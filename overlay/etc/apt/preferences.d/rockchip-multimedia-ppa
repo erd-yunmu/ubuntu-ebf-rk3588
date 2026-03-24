@@ -1,0 +1,3 @@
+Package: ffmpeg ffmpeg-doc libavcodec-dev libavcodec-extra libavcodec-extra60 libavcodec60 libavdevice-dev libavdevice60 libavfilter-dev libavfilter-extra libavfilter-extra9 libavfilter9 libavformat-dev libavformat-extra libavformat-extra60 libavformat60 libavutil-dev libavutil58 libpostproc-dev libpostproc57 libswresample-dev libswresample4 libswscale-dev libswscale7 librga2 librga-dev librga librga-dev librga2 librockchip-mpp-dev librockchip-mpp1 librockchip-vpu0 rockchip-mpp-demos
+Pin: release o=LP-PPA-jjriek-rockchip-multimedia
+Pin-Priority: 1

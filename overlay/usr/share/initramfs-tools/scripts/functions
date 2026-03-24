@@ -1,0 +1,997 @@
+# -*- shell-script -*-
+
+_log_msg()
+{
+	if [ "${quiet?}" = "y" ]; then return; fi
+	# shellcheck disable=SC2059
+	printf "$@"
+	return 0 # Prevents error carry over in case of unavailable console
+}
+
+log_success_msg()
+{
+	_log_msg "Success: %s\\n" "$*"
+}
+
+log_failure_msg()
+{
+	_log_msg "Failure: %s\\n" "$*"
+}
+
+log_warning_msg()
+{
+	_log_msg "Warning: %s\\n" "$*"
+}
+
+log_begin_msg()
+{
+	_log_msg "Begin: %s ... " "$*"
+}
+
+log_end_msg()
+{
+	_log_msg "done.\\n"
+}
+
+# Add failure hook
+add_mountroot_fail_hook()
+{
+	# DEPRECATED; this definition remains as a stub but any packages
+	# calling this function should be revised to remove references to it
+	return 0
+}
+
+panic()
+{
+	local console rest IFS
+
+	if command -v chvt >/dev/null 2>&1; then
+		chvt 1
+	fi
+
+	echo "$@"
+
+	# The panic= parameter implies we should disallow console access
+	if [ -n "${panic?}" ]; then
+		delay=
+		case "${panic?}" in
+		-*[![:digit:].]*)	# invalid: wait forever
+			;;
+		-*)			# timeout < 0: reboot immediately
+			delay=0
+			;;
+		0 | *[![:digit:].]*)	# timeout = 0 or invalid: wait forever
+			;;
+		*)			# timeout > 0: seconds before rebooting
+			delay="${panic}"
+			;;
+		esac
+		if [ -n "${delay}" ]; then
+			echo "Rebooting automatically due to panic= boot argument"
+			sleep "${delay}"
+			reboot -f
+		else
+			echo "Halting automatically due to panic= boot argument"
+			halt -f
+		fi
+		exit  # in case reboot fails, force kernel panic
+	fi
+
+	run_scripts /scripts/panic
+
+	# Try to use setsid, which will enable job control in the shell
+	# and paging in more
+	if command -v setsid >/dev/null 2>&1; then
+		unset IFS
+		read -r console rest </proc/consoles
+		if [ "${console}" = "tty0" ]; then
+			# Need to choose a specific VT
+			console="tty1"
+		fi
+		# We don't have 'setsid -c' so we need to setsid, open
+		# the tty, and finally exec an interactive shell
+		REASON="$*" PS1='(initramfs) ' setsid sh -c "exec sh -i <>/dev/${console} 1>&0 2>&1"
+	else
+		REASON="$*" PS1='(initramfs) ' sh -i </dev/console >/dev/console 2>&1
+	fi
+}
+
+maybe_break()
+{
+	case ",${break?}," in
+	*,$1,*)
+		if [ "$1" = "top" ]; then
+			# udev is not yet running, so load keyboard drivers
+			if [ "${quiet}" = "y" ]; then
+				opts="-q"
+			else
+				opts="-v"
+			fi
+			/sbin/modprobe ${opts} -a i8042 atkbd ehci-pci ehci-orion \
+				 ehci-hcd ohci-hcd ohci-pci uhci-hcd usbhid xhci \
+				 xhci-pci xhci-hcd
+			sleep 2
+			for modalias in /sys/bus/hid/devices/*/modalias; do
+				if [ -f "${modalias}" ]; then
+					/sbin/modprobe ${opts} -b "$(cat "${modalias}")"
+				fi
+			done
+		fi
+		panic "Spawning shell within the initramfs"
+		;;
+	esac
+}
+
+# For boot time only; this is overridden at build time in hook-functions
+run_scripts()
+{
+	initdir=${1}
+	[ ! -d "${initdir}" ] && return
+
+	shift
+	. "${initdir}/ORDER"
+}
+
+# Load custom modules first
+load_modules()
+{
+	if [ -e /conf/modules ]; then
+		while read -r m; do
+			# Skip empty lines
+			if [ -z "$m" ];  then
+				continue
+			fi
+			# Skip comments - d?ash removes whitespace prefix
+			com=$(printf "%.1s" "${m}")
+			if [ "$com" = "#" ]; then
+				continue
+			fi
+			# shellcheck disable=SC2086
+			/sbin/modprobe $m
+		done < /conf/modules
+	fi
+}
+
+_uptime() {
+	local uptime
+	uptime="$(cat /proc/uptime)"
+	uptime="${uptime%%[. ]*}"
+	echo "$uptime"
+}
+
+time_elapsed() {
+	# shellcheck disable=SC2154
+	if [ -z "$starttime" ]; then
+		log_failure_msg "time_elapsed() called before \$starttime initialized"
+		echo 0
+	fi
+	local delta
+	delta="$(_uptime)"
+	delta=$((delta - starttime))
+	echo "$delta"
+}
+
+# lilo compatibility
+parse_numeric() {
+	case $1 in
+	*:*)
+		# Does it match /[0-9]*:[0-9]*/?
+		minor=${1#*:}
+		major=${1%:*}
+		case $major$minor in
+		*[!0-9]*)
+			# No.
+			return
+			;;
+		esac
+		;;
+	"" | *[!A-Fa-f0-9]*)
+		# "", "/*", etc.
+		return
+		;;
+	*)
+		# [A-Fa-f0-9]*
+		value=$(( 0x${1} ))
+		minor=$(( (value & 0xff) | (value >> 12) & 0xfff00 ))
+		major=$(( (value >> 8) & 0xfff ))
+		;;
+	esac
+
+	# shellcheck disable=SC2034
+	ROOT="/dev/block/${major}:${minor}"
+}
+
+# Parameter: device node to check
+# Echos fstype to stdout
+# Return value: indicates if an fs could be recognized
+get_fstype ()
+{
+	local FS FSTYPE
+	FS="${1}"
+
+	FSTYPE=$(blkid -o value -s TYPE "${FS}") || return
+	echo "${FSTYPE}"
+	return 0
+}
+
+_set_netdev_from_ip_param()
+{
+	# If the ip= parameter is present and specifies a device, use
+	# that in preference to any device name we already have
+	local rc=1
+	local IFS=:
+	set -f
+	# shellcheck disable=SC2086
+	set -- ${IP}
+	set +f
+	if [ -n "$6" ]; then
+		DEVICE="$6"
+		rc=0
+	fi
+	case "$IP6" in
+		""|on|dhcp|any|none|off)
+			;;
+		*)
+			DEVICE6="$IP6"
+			rc=0
+			;;
+	esac
+	return $rc
+}
+
+_set_netdev_from_hw_address()
+{
+	local want_address="$1"
+	local device
+	for device in /sys/class/net/*; do
+		if [ -f "$device/address" ] &&
+		   [ "$(cat "$device/address")" = "$want_address" ]; then
+			DEVICE="${device##*/}"
+			DEVICE6="${device##*/}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+_usable_netdev_exists()
+{
+	# Look for a device with IFF_LOOPBACK clear and (IFF_BROADCAST
+	# or IFF_POINTTOPOINT) set.  This is the same test the kernel
+	# and ipconfig apply to find a device.
+	local device
+	local flags
+	for device in /sys/class/net/*; do
+		if [ -f "${device}/flags" ]; then
+			flags="$(cat "${device}/flags")"
+			if [ "$((flags & 8))" -eq 0 ] &&
+			   [ "$((flags & 0x12))" -ne 0 ]; then
+				return 0
+			fi
+		fi
+	done
+	return 1
+}
+
+_update_ip_param()
+{
+	# If the ip= parameter is present, and is a colon-separated list,
+	# but does not specify a device, substitute in the device name
+	# we have
+	local IFS=:
+	set -f
+	# shellcheck disable=SC2086
+	set -- ${IP}
+	set +f
+	if [ -z "$6" ] && [ $# -ge 2 ] && [ -n "${DEVICE}" ]; then
+		IP="$1:$2:$3:$4:$5:${DEVICE}"
+		shift 6 || shift $#
+		IP="${IP}:$*"
+	fi
+}
+
+_set_bootif_and_ip_param_from_ibft()
+{
+	local iface mac
+	for iface in /sys/firmware/ibft/ethernet*; do
+		echo "iface: $iface"
+		[ -e "$iface/mac" ] || continue
+		read -r mac < "${iface}"/mac
+		[ -n "$mac" ] || continue
+		echo "mac: $mac"
+		BOOTIF="$mac"
+		case "$(cat "$iface/ip-addr")" in
+		*:*)
+			# IPv6 address
+			IP=off
+			IP6=on
+		;;
+		esac
+	done
+}
+
+configure_networking()
+{
+	local netdev_desc
+
+	if [ -z "${DEVICE-}${DEVICE6-}${BOOTIF-}" ] && [ -e /sys/firmware/ibft ]; then
+		_set_bootif_and_ip_param_from_ibft
+	fi
+
+	# The order of precedence here is:
+	# 1. Device specified by ip= kernel parameter
+	# 2. Device matching MAC specified by BOOTIF= kernel parameter
+	# 3. Build-time DEVICE variable
+	# In case 2 we only discover the device name while waiting
+	# for a device.
+	if _set_netdev_from_ip_param; then
+		if [ -n "${DEVICE}" ] && [ -n "${DEVICE6}" ]; then
+			netdev_desc="${DEVICE} and ${DEVICE6}"
+		else
+			netdev_desc="${DEVICE:-$DEVICE6}"
+		fi
+	elif [ -n "${BOOTIF}" ]; then
+		# pxelinux sets BOOTIF to a value based on the mac address of the
+		# network card used to PXE boot
+		# pxelinux sets BOOTIF to 01-$mac_address
+
+		# strip off the leading "01-", which isn't part of the mac
+		# address
+		temp_mac=${BOOTIF#*-}
+
+		# convert to typical mac address format by replacing "-" with ":"
+		bootif_mac=""
+		IFS='-'
+		for x in $temp_mac ; do
+			if [ -z "$bootif_mac" ]; then
+				bootif_mac="$x"
+			else
+				bootif_mac="$bootif_mac:$x"
+			fi
+		done
+		unset IFS
+
+		_set_netdev_from_hw_address "${bootif_mac}"
+		netdev_desc="device with address ${bootif_mac}"
+	elif [ -n "${DEVICE}${DEVICE6}" ]; then
+		if [ -n "${DEVICE}" ] && [ -n "${DEVICE6}" ]; then
+			netdev_desc="${DEVICE} and ${DEVICE6}"
+		else
+			netdev_desc="${DEVICE:-$DEVICE6}"
+		fi
+	else
+		netdev_desc="any network device"
+	fi
+
+	for v in $VLAN; do
+		VLAN_LINK="$VLAN_LINK ${v##*:}"
+		VLAN_NAMES="$VLAN_NAMES ${v%:*}"
+	done
+
+	# activate non-autoconfigured s390x devices
+	for dev in $DEVICE $DEVICE6 $VLAN_LINK; do
+		# do not chzdev $dev if it is a not-yet-created vlan interface
+		for vlan_name in $VLAN_NAMES; do
+			if [ "$dev" = "$vlan_name" ]; then
+				continue 2
+			fi
+		done
+		case ${dev} in
+		enc*)
+			zdev=${dev#enc}
+			chzdev -e "$zdev" || true
+			;;
+		esac
+	done
+
+	for v in $VLAN; do
+		vlink=${v##*:}
+		vname=${v%:*}
+		vid=${vname#*.}
+		ip link set up dev "$vlink"
+		ip link add name "$vname" link "$vlink" type vlan id "$vid"
+	done
+
+	local netdevwait=180
+	log_begin_msg "Waiting up to ${netdevwait} secs for ${netdev_desc} to become available"
+	while true; do
+		if [ "$(time_elapsed)" -ge "$netdevwait" ]; then
+			log_failure_msg "Network device did not appear in time"
+			break
+		fi
+		if [ -n "${DEVICE}" ]; then
+			[ -e "/sys/class/net/${DEVICE}" ] && break
+		elif [ -n "${bootif_mac}" ]; then
+			_set_netdev_from_hw_address "${bootif_mac}" && break
+		else
+			_usable_netdev_exists && break
+		fi
+		sleep 1
+	done
+	log_end_msg
+
+	_update_ip_param
+
+	wait_for_udev 10
+
+	# support ip options see linux sources
+	# Documentation/filesystems/nfs/nfsroot.txt
+	# Documentation/frv/booting.txt
+
+	for ROUNDTTT in 30 60 90 120; do
+		local iter_entry_time iter_exit_time
+
+		iter_entry_time=$(time_elapsed)
+
+		case ${IP} in
+		none|done|off)
+			# Do nothing
+			IP="done"
+			;;
+		""|on|any|dhcp|bootp|both)
+			dhcpcd -1KL -t $ROUNDTTT -4 ${DEVICE:+"${DEVICE}"}
+			;;
+		*)
+			ipconfig -t ${ROUNDTTT} -d "$IP"
+			;;
+		esac
+
+		case ${IP6} in
+		""|none|done|off)
+			# Do nothing
+			IP6="done"
+			;;
+		*)
+			# check the content of IP6 and if it is not on/dhcp/any use it as
+			# a device name. Otherwise all devices will be tried (unless
+			# BOOTIF was set, see above).
+			case "${IP6}" in
+			on|dhcp|any)
+				;;
+			*)
+				DEVICE6="$IP6" ;;
+			esac
+
+			dhcpcd -1KL -t $ROUNDTTT -6 ${DEVICE6:+"${DEVICE6}"}
+			;;
+		esac
+
+		# The NIC is to be configured if this file does not exist.
+		# Ip-Config tries to create this file and when it succeds
+		# creating the file, ipconfig is not run again.
+		if [ -z "${DEVICE}" ] && ls /run/net-*.conf >/dev/null 2>&1 || [ -e /run/net-"${DEVICE}".conf ]; then
+			IP="done"
+		fi
+		if [ -z "${DEVICE6}" ] && ls /run/net6-*.conf >/dev/null 2>&1 || [ -e /run/net6-"${DEVICE6}".conf ]; then
+			IP6="done"
+		fi
+
+		# if we've reached a point where both IP and IP6 are "done",
+		# then we're finished with network configuration.
+		if [ "$IP" = "done" ] && [ "$IP6" = "done" ]; then
+			break
+		fi
+
+		iter_exit_time=$(time_elapsed)
+
+		if [ $((iter_exit_time - iter_entry_time)) -le $ROUNDTTT ]; then
+			echo "Sleeping $((ROUNDTTT - iter_exit_time + iter_entry_time)) seconds before retrying getting a DHCP lease"
+			sleep $((ROUNDTTT - iter_exit_time + iter_entry_time))
+		fi
+	done
+
+	# source ipconfig output for either $DEVICE or the first one.
+	# If the user is booting with only IPv6, then DEVICE may be set,
+	# but no IPv4 conf files exist.
+	for conf in /run/"net-$DEVICE.conf" /run/net-*.conf; do
+		if [ -e "$conf" ]; then
+			# source specific bootdevice
+			. "$conf"
+			break
+		fi
+	done
+
+	netinfo_to_resolv_conf /etc/resolv.conf \
+		/run/"net-${DEVICE}.conf" /run/net-*.conf /run/net6-*.conf
+	netinfo_to_netplan /run/netplan \
+		/run/"net-${DEVICE}.conf" /run/net-*.conf /run/net6-*.conf
+}
+
+netinfo_to_resolv_conf() {
+	# netinfo_to_resolv_conf(output, files)
+	# write resolv_conf from /run/net-<device> style files.
+	if [ "${_in_subshell:-0}" = "0" ]; then
+		# subshell to avoid modification of variables by '.'
+		# shellcheck disable=SC2030
+		( _in_subshell=1; netinfo_to_resolv_conf "$@" )
+		return
+	fi
+	local output="$1" search="" ns="" f="" n=""
+	shift
+	for f in "$@"; do
+		[ -f "$f" ] || continue
+		unset IPV4DNS0 IPV4DNS1 IPV6DNS0 IPV6DNS1
+		unset DOMAINSEARCH IPV6DOMAINSEARCH
+		. "$f" || { echo "WARN: failed '. \"$f\"'" 1>&2; return 1; }
+		for n in "${IPV4DNS0}" "${IPV4DNS1}" \
+			"${IPV6DNS0}" "${IPV6DNS1}"; do
+			if [ -z "$n" ] || [ "$n" = "0.0.0.0" ]; then
+				continue
+			fi
+			# skip if 'n' already in list.
+			case " ${ns} " in
+				*\ $n\ *) continue;;
+			esac
+			ns="${ns} ${n}"
+		done
+		for n in "${DOMAINSEARCH}" "${IPV6DOMAINSEARCH}"; do
+			[ -n "$n" ] || continue
+			# skip if already in search.
+			case " ${search}" in
+				*\ $n\ *) continue;;
+			esac
+			search="$search $n"
+		done
+		search=${search# }
+		ns=${ns# }
+	done
+
+	local rconf="" CR="
+"
+	for n in ${ns}; do
+		rconf="${rconf}nameserver $n${CR}"
+	done
+	if [ -n "${search}" ]; then
+		rconf="${rconf}search ${search}${CR}"
+	fi
+	if [ -z "$rconf" ]; then
+		echo "no search or nameservers found in $*" 1>&2
+	fi
+	if [ "$rconf" = "-" ]; then
+		echo -n "$rconf"
+	else
+		echo -n "$rconf" > "$output"
+	fi
+}
+
+mask2cidr() {
+	# https://forum.openwrt.org/viewtopic.php?pid=220781#p220781
+	# Assumes there's no "255." after a non-255 byte in the mask
+	local x=${1##*255.}
+	set -- 0^^^128^192^224^240^248^252^254^ $(( (${#1} - ${#x})*2 )) "${x%%.*}"
+	x=${1%%"$3"*}
+	echo $(( $2 + (${#x}/4) ))
+}
+
+_declare_sh_append_var() {
+	# append_var(name, skip, strings)
+	# write a declaration of name that will append to any existing
+	local name="$1" skip="$2" add="" n=""
+	shift 2
+	for n in "$@"; do
+		if [ -z "$n" ] || [ "$n" = "$skip" ]; then
+			continue
+		fi
+		add="$add $n"
+	done
+	add=${add# }
+	[ -n "$add" ] || return 0
+	echo "$name=\"\${${name}:+\${${name}} }${add}\""
+}
+
+_declare_ip_info() {
+	# declare_ip_info(version, proto, address, netmask, gateway)
+	local version="$1" proto="$2" address="$3" netmask="$4" gateway="$5"
+	local netprefix=""
+	case $proto in
+		dhcp|dhcp4|dhcp6)
+			echo "dhcp${version}=true"
+			;;
+		none)
+			if [ -n "$address" ]; then
+				netprefix=$netmask
+				if [ "$version" = "4" ]; then
+					netprefix=$(mask2cidr "$netmask")
+				fi
+				_declare_sh_append_var addresses "" "$address/$netprefix"
+			fi
+			if [ -n "$gateway" ]; then
+				echo "gateway${version}=$gateway"
+			fi
+			;;
+	esac
+}
+
+_render_netplan() {
+	# write a netplan stanza for the given device.
+	local name="$1" mac="$2" dhcp4="$3" dhcp6="$4" addrs="$5" \
+		gateway4="$6" gateway6="$7" ns_addrs="$8" ns_search="$9" \
+		vlink="${10}" vname="${11}" vid="${12}"
+	local n found=""
+	if [ -n "$vlink" ]; then
+		name=$vlink
+	fi
+	echo "network:"
+	echo "  version: 2"
+	echo "  ethernets:"
+	echo "    $name:"
+	if [ -n "$mac" ] && grep -q net.ifnames=0 /proc/cmdline 2>/dev/null; then
+		echo "      match:"
+		echo "        macaddress: \"$mac\""
+		echo "      set-name: $name"
+	elif [ -n "$vname" ]; then
+		echo "      {}"
+	fi
+	if [ -n "$vname" ]; then
+		echo "  vlans:"
+		echo "    $vname:"
+		echo "      id: $vid"
+		echo "      link: $name"
+	fi
+	if [ -n "$dhcp4" ]; then
+		echo "      dhcp4: $dhcp4"
+		echo "      dhcp-identifier: mac"
+	fi
+	if [ -n "$dhcp6" ]; then
+		echo "      dhcp6: $dhcp6"
+	fi
+	if [ -n "$dhcp4$dhcp6" ]; then
+		echo "      critical: true"
+	fi
+	if [ -n "$addrs" ]; then
+		echo "      addresses:"
+		found=","
+		for n in $addrs; do
+			# remove dups
+			[ "${found#*,"$n",}" = "${found}" ] || continue
+			found="${found}$n,"
+			echo "        - \"$n\""
+		done
+	fi
+	if [ -n "$gateway4" ]; then
+		echo "      gateway4: \"$gateway4\""
+	fi
+	if [ -n "$gateway6" ]; then
+		echo "      gateway6: \"$gateway6\""
+	fi
+
+	if [ -n "$ns_addrs" ]; then
+		local alist="[" slist=""
+		for n in $ns_addrs; do
+			# do not put in duplicates
+			[ "${alist#*\""$n"\"}" = "$alist" ] || continue
+			alist="${alist}\"$n\", ";
+		done
+		alist="${alist%, }]"
+
+		if [ -n "$ns_search" ]; then
+			slist="["
+			for n in ${ns_search}; do
+				# do not put in duplicates
+				[ "${slist#*\""$n"\"}" = "$slist" ] || continue
+				slist="${slist}\"$n\", ";
+			done
+			slist="${slist%, }]"
+		fi
+		echo "      nameservers:"
+		echo "        addresses: $alist"
+		if [ -n "$slist" ]; then
+			echo "        search: $slist"
+		fi
+	fi
+}
+
+netinfo_to_netplan() {
+	# read /run/net-* files write netplan config.
+	# shellcheck disable=SC2031
+	if [ "${_in_subshell:-0}" = "0" ]; then
+		# subshell to avoid modification of variables by '.'
+		( _in_subshell=1; netinfo_to_netplan "$@" )
+		return
+	fi
+	local out_d="$1" tmpd
+	if command -v mktemp >/dev/null 2>&1; then
+		tmpd=$(mktemp -d "${TMPDIR:-/tmp}/${0##*/}.XXXXXX")
+	else
+		tmpd="${TMPDIR:-/tmp}/${0##*/}.niinfo.$$"
+		mkdir -p "$tmpd" || return
+	fi
+
+	local devices="" mac=""
+	# we go through all the files presented and create per-device files in
+	# a tmpdir that are shell sourceable and closer to the netplan that
+	# we want to render. Then render those to netplan stanzas.
+	for f in "$@"; do
+		[ -f "$f" ] || continue
+		unset DEVICE DEVICE6 PROTO IPV6PROTO
+		unset IPV6ADDR IPV6NETMASK IPV6GATEWAY
+		unset IPV4ADDR IPV4NETMASK IPV4GATEWAY
+		. "$f" || { echo "WARN: failed '. \"$f\"'" 1>&2; return 1; }
+		local name=""
+		name=${DEVICE:-${DEVICE6}}
+		[ -n "$name" ] || {
+			echo "WARN: $f did not define DEVICE or DEVICE6" 1>&2;
+			return 1;
+		}
+		case " ${devices} " in
+			*\ ${name}\ *) :;;
+			*) devices="${devices} ${name}"
+		esac
+		if [ ! -e "$tmpd/$name" ] \
+		   && [ -r "/sys/class/net/$name/address" ]
+		then
+			read -r mac < /sys/class/net/"$name"/address &&
+				echo "macaddress=$mac" > "$tmpd/$name"
+		fi
+
+		{
+		for v in $VLAN; do
+			vlink=${v##*:}
+			vname=${v%:*}
+			vid=${vname#*.}
+			if [ "$name" = "$vname" ]; then
+				echo "vlink=$vlink"
+				echo "vname=$vname"
+				echo "vid=$vid"
+				break
+			fi
+		done
+		if [ -n "$DEVICE" ]; then
+			# shellcheck disable=SC2153
+			_declare_ip_info 4 "$PROTO" "$IPV4ADDR" "$IPV4NETMASK" "$IPV4GATEWAY"
+		elif [ -n "$DEVICE6" ]; then
+			_declare_ip_info 6 "$IPV6PROTO" "$IPV6ADDR" "$IPV6NETMASK" \
+				"$IPV6GATEWAY"
+		fi
+		_declare_sh_append_var ns_addresses "0.0.0.0" \
+			"${IPV4DNS0}" "${IPV4DNS1}" "${IPV6DNS0}" "${IPV6DNS1}"
+		_declare_sh_append_var ns_search "" "$DOMAINSEARCH" "$IPV6DOMAINSEARCH"
+		} >> "$tmpd/$name"
+	done
+
+	[ -d "$out_d" ] || mkdir -p "$out_d" ||
+		{ echo "WARN: failed mkdir $out_d"; return 1; }
+
+	for name in $devices; do
+		local macaddress="" dhcp4="" dhcp6="" addresses=""
+		local gateway4="" gateway6="" ns_addresses="" ns_search=""
+		local vlink="" vname="" vid=""
+		. "$tmpd/$name"
+		_render_netplan "$name" "$macaddress" "$dhcp4" "$dhcp6" "$addresses" \
+			"$gateway4" "$gateway6" "$ns_addresses" "$ns_search" \
+			"$vlink" "$vname" "$vid" \
+			> "${out_d}/$name.yaml"
+	done
+	rm -Rf "$tmpd"
+}
+
+# Wait for queued kernel/udev events
+wait_for_udev()
+{
+	command -v udevadm >/dev/null 2>&1 || return 0
+	udevadm settle ${1:+--timeout=$1}
+}
+
+# Find a specific fstab entry
+# $1=mountpoint
+# $2=fstype (optional)
+# returns 0 on success, 1 on failure (not found or no fstab)
+read_fstab_entry() {
+	# Not found by default.
+	found=1
+
+	for file in ${rootmnt?}/etc/fstab; do
+		if [ -f "$file" ]; then
+			# shellcheck disable=SC2034
+			while read -r MNT_FSNAME MNT_DIR MNT_TYPE MNT_OPTS MNT_FREQ MNT_PASS MNT_JUNK; do
+				case "$MNT_FSNAME" in
+				  ""|\#*)
+					continue;
+					;;
+				esac
+				if [ "$MNT_DIR" = "$1" ]; then
+					if [ -n "$2" ]; then
+						[ "$MNT_TYPE" = "$2" ] || continue;
+					fi
+					found=0
+					break 2
+				fi
+			done < "$file"
+		fi
+	done
+
+	return $found
+}
+
+# Resolve device node from a name.  This expands any LABEL or UUID.
+# $1=name
+# Resolved name is echoed.
+resolve_device() {
+	DEV="$1"
+	local orig="$DEV"
+
+	case "$DEV" in
+	LABEL=* | UUID=* | PARTLABEL=* | PARTUUID=*)
+		if ! DEV="$(blkid -l -t "$DEV" -o device)"; then
+			DEV="$orig"
+
+			# Support uppercase and lowercase UUIDs -- see RFC#4122:
+			#   "Each field is treated as an integer and has its value printed as
+			#    a zero-filled hexadecimal digit string with the most significant
+			#    digit first.  The hexadecimal values "a" through "f" are output as
+			#    lower case characters and are case insensitive on input."
+			#
+			# Note: that blkid which we will use to map these assums the input is lower
+			# case.
+
+			# Only apply this behaviour to UUIDs.
+			case "$DEV" in
+			UUID=* | PARTUUID=*)	;;
+			*)			return 1 ;;
+			esac
+
+			# Pull DEV apart and map it.
+			local type value fmt
+			type=$(echo "${DEV}" | cut -f 1 -d =)
+			value=$(echo "${DEV}" | cut -f 2 -d = | tr 'A-F' 'a-f')
+
+			# ... in RFC#4122 format;
+			# look for five hexadecimal fragments separated by minus signs.
+			fmt=$( echo "$value" | sed -e 's/[0-9a-fA-F]*//g' )
+			if [ "$fmt" != '----' ]; then
+				return 1
+			fi
+			DEV="${type}=${value}"
+
+			# Retry with the lower cased UUID.
+			DEV="$(blkid -l -t "$DEV" -o device)" || return 1
+		fi
+		;;
+	esac
+	[ -e "$DEV" ] && echo "$DEV"
+}
+
+# Check a file system.
+# $1=device
+# $2=mountpoint (for diagnostics only)
+# $3=type (may be "auto")
+_checkfs_once()
+{
+	DEV="$1"
+	NAME="$2"
+	TYPE="$3"
+	if [ "$NAME" = "/" ] ; then
+		NAME="root"
+	fi
+	FSCK_LOGFILE=/run/initramfs/fsck.log
+	FSCK_STAMPFILE=/run/initramfs/fsck-${NAME#/}
+
+	if [ "${TYPE}" = "auto" ]; then
+		TYPE="$(get_fstype "${DEV}")"
+	fi
+
+	FSCKCODE=0
+	if [ -z "${TYPE}" ]; then
+		log_warning_msg "Type of $NAME file system is unknown, so skipping check."
+		return
+	fi
+	if ! command -v fsck >/dev/null 2>&1; then
+		log_warning_msg "fsck not present, so skipping $NAME file system"
+		return
+	fi
+	if [ "${fastboot?}" = "y" ] ; then
+		log_warning_msg "Fast boot enabled, so skipping $NAME file system check."
+		return
+	fi
+
+	if [ "${forcefsck?}" = "y" ]
+	then
+		force="-f"
+	else
+		force=""
+	fi
+
+	if [ "${fsckfix?}" = "y" ]
+	then
+		fix="-y"
+	elif [ "${fsckfix?}" = "n" ]
+	then
+		fix="-n"
+	else
+		fix="-a"
+	fi
+
+	spinner=""
+	if [ -z "${debug?}" ]; then
+		spinner="-C"
+	fi
+
+	if [ "${quiet}" = n ]
+	then
+		log_begin_msg "Will now check $NAME file system"
+		# shellcheck disable=SC2086
+		logsave -a -s $FSCK_LOGFILE fsck $spinner $force $fix -V -t "$TYPE" "$DEV"
+		logsave -a -s $FSCK_LOGFILE fsck $spinner $force -y -V -t "$TYPE" "$DEV"
+		FSCKCODE=$?
+		log_end_msg
+	else
+		log_begin_msg "Checking $NAME file system"
+		# shellcheck disable=SC2086
+		logsave -a -s $FSCK_LOGFILE fsck $spinner $force $fix -T -t "$TYPE" "$DEV"
+		logsave -a -s $FSCK_LOGFILE fsck $spinner $force -y -V -t "$TYPE" "$DEV"
+		FSCKCODE=$?
+		log_end_msg
+	fi
+
+	# NOTE: "failure" is defined as exiting with a return code of
+	# 4, possibly or-ed with other flags. A return code of 1
+	# indicates that file system errors were corrected but that
+	# the boot may proceed.
+	#
+	if [ "$FSCKCODE" -eq 32 ]
+	then
+		log_warning_msg "File system check was interrupted by user"
+	elif [ $((FSCKCODE & 4)) -eq 4 ]
+	then
+		log_failure_msg "File system check of the $NAME filesystem failed"
+		return 1
+	elif [ "$FSCKCODE" -gt 1 ]
+	then
+		log_warning_msg "File system check failed but did not detect errors"
+		sleep 5
+	else
+		true >"$FSCK_STAMPFILE"
+	fi
+	return 0
+}
+
+checkfs()
+{
+	while ! _checkfs_once "$@"; do
+		panic "The $2 filesystem on $1 requires a manual fsck"
+	done
+}
+
+# Mount a file system.  We parse the information from the fstab.  This
+# should be overridden by any boot script which can mount arbitrary
+# filesystems such as /usr.  This default implementation delegates to
+# local or nfs based upon the filesystem type.
+# $1=mountpoint mount location
+mountfs()
+{
+	type=local
+	read_fstab_entry "$1"
+	if [ "${MNT_TYPE}" = "nfs" ] || [ "${MNT_TYPE}" = "nfs4" ]; then
+		type=nfs
+	fi
+
+	${type}_mount_fs "$1"
+}
+
+# Mount the root file system.  It should be overridden by all
+# boot scripts.
+mountroot()
+{
+	:
+}
+
+# Run /scripts/${boot}-top.  This should be overridden by all boot
+# scripts.
+mount_top()
+{
+	:
+}
+
+# Run /scripts/${boot}-premount.  This should be overridden by all boot
+# scripts.
+mount_premount()
+{
+	:
+}
+
+# Run /scripts/${boot}-bottom.  This should be overridden by all boot
+# scripts.
+mount_bottom()
+{
+	:
+}

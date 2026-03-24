@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2024 Rockchip Electronics Co., Ltd.
+ */
+
+/delete-node/ &cpu_l0;
+/delete-node/ &cpu_l1;
+/delete-node/ &cpu_l2;
+/delete-node/ &cpu_l3;
+
+/ {
+	cpus {
+		cpu_l0: cpu@000 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x0>;
+			enable-method = "psci";
+			capacity-dmips-mhz = <485>;
+			clocks = <&scmi_clk ARMCLK_L>;
+			operating-points-v2 = <&cluster0_opp_table>;
+			#cooling-cells = <2>;
+			dynamic-power-coefficient = <120>;
+			cpu-idle-states = <&CPU_SLEEP>;
+			i-cache-size = <0x8000>;
+			i-cache-line-size = <64>;
+			i-cache-sets = <256>;
+			d-cache-size = <0x8000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <128>;
+			next-level-cache = <&l2_cache_l>;
+		};
+
+		cpu_l1: cpu@001 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x1>;
+			enable-method = "psci";
+			capacity-dmips-mhz = <485>;
+			clocks = <&scmi_clk ARMCLK_L>;
+			operating-points-v2 = <&cluster0_opp_table>;
+			cpu-idle-states = <&CPU_SLEEP>;
+			i-cache-size = <0x8000>;
+			i-cache-line-size = <64>;
+			i-cache-sets = <256>;
+			d-cache-size = <0x8000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <128>;
+			next-level-cache = <&l2_cache_l>;
+		};
+
+		cpu_l2: cpu@002 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x2>;
+			enable-method = "psci";
+			capacity-dmips-mhz = <485>;
+			clocks = <&scmi_clk ARMCLK_L>;
+			operating-points-v2 = <&cluster0_opp_table>;
+			cpu-idle-states = <&CPU_SLEEP>;
+			i-cache-size = <0x8000>;
+			i-cache-line-size = <64>;
+			i-cache-sets = <256>;
+			d-cache-size = <0x8000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <128>;
+			next-level-cache = <&l2_cache_l>;
+		};
+
+		cpu_l3: cpu@003 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x3>;
+			enable-method = "psci";
+			capacity-dmips-mhz = <485>;
+			clocks = <&scmi_clk ARMCLK_L>;
+			operating-points-v2 = <&cluster0_opp_table>;
+			cpu-idle-states = <&CPU_SLEEP>;
+			i-cache-size = <0x8000>;
+			i-cache-line-size = <64>;
+			i-cache-sets = <256>;
+			d-cache-size = <0x8000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <128>;
+			next-level-cache = <&l2_cache_l>;
+		};
+	};
+};
