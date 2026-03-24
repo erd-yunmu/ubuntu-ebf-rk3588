@@ -1,0 +1,13 @@
+menu "Embedfire Modules"
+
+menuconfig EBF_MODULE
+	bool "Embedfire Modules"
+
+if EBF_MODULE
+
+config EBF_DHT11
+	tristate "dht11"
+
+endif # EBF_MODULE
+
+endmenu
