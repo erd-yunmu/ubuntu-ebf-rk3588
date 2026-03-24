@@ -1,0 +1,22 @@
+#
+# LTE network device configuration
+#
+
+menuconfig LTE
+	bool "Rockchip LTE support"
+	help
+	Enable LTE drivers for Rockchip platform.
+
+if LTE
+config LTE_RM310
+	bool "LTE rm310 support"
+	default n
+
+config LTE_EM05
+	tristate "LTE EM05 support"
+	default n
+	help
+	  Enable support for the LTE EM05 modem driver.
+	  Say 'M' to compile as a loadable kernel module.
+
+endif
