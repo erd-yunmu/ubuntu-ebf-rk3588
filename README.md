@@ -53,7 +53,7 @@ sudo apt-get install -y build-essential gcc-aarch64-linux-gnu bison \
 qemu-user-static qemu-system-arm u-boot-tools binfmt-support \
 debootstrap flex libssl-dev bc rsync kmod cpio xz-utils fakeroot parted \
 udev dosfstools uuid-runtime git-lfs device-tree-compiler python3 fdisk \
-python-is-python3
+python-is-python3 python2
 ```
 
 ## 获取源码
