@@ -166,7 +166,7 @@ if test -e ${devtype} ${devnum}:${distro_bootpart} /ubuntuEnv.txt; then
 	env import -t ${load_addr} ${filesize}
 fi
 
-setenv bootargs "${bootargs} root=/dev/mmcblk${devnum}p2"
+setenv bootargs "${bootargs} root=LABEL=writable"
 printenv bootargs
 
 load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} /dtbs/rockchip/${fdtfile}
