@@ -105,11 +105,6 @@ for type in $target; do
     # Copy rockchip dedicated audio to system files
     cp -r ${overlay_dir}/usr/share/alsa/* ${chroot_dir}/usr/share/alsa/
     cp -r ${overlay_dir}/usr/share/pulseaudio/* ${chroot_dir}/usr/share/pulseaudio/
-        
-    # Build the minimal FFmpeg
-    cp -r ../packages/arm64/build-ffmpeg.sh ${chroot_dir}/tmp
-    chroot ${chroot_dir} /bin/bash -c "bash ./tmp/build-ffmpeg.sh"
-    rm -f ${chroot_dir}/tmp/*
 
     # Umount temporary API filesystems
     umount -lf ${chroot_dir}/dev/pts 2> /dev/null || true
