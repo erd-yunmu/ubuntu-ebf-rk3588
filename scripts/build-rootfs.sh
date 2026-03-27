@@ -12,15 +12,15 @@ cd "$(dirname -- "$(readlink -f -- "$0")")" && cd ..
 mkdir -p build && cd build
 
 if [[ ${DESKTOP_ONLY} == "Y" ]]; then
-    if [[ -f ubuntu-22.04.5-desktop-arm64.rootfs.tar.xz ]]; then
+    if [[ -f ubuntu-22.04-desktop-arm64.rootfs.tar.xz ]]; then
         exit 0
     fi
 elif [[ ${SERVER_ONLY} == "Y" ]]; then
-    if [[ -f ubuntu-22.04.5-server-arm64.rootfs.tar.xz ]]; then
+    if [[ -f ubuntu-22.04-server-arm64.rootfs.tar.xz ]]; then
         exit 0
     fi
 else
-    if [[ -f ubuntu-22.04.5-server-arm64.rootfs.tar.xz && -f ubuntu-22.04.5-desktop-arm64.rootfs.tar.xz ]]; then
+    if [[ -f ubuntu-22.04-server-arm64.rootfs.tar.xz && -f ubuntu-22.04-desktop-arm64.rootfs.tar.xz ]]; then
         exit 0
     fi
 fi
@@ -169,7 +169,7 @@ p7zip-full htop iotop pciutils lshw lsof landscape-common exfat-fuse hwinfo \
 net-tools wireless-tools openssh-client openssh-server wpasupplicant ifupdown \
 pigz wget curl lm-sensors bluez gdisk usb-modeswitch usb-modeswitch-data make \
 gcc libc6-dev bison libssl-dev flex fake-hwclock rfkill wireless-regdb mmc-utils \
-network-manager python3-opencv python3-pip python3-numpy python3-venv \
+network-manager python3-opencv python3-pip python3-numpy python3-venv pulseaudio \
 cloud-initramfs-growroot
 
 # Update upgrade
@@ -219,6 +219,10 @@ cp ${overlay_dir}/etc/adduser.conf ${chroot_dir}/etc/adduser.conf
 
 mkdir -p ${chroot_dir}/etc/initramfs/post-update.d/
 cp ${overlay_dir}/etc/initramfs/post-update.d/zz-update-firmware ${chroot_dir}/etc/initramfs/post-update.d/zz-update-firmware
+
+# Fix root filesystem issues by changing fsck -a to -y.
+cp ${overlay_dir}/usr/share/initramfs-tools/scripts/functions ${chroot_dir}/usr/share/initramfs-tools/scripts/functions
+sed -i 's/^FSTYPE=auto/FSTYPE=ext4/' ${chroot_dir}/etc/initramfs-tools/initramfs.conf
 
 # Realtek 8811CU/8821CU usb modeswitch support
 cp ${chroot_dir}/lib/udev/rules.d/40-usb_modeswitch.rules ${chroot_dir}/etc/udev/rules.d/40-usb_modeswitch.rules
@@ -287,7 +291,7 @@ umount -lf ${chroot_dir}/dev/pts 2> /dev/null || true
 umount -lf ${chroot_dir}/* 2> /dev/null || true
 
 # Tar the entire rootfs
-[[ ${DESKTOP_ONLY} != "Y" ]] && cd ${chroot_dir} && XZ_OPT="-3 -T0" tar -cpJf ../ubuntu-22.04.5-server-arm64.rootfs.tar.xz . && cd ..
+[[ ${DESKTOP_ONLY} != "Y" ]] && cd ${chroot_dir} && XZ_OPT="-3 -T0" tar -cpJf ../ubuntu-22.04-server-arm64.rootfs.tar.xz . && cd ..
 [[ ${SERVER_ONLY} == "Y" ]] && exit 0
 
 # Mount the temporary API filesystems
@@ -305,7 +309,7 @@ trap 'echo Error: in $0 on line $LINENO' ERR
 # Desktop packages
 apt-get -y install ubuntu-desktop dbus-x11 xterm pulseaudio pavucontrol qtwayland5 \
 gstreamer1.0-plugins-bad gstreamer1.0-plugins-base gstreamer1.0-plugins-good mpv \
-gstreamer1.0-tools gstreamer1.0-rockchip1 chromium-browser mali-g610-firmware malirun \
+gstreamer1.0-tools gstreamer1.0-rockchip1 chromium mali-g610-firmware malirun \
 rockchip-multimedia-config librist4 librist-dev rist-tools dvb-tools ir-keytable \
 libdvbv5-0 libdvbv5-dev libdvbv5-doc libv4l-0 libv4l2rds0 libv4lconvert0 libv4l-dev \
 libv4l-rkmpp qv4l2 v4l-utils libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview \
@@ -380,25 +384,6 @@ cp ${overlay_dir}/bgrt-fallback.png ${chroot_dir}/usr/share/plymouth/themes/spin
 cp ${overlay_dir}/ubuntu-logo.png ${chroot_dir}/usr/share/plymouth/ubuntu-logo.png
 cp ${overlay_dir}/ubuntu-logo-icon.png ${chroot_dir}/usr/share/pixmaps/ubuntu-logo-icon.png
 
-# Set chromium inital prefrences
-mkdir -p ${chroot_dir}/usr/lib/chromium-browser
-cp ${overlay_dir}/usr/lib/chromium-browser/initial_preferences ${chroot_dir}/usr/lib/chromium-browser/initial_preferences
-
-# Set chromium default launch args
-mkdir -p ${chroot_dir}/usr/lib/chromium-browser
-cp ${overlay_dir}/etc/chromium-browser/default ${chroot_dir}/etc/chromium-browser/default
-
-# Set chromium as default browser
-chroot ${chroot_dir} /bin/bash -c "update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/chromium-browser 500"
-chroot ${chroot_dir} /bin/bash -c "update-alternatives --set x-www-browser /usr/bin/chromium-browser"
-sed -i 's/firefox-esr\.desktop/chromium-browser\.desktop/g;s/firefox\.desktop;//g' ${chroot_dir}/usr/share/applications/gnome-mimeapps.list 
-
-# Add chromium to favorites bar
-mkdir -p ${chroot_dir}/etc/dconf/db/local.d
-cp ${overlay_dir}/etc/dconf/db/local.d/00-favorite-apps ${chroot_dir}/etc/dconf/db/local.d/00-favorite-apps
-cp ${overlay_dir}/etc/dconf/profile/user ${chroot_dir}/etc/dconf/profile/user
-chroot ${chroot_dir} /bin/bash -c "dconf update"
-
 # Have plymouth use the framebuffer
 mkdir -p ${chroot_dir}/etc/initramfs-tools/conf-hooks.d
 cp ${overlay_dir}/etc/initramfs-tools/conf-hooks.d/plymouth ${chroot_dir}/etc/initramfs-tools/conf-hooks.d/plymouth
@@ -415,6 +400,7 @@ EOF
 echo "MUTTER_DEBUG_ENABLE_ATOMIC_KMS=0" >> ${chroot_dir}/etc/environment
 echo "MUTTER_DEBUG_FORCE_KMS_MODE=simple" >> ${chroot_dir}/etc/environment
 echo "CLUTTER_PAINT=disable-dynamic-max-render-time" >> ${chroot_dir}/etc/environment
+# ðŸ‘† If you build the 24.04 system, please comment out the code to prevent the login from getting stuck on the desktop.ðŸ˜Š
 
 # Update initramfs
 chroot ${chroot_dir} /bin/bash -c "update-initramfs -u"
@@ -424,4 +410,4 @@ umount -lf ${chroot_dir}/dev/pts 2> /dev/null || true
 umount -lf ${chroot_dir}/* 2> /dev/null || true
 
 # Tar the entire rootfs
-cd ${chroot_dir} && XZ_OPT="-3 -T0" tar -cpJf ../ubuntu-22.04.5-desktop-arm64.rootfs.tar.xz . && cd ..
+cd ${chroot_dir} && XZ_OPT="-3 -T0" tar -cpJf ../ubuntu-22.04-desktop-arm64.rootfs.tar.xz . && cd ..

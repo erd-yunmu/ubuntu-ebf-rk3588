@@ -2,4 +2,4 @@
 # /usr/bin/chromium-browser
 
 # Options to pass to chromium-browser
-CHROMIUM_FLAGS="--use-gl=egl --disable-gpu-vsync --disable-software-rasterizer"
+CHROMIUM_FLAGS="--use-gl=egl"

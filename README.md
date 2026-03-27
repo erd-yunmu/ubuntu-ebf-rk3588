@@ -1,131 +1,78 @@
 # 概述
-这个项目旨在为Rockchip RK3588 系列设备提供一个基于 Ubuntu 的操作系统体验。通过此项目，您可以：
-立即启动：使用预制的 Ubuntu 服务器或桌面映像，快速获得一个熟悉的 Linux 环境，无需复杂的安装过程。
-设备支持：目前支持的设备包括但不限于：
-```bash
-LubanCat-4
-LubanCat-5
-LubanCat-5-V2
-LubanCat-5IO
-```
+面向 Rockchip RK3588 系列（LubanCat-4/5/5-V2/5IO）的 Ubuntu 体验，提供预制服务器版与桌面版镜像，开机即用。
 
-# 特色功能
+## 主要特性
+- apt 包管理与系统更新（内核/固件/引导）
+- 首次运行向导简化用户与桌面配置
+- 硬件加速：panfork 3D、Mali OpenGL ES、Rockchip MPP 编解码
+- 桌面：Wayland + GNOME，Chromium 流畅播放 4K YouTube；MPV/GStreamer 4K 播放
+- 支持 Plex；内核 6.1
 
-- **包管理**：利用官方Ubuntu存储库通过apt进行便捷的包管理，确保软件的更新和安全性。
-- **系统更新**：通过apt轻松获取内核、固件和引导加载程序的最新更新，保持系统的稳定性和兼容性。
-- **用户配置**：首次运行向导简化了桌面的用户设置和系统配置过程。
-- **硬件加**速：通过panfork提供3D视频加速，提升图形性能。
-- **图形支持**：基于Mali GPU的OpenGL ES支持，优化图形渲染效率。
-- **桌面环境**：采用Wayland协议，全面支持GNOME桌面，提供流畅的用户体验。
-- **视频播放**：Chromium浏览器支持高清4K YouTube视频流畅播放。
-- **高清视频**：MPV视频播放器能够流畅播放4K视频内容。
-- **多媒体处理**：Gstreamer作为命令行工具，支持4K视频的播放，为多媒体应用提供更多选择。
-- **视频编码解码**：支持Rockchip MPP（Media Process Platform）进行高效的视频硬编码和硬解码。
-- **预装软件**：已预装MPV，利用硬件解码能力提升视频播放性能。
-- **容器化支持**：系统兼容Docker，方便用户部署和管理容器；也支持Plex服务器，满足多媒体服务器的需求。
-- **内核版本**：采用稳定的6.1.84 Linux内核，确保系统的安全性和性能。
+## 支持设备
+- LubanCat-4
+- LubanCat-5
+- LubanCat-5-V2
+- LubanCat-5IO
+
+# 获取与校验
+1. 从提供的下载源获取镜像（桌面/服务器版）。
 
 # 安装
-### SD卡
-* 1.使用工具烧录，三种rufus，win32diskimager,balenaEtcher选个工具，推荐 rufus，免安装，包又小
-* rufus安装包在->网盘/6-开发软件/rufus-4.3.exe
-* rufus如需安装其他版本，可从 https://rufus.ie/zh/ 下载
-* 2.打开rufus，插上SD卡，点击“选择”镜像，可以不用解压，直接选上，点击开始烧录。等待写卡结束即可。
 
-### EMMC启动
-* 打开RKDevTool.exe工具，进入maskrom模式，
-* 1.选择“下载镜像”下面有名字写着：boot  system
-* 2.“boot”选择工具文件夹里面自带名是“rk3588_MiniLoaderAll.bin”点击右边“...”选择bin
-* 3.“sysem”选择下载好的镜像，ubuntu**.xz压缩包，进行解压出镜像.img，点击右边“...”选择镜像.img
-* 4.下方 打勾“强制按地址写”
-* 5.最后点击“执行”正在刷入，等待结束。
+## SD 卡
+1. 推荐使用 rufus（免安装、小体积）。若需其他版本可从 https://rufus.ie/zh/ 获取。
+2. 打开 rufus，选择 SD 卡与镜像（可直接选择 .xz），开始写入，等待完成。
 
-### NVME启动
-- 方法1：
-```bash
-镜像刷入SD卡上，按PWR键，上电自动进入SD加载镜像启动进系统
-把 ubuntu-22.04.4-desktop-arm64-lubancat-5.img.xz 镜像包放到当前系统目录下，
-执行xz -dc *-lubancat-5.img.xz | sudo dd of=/dev/nvme0n1 bs=4k 把镜像写入到NVME上，结束后执行sync，然后拔电，移除SD卡
-再次按MR键进入maskrom模式，把 rkspi_loader_lubancat_5.img 刷入emmc作为引导nvme系统。刷完系统就自动引导起来了
- 
-cat@lubancat:~$ df -h
-Filesystem      Size  Used Avail Use% Mounted on
-tmpfs           1.6G  2.7M  1.6G   1% /run
-/dev/nvme0n1p2  7.9T  7.7G  4.4G   1% /
-tmpfs           7.8G     0  7.8G   0% /dev/shm
-tmpfs           5.0M  4.0K  5.0M   1% /run/lock
-tmpfs           4.0M     0  4.0M   0% /sys/fs/cgroup
-/dev/nvme0n1p1  511M   52M  460M  11% /boot/firmware
-tmpfs           1.6G   80K  1.6G   1% /run/user/129
-tmpfs           1.6G   68K  1.6G   1% /run/user/1000
-cat@lubancat:~$
- 
-看到nvme就成功从nvme启动了。
- ```
-- 方法2：
-```bash
-参考刷入emmc教程，然后启动进入系统
-把 *-ubuntu-22.04.4-desktop-arm64-lubancat-5.img.xz 镜像包放到当前系统目录下，
-执行xz -dc *-lubancat-5.img.xz | sudo dd of=/dev/nvme0n1 bs=4k 把镜像写入到NVME上，结束后执行sync，然后拔电
-再次按MR键进入maskrom模式，把 rkspi_loader_lubancat_5.img 刷入emmc作为引导nvme系统。刷完系统就自动引导起来
- 
-破坏nvme分区，停止nvme启动系统，执行命令：dd if=/dev/zero of=/dev/nvme0n1 bs=8M count=1 之后拔电即可。
-```
+## eMMC 启动
+1. 用 RKDevTool 进入 maskrom 模式。
+2. 选择 “下载镜像”：`boot` 选 `rk3588_MiniLoaderAll.bin`；`system` 选解压后的 `.img`。
+3. 勾选 “强制按地址写”，点击执行，等待完成。
+
+## NVMe 启动
+- 方案 A（先从 SD 引导到系统后写 NVMe）：
+  ```bash
+  xz -dc ubuntu-22.04.4-desktop-arm64-lubancat-5.img.xz | sudo dd of=/dev/nvme0n1 bs=4k
+  sync
+  ```
+  断电拔卡后，按 MR 进入 maskrom，将 `rkspi_loader_lubancat_5.img` 刷入 eMMC 作为 NVMe 引导。
+- 方案 B（从已启动系统直接写 NVMe，流程同上）。
+- 停止 NVMe 启动（清除分区）：
+  ```bash
+  sudo dd if=/dev/zero of=/dev/nvme0n1 bs=8M count=1
+  ```
 
 # 登录信息
-* 对于桌面版和服务器映像，您将能够通过 HDMI 或串行控制台连接登录。预定义用户为`**cat**`，密码为`**temppwd**`。
+- 预设账户：用户 `cat` / 密码 `temppwd`
+- 支持 HDMI 与串口登录。
 
 # 编译
-### 安装依赖
-```
+
+## 安装依赖
+```bash
 sudo apt-get install -y build-essential gcc-aarch64-linux-gnu bison \
-qemu-user-static qemu-system-arm qemu-efi u-boot-tools binfmt-support \
+qemu-user-static qemu-system-arm u-boot-tools binfmt-support \
 debootstrap flex libssl-dev bc rsync kmod cpio xz-utils fakeroot parted \
-udev dosfstools uuid-runtime git-lfs device-tree-compiler python3 fdisk bc \
-python-is-python3
+udev dosfstools uuid-runtime git-lfs device-tree-compiler python3 fdisk \
+python-is-python3 python2
 ```
 
-### 下载源码
-```
+## 获取源码
+```bash
 git clone -b 22.04-rt16 https://github.com/erd-yunmu/ubuntu-ebf-rk3588
 cd ubuntu-ebf-rk3588
 git lfs fetch && git lfs checkout
 ```
 
-# 使用方法：
-```
-sudo ./build.sh --board=lubancat-4
-
-# 支持的设备：
-sudo ./build.sh --board=lubancat-4
-sudo ./build.sh --board=lubancat-5      
-sudo ./build.sh --board=lubancat-5-v2
-sudo ./build.sh --board=lubancat-5io
-
-# 参数说明：
-  -b, --board=BOARD      目标板
-  -h, --help             显示此帮助信息并退出
-  -c, --clean            清理构建目录
-  -d, --docker           使用Docker进行构建
-  -k, --kernel-only      仅编译内核
-  -u, --uboot-only       仅编译U-Boot
-  -so, --server-only     仅构建服务镜像
-  -do, --desktop-only    仅构建桌面镜像
-  -l, --launchpad        使用Launchpad存储库的内核和U-Boot
-  -v, --verbose          增加Bash脚本的详细程度
-
-编译生成的镜像文件存放在 images 文件夹下。
-```
-# 单独编译内核
+## 构建镜像
 ```bash
-cd build/linux-rockchip
-sudo -s # 切换为root用户进行编译
-make CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 rockchip_linux_defconfig
-make KBUILD_IMAGE="arch/arm64/boot/Image" CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 -j"$(nproc)" bindeb-pkg
-# 生成的.deb包位于上级目录
+sudo ./build.sh --board=lubancat-4        # 其他：lubancat-5 / lubancat-5-v2 / lubancat-5io
+# 常用参数：-c 清理，-d Docker 构建，-k 仅内核，-u 仅 U-Boot，-so 仅服务器，-do 仅桌面，-v 详细日志
+# 产物位于 images/
 ```
 
-镜像路径在images文件夹下
+# 常见问题
+- NVMe 启动失败：确认已刷入 `rkspi_loader_lubancat_5.img`；检查 NVMe 是否已写入镜像并 sync。
+- GPG/仓库问题：如 apt 更新失败，检查网络与镜像源，必要时更换为官方/就近镜像。
 
 ---
-> Ubuntu is a trademark of Canonical Ltd. Rockchip is a trademark of Fuzhou Rockchip Electronics Co., Ltd. The Ubuntu Rockchip project is not affiliated with Canonical Ltd or Fuzhou Rockchip Electronics Co., Ltd. All other product names, logos, and brands are property of their respective owners. The Ubuntu name is owned by [Canonical Limited](https://ubuntu.com/).
+Ubuntu is a trademark of Canonical Ltd. Rockchip is a trademark of Fuzhou Rockchip Electronics Co., Ltd. The Ubuntu Rockchip project is not affiliated with Canonical Ltd or Fuzhou Rockchip Electronics Co., Ltd. All other product names, logos, and brands are property of their respective owners. The Ubuntu name is owned by [Canonical Limited](https://ubuntu.com/).

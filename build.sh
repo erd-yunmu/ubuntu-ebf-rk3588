@@ -7,7 +7,7 @@ cd "$(dirname -- "$(readlink -f -- "$0")")"
 
 usage() {
 cat << HEREDOC
-Usage: $0 --board=[lubancat-4|lubancat-5|lubancat-5-v2|lubancat-5io]
+Usage: $0 --board=[lubancat-4|lubancat-4io|lubancat-5|lubancat-5-v2|lubancat-5io]
 
 Required arguments:
   -b, --board=BOARD      target board 
