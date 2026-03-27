@@ -58,8 +58,8 @@ python-is-python3
 
 ## 获取源码
 ```bash
-git clone -b <分支> git@github.com:xxx/ubuntu-rockchip.git
-cd ubuntu-rockchip
+git clone -b 24.04-panfrost https://github.com/erd-yunmu/ubuntu-ebf-rk3588
+cd ubuntu-ebf-rk3588
 git lfs fetch && git lfs checkout
 ```
 
