@@ -11,10 +11,6 @@
 / {
 	model = "Embedfire LubanCat-5 V2";
 	compatible = "embedfire,rk3588-lubancat-5-v2", "rockchip,rk3588";
-
-	chosen: chosen {
-		bootargs = "earlycon=uart8250,mmio32,0xfeb50000 console=ttyFIQ0 irqchip.gicv3_pseudo_nmi=0 rcupdate.rcu_expedited=1 rcu_nocbs=all";
-	};
 };
 
 &usbc0 {
@@ -38,4 +34,20 @@
 			rockchip,pins = <1 RK_PA4 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
     };
+};
+
+&backlight_dsi0 {
+	status = "disabled";
+};
+
+&backlight_dsi1 {
+	status = "disabled";
+};
+
+&pwm0 {
+	status = "disabled";
+};
+
+&pwm1 {
+	status = "disabled";
 };

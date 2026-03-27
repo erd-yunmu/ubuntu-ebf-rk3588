@@ -1,0 +1,45 @@
+overlays=rk3588s-lubancat-4io-hdmi0-overlay rk3588s-lubancat-dp0-in-vp1-overlay
+
+# 正确的方法是将所有需要的设备树覆盖文件名列在一个overlays=后面，用空格分隔。例如：
+# 下面是为鲁班猫4使用两个覆盖层的示例:      
+# overlays=rk3588s-lubancat-4-hdmi0-8k-overlay rk3588s-lubancat-4-v1-dsi1-1024x600-overlay
+
+# Display 显示输出配置
+# 每个vp对应一个显示接口，同一个vp同时只能开启一个屏幕
+# 规则1.默认在主设备树中开启hdmi0(vp0,4K)和dp0(vp1,4K)，可即插即用。
+# 规则2.开启vp2和vp3设备树插件，配合规则1,可实现4k+4k+4k+2k四屏异显
+# 规则3.显示8K,同时占用vp0和vp1,还要开启hdmi0-8k设备树插件来配置时钟。
+# 规则4.根据规则1和规则3,如果hdmi0设置为8k的话,dp0不能连接显示器,否则会导致系统崩溃。
+# 规则5.开启vp2和vp3设备树插件,搭配规则3,可实现8k+4k+2k三屏异显
+
+## vp0
+# rk3588s-lubancat-hdmi0-8k-overlay
+# rk3588s-lubancat-4io-hdmi0-overlay
+## vp1
+# rk3588s-lubancat-dp0-in-vp1-overlay
+## vp2
+# rk3588s-lubancat-dp0-in-vp2-overlay
+# rk3588s-lubancat-4io-dsi0-800x1280-10.1inch-ebf410177-overlay
+# rk3588s-lubancat-4io-dsi0-800x1280-10.1inch-s8001280b1060b-overlay
+# rk3588s-lubancat-4io-dsi0-1024x600-7inch-ebf410173-overlay
+# rk3588s-lubancat-4io-dsi0-1080x1920-5.5inch-ebf410125-overlay
+# rk3588s-lubancat-4io-dsi0-generic-overlay
+## vp3
+# rk3588s-lubancat-4io-dsi1-800x1280-10.1inch-ebf410177-overlay
+# rk3588s-lubancat-4io-dsi1-800x1280-10.1inch-s8001280b1060b-overlay
+# rk3588s-lubancat-4io-dsi1-1024x600-7inch-ebf410173-overlay
+# rk3588s-lubancat-4io-dsi1-1080x1920-5.5inch-ebf410125-overlay
+# rk3588s-lubancat-4io-dsi1-generic-overlay
+# rk3588-lubancat-dsi1-vp3-virtual-screen-overlay
+
+# CAM0
+# rk3588s-lubancat-4io-cam0-imx415-overlay
+# CAM1
+# rk3588s-lubancat-4io-cam1-imx415-overlay
+# CAM2
+# rk3588s-lubancat-4io-cam2-imx415-overlay
+# CAM3
+# rk3588s-lubancat-4io-cam3-imx415-overlay
+
+# 开启sata0, mini pcie接口可接msata硬盘
+# rk3588s-lubancat-sata0-overlay

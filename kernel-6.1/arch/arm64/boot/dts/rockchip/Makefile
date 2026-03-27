@@ -2,6 +2,6 @@
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-lubancat-5.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-lubancat-5io.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-lubancat-5-v2.dtb
-dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-lubancat-4.dtb
-
+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-lubancat-4-v1.dtb
+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-lubancat-4io.dtb
 subdir-y := $(dts-dirs) overlay

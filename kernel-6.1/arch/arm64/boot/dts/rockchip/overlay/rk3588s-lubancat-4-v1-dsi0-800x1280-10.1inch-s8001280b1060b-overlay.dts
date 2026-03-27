@@ -45,9 +45,9 @@
 				status = "okay";
 				compatible = "simple-panel-dsi";
 				reg = <0>;
-				backlight = <&backlight0>;
+				backlight = <&backlight_dsi0>;
 				power-supply = <&mipi_dsi0_power>;
-			    reset-gpios = <&gpio1 RK_PA1 GPIO_ACTIVE_LOW>;
+				reset-gpios = <&gpio1 RK_PA1 GPIO_ACTIVE_LOW>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&dsi0_reset>;
 
@@ -343,4 +343,3 @@
 		};
 	};
 };
-

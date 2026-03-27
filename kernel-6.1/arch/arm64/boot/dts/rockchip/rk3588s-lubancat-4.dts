@@ -10,34 +10,60 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/pwm/pwm.h>
 #include <dt-bindings/pinctrl/rockchip.h>
-#include <dt-bindings/input/rk-input.h>
+//#include <dt-bindings/input/rk-input.h>
+#include <dt-bindings/input/linux-event-codes.h>
 #include <dt-bindings/display/drm_mipi_dsi.h>
 #include <dt-bindings/display/rockchip_vop.h>
 #include <dt-bindings/sensor-dev.h>
 #include <dt-bindings/phy/jlsemi-dt-phy.h>
 #include "rk3588s.dtsi"
 #include "rk3588-linux.dtsi"
+
+/* MIPI CSI 节点配置 */
 #include "rk3588s-lubancat-4-csi.dtsi"
+/* IMX415 示例, 开启链路节点 */
+// #include "rk3588s-lubancat-4-cam0-imx415.dtsi"
+// #include "rk3588s-lubancat-4-cam1-imx415.dtsi"
+// #include "rk3588s-lubancat-4-cam2-imx415.dtsi"
+
+/* 显示输出配置，
+ * 同一个vp同时只能开启一个配置
+ * 最多可以同时开启4个vp
+ * mipi屏幕默认使用设备树插件开启
+ */
+/***** vp0 *****/
+/* hdmi0 display */
+// #include "rk3588s-lubancat-4-hdmi0.dtsi"
+
+/***** vp1 *****/
+/* dp0 display */
+// #include "rk3588s-lubancat-4-dp0.dtsi"
+
+/***** vp2 *****/
+// #include "rk3588s-lubancat-4-dsi0-1080x1920-5.5inch-ebf410125.dtsi"
+// #include "rk3588s-lubancat-4-dsi0-1024x600-7inch-ebf410173.dtsi"
+// #include "rk3588s-lubancat-4-dsi0-800x1280-10.1inch-ebf410177.dtsi"
+
+/***** vp3 *****/
+// #include "rk3588s-lubancat-4-dsi1-1080x1920-5.5inch-ebf410125.dtsi"
+// #include "rk3588s-lubancat-4-dsi1-1024x600-7inch-ebf410173.dtsi"
+// #include "rk3588s-lubancat-4-dsi1-800x1280-10.1inch-ebf410177.dtsi"
 
 / {
 	model = "Embedfire LubanCat-4";
 	compatible = "rockchip,rk3588s-lubancat-4", "rockchip,rk3588";
 
-	chosen: chosen {
-		bootargs = "earlycon=uart8250,mmio32,0xfeb50000 console=ttyFIQ0 irqchip.gicv3_pseudo_nmi=0 rcupdate.rcu_expedited=1 rcu_nocbs=all";
-	};
-
 	leds: leds {
 		status = "okay";
 		compatible = "gpio-leds";
 
-		sys_status_led: sys-status-led {
-			label = "sys_status_led";
+		sys_led: sys-led {
+			label = "sys_led";
 			linux,default-trigger = "heartbeat";
 			default-state = "on";
 			gpios = <&gpio4 RK_PB5 GPIO_ACTIVE_LOW>;
 			pinctrl-names = "default";
-			pinctrl-0 = <&sys_status_led_pin>;
+			pinctrl-0 = <&sys_led_pin>;
 		};
 	};
 
@@ -49,7 +75,7 @@
 		regulator-min-microvolt = <5000000>;
 		regulator-max-microvolt = <5000000>;
 	};
-	
+
 	vcc5v0_sys: vcc5v0-sys {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc5v0_sys";
@@ -271,7 +297,7 @@
 		>;
 	};
 
-	backlight0: backlight0 {
+	backlight_dsi0: backlight-dsi0 {
 		compatible = "pwm-backlight";
 		pwms = <&pwm2 0 25000 0>;
 		brightness-levels = <
@@ -306,12 +332,12 @@
 		224 225 226 227 228 229 230 231
 		232 233 234 235 236 237 238 239
 		240 241 242 243 244 245 246 247
-		248 249 250 251 252 253 254 255	
+		248 249 250 251 252 253 254 255
 		>;
 		default-brightness-level = <200>;
 	};
 
-	backlight1: backlight1 {
+	backlight_dsi1: backlight-dsi1 {
 		compatible = "pwm-backlight";
 		pwms = <&pwm6 0 25000 0>;
 		brightness-levels = <
@@ -346,7 +372,7 @@
 		224 225 226 227 228 229 230 231
 		232 233 234 235 236 237 238 239
 		240 241 242 243 244 245 246 247
-		248 249 250 251 252 253 254 255	
+		248 249 250 251 252 253 254 255
 		>;
 		default-brightness-level = <200>;
 	};
@@ -365,7 +391,7 @@
 };
 
 &spdif_tx2 {
-    status = "okay";
+	status = "okay";
 };
 
 &i2s5_8ch {
@@ -712,6 +738,7 @@
 		regulators {
 			vdd_gpu_s0: vdd_gpu_mem_s0: DCDC_REG1 {
 				regulator-boot-on;
+				regulator-always-on;
 				regulator-min-microvolt = <550000>;
 				regulator-max-microvolt = <950000>;
 				regulator-ramp-delay = <12500>;
@@ -964,12 +991,12 @@
 };
 
 &i2s0_8ch {
-    status = "okay";
-    rockchip,clk-trcm = <1>;
-    pinctrl-0 = <&i2s0_lrck
-             &i2s0_sclk
-             &i2s0_sdi0
-             &i2s0_sdo0>;
+	status = "okay";
+	rockchip,clk-trcm = <1>;
+	pinctrl-0 = <&i2s0_lrck
+			 &i2s0_sclk
+			 &i2s0_sdi0
+			 &i2s0_sdo0>;
 };
 
 &saradc {
@@ -1092,23 +1119,31 @@
 	ir_key_lubancat{
 	rockchip,usercode = <0xff00>;
 	rockchip,key_table =
-		<0xeb   KEY_POWER>,
-		<0xec   KEY_MENU>,
-		<0xfe   KEY_BACK>,
-		<0xb7   KEY_HOME>,
-		<0xa3   KEY_WWW>,
-		<0xf4   KEY_VOLUMEUP>,
-		<0xa7   KEY_VOLUMEDOWN>,
-		<0xf8   KEY_REPLY>,
-		<0xfc   KEY_UP>,
-		<0xfd   KEY_DOWN>,
-		<0xf1   KEY_LEFT>,
-		<0xe5   KEY_RIGHT>;
+		<0xba   KEY_POWER>,   //电源按键
+		<0xb8   KEY_MENU>,     //菜单按键
+		<0xbc   KEY_BACK>,      //返回按键
+		<0xbb   KEY_HOME>,      //home键按键
+		<0xea   KEY_PLAY>,      //播放按键
+		<0xbf   KEY_VOLUMEUP>,  //音量加按键
+		<0xe6   KEY_VOLUMEDOWN>,   //音量键按键
+		<0xf6   KEY_FASTFORWARD>,  //快进按键
+		<0xf8   KEY_FASTREVERSE>,  //快退按键
+		<0xf2   KEY_BACKSPACE>,    //BaskSpace按键
+		<0xf3   KEY_1>,            //按键1
+		<0xe7   KEY_2>,
+		<0xa1   KEY_3>,
+		<0xf7   KEY_4>,
+		<0xe3   KEY_5>,
+		<0xa5   KEY_6>,
+		<0xbd   KEY_7>,
+		<0xad   KEY_8>,
+		<0xb5   KEY_9>,
+		<0xe9   KEY_0>;            //按键0
 	};
 
-	ir_key2 {	
+	ir_key2 {
 		rockchip,usercode = <0xf708>;
-		rockchip,key_table =	
+		rockchip,key_table =
 			<0x28   KEY_POWER>,
 			<0xfe   KEY_SETUP>,
 			<0xa4   KEY_MUTE>,
@@ -1123,11 +1158,11 @@
 			<0x7c   KEY_VOLUMEDOWN>,
 			<0x79   KEY_VOLUMEUP>,
 			<0x57   KEY_AUDIO>,
-			<0x5d   KEY_SUBTITLE>,  
-			<0x99   KEY_PHONE>, 
+			<0x5d   KEY_SUBTITLE>,
+			<0x99   KEY_PHONE>,
 			<0xfd   KEY_WWW>,
 			<0xfc   KEY_F1>,
-			<0x7e   KEY_TV>;			
+			<0x7e   KEY_TV>;
 	};
 
 	ir_key3 {
@@ -1161,62 +1196,6 @@
 			<0xb6   KEY_0>,
 			<0xb5   KEY_BACKSPACE>;
 	};
-};
-
-&iep {
-	status = "okay";
-};
-
-&iep_mmu {
-	status = "okay";
-};
-
-&jpegd {
-	status = "okay";
-};
-
-&jpegd_mmu {
-	status = "okay";
-};
-
-&jpege_ccu {
-	status = "okay";
-};
-
-&jpege0 {
-	status = "okay";
-};
-
-&jpege0_mmu {
-	status = "okay";
-};
-
-&jpege1 {
-	status = "okay";
-};
-
-&jpege1_mmu {
-	status = "okay";
-};
-
-&jpege2 {
-	status = "okay";
-};
-
-&jpege2_mmu {
-	status = "okay";
-};
-
-&jpege3 {
-	status = "okay";
-};
-
-&jpege3_mmu {
-	status = "okay";
-};
-
-&mpp_srv {
-	status = "okay";
 };
 
 &rga3_core0 {
@@ -1274,8 +1253,6 @@
 };
 
 &rkvenc0 {
-	venc-supply = <&vdd_vdenc_s0>;
-	mem-supply = <&vdd_vdenc_mem_s0>;
 	status = "okay";
 };
 
@@ -1284,16 +1261,10 @@
 };
 
 &rkvenc1 {
-	venc-supply = <&vdd_vdenc_s0>;
-	mem-supply = <&vdd_vdenc_mem_s0>;
 	status = "okay";
 };
 
 &rkvenc1_mmu {
-	status = "okay";
-};
-
-&rkvtunnel {
 	status = "okay";
 };
 
@@ -1338,10 +1309,11 @@
 				 JL2XXX_LED2_LINK100  | \
 				 JL2XXX_LED2_LINK1000 | \
 				 JL2XXX_LED2_ACTIVITY )>; //JL PHY
+		realtek,led-data = <0x6d60>;  //8211F phy
 	};
 };
 
-/* SATA30/PCIe20x1_2 Combo PHY */
+/* SATA30_HOST0/PCIe20x1_2 Combo PHY */
 &combphy0_ps {
 	status = "okay";
 };
@@ -1392,7 +1364,7 @@
 &usbdrd_dwc3_0 {
 	dr_mode = "otg";
 	usb-role-switch;
-	
+
 	status = "okay";
 	port {
 		#address-cells = <1>;
@@ -1414,7 +1386,7 @@
 	status = "okay";
 };
 
-/* USB3.1/SATA/PCIe20x1_1 Combo PHY */
+/* USB30_HOST2/SATA30_HOST2/PCIe20x1_1 Combo PHY */
 &combphy2_psu {
 	status = "okay";
 };
@@ -1479,63 +1451,9 @@
 	status = "okay";
 };
 
-/* hdmi0 display */
-
-&hdmi0 {
-	enable-gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>;
-	cec-enable = "true";
-	status = "okay";
-};
-
-&route_hdmi0{
-	status = "okay";
-	connect = <&vp0_out_hdmi0>;
-};
-
-&hdmi0_in_vp0 {
-	status = "okay";
-};
-
-&hdmi0_in_vp1 {
-	status = "disabled";
-};
-
-&hdmi0_in_vp2 {
-	status = "disabled";
-};
-
-&hdptxphy_hdmi0 {
-	status = "okay";
-};
-
-/* dp0 display */
-
-&dp0 {
-	status = "okay";
-};
-
-&route_dp0 {
-	status = "okay";
-	connect = <&vp1_out_dp0>;	
-};
-
-&dp0_in_vp0 {
-	status = "disabled";
-};
-
-&dp0_in_vp1 {
-	status = "okay";
-};
-
-&dp0_in_vp2 {
-	status = "disabled";
-};
-
 &vop {
 	status = "okay";
-	disable-win-move;
-	assigned-clocks = <&cru ACLK_VOP>;
-	assigned-clock-rates = <800000000>;
+	// disable-win-move;
 };
 
 &vop_mmu {
@@ -1569,15 +1487,26 @@
 };
 
 &hdptxphy_hdmi0 {
-    status = "okay";
+	status = "okay";
 };
 
 &pinctrl {
-    hym8563 {
-        hym8563_int: hym8563-int {
-            rockchip,pins = <0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_up>;
+	dsi {
+                dsi0_reset: dsi0-reset {
+                        rockchip,pins = <0 RK_PD7 RK_FUNC_GPIO &pcfg_pull_up>;
+                };
+
+                tp1_irq: tp1-irq {
+                        rockchip,pins = <3 RK_PC4 RK_FUNC_GPIO &pcfg_pull_up>;
+                };
         };
-    };
+
+	
+	hym8563 {
+		hym8563_int: hym8563-int {
+			rockchip,pins = <0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
 
 	headphone {
 		hp_det: hp-det {
@@ -1606,19 +1535,8 @@
 	};
 
 	leds {
-		sys_status_led_pin: sys-status-led-pin {
+		sys_led_pin: sys-led-pin {
 			rockchip,pins = <4 RK_PB5 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
-
-	dsi {
-		dsi0_reset: dsi0-reset {
-			rockchip,pins = <1 RK_PA1 RK_FUNC_GPIO &pcfg_pull_up>;
-		};
-		
-		tp1_irq: tp1-irq {
-			rockchip,pins = <4 RK_PA1 RK_FUNC_GPIO &pcfg_pull_up>;
-		};
-    };
 };
-
