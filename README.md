@@ -87,7 +87,8 @@ python-is-python3
 
 ### 下载源码
 ```
-git clone -b "分支" git@github.com:xxx/ubuntu-rockchip.git && cd ubuntu-rockchip
+git clone -b 22.04-rt16 https://github.com/erd-yunmu/ubuntu-ebf-rk3588
+cd ubuntu-ebf-rk3588
 git lfs fetch && git lfs checkout
 ```
 
