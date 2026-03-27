@@ -201,6 +201,7 @@ EOF
 # Install arm64 deb package
 cp -r ../packages/arm64/* ${chroot_dir}/tmp
 chroot ${chroot_dir} /bin/bash -c "dpkg -i /tmp/*.deb"
+chroot ${chroot_dir} /bin/bash -c "apt-mark hold ffmpeg"
 rm -f ${chroot_dir}/tmp/*
 
 # Customize header content
