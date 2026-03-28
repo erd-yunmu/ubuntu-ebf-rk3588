@@ -20,7 +20,7 @@
 	};
 
 	fragment@1 {
-		target = <&dphy5_gc2053>;
+		target = <&dphy5_imx415>;
 		__overlay__ {
 			status = "okay";
 		};
