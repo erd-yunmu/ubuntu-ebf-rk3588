@@ -50,8 +50,8 @@
 
 				enable-delay-ms = <35>;
 				prepare-delay-ms = <6>;
-				reset-delay-ms = <0>;
-				init-delay-ms = <20>;
+				reset-delay-ms = <10>;
+				init-delay-ms = <50>;
 				unprepare-delay-ms = <0>;
 				disable-delay-ms = <20>;
 
@@ -62,8 +62,41 @@
 				dsi,format = <MIPI_DSI_FMT_RGB888>;
 				dsi,lanes  = <4>;
 
-				nvmem = <&eeprom1>;
-				nvmem-names = "eeprom";
+				panel-init-sequence = [
+					15 00 02 80 AC
+					15 00 02 81 B8
+					15 00 02 82 09
+					15 00 02 83 78
+					15 00 02 84 7F
+					15 00 02 85 BB
+					15 00 02 86 70
+					05 C8 01 11
+					05 C8 01 29
+				];
+
+				panel-exit-sequence = [
+					05 78 01 28
+					05 00 01 10
+				];
+
+				disp1_timings0: display-timings {
+					native-mode = <&dsi1_timing0>;
+					dsi1_timing0: timing0 {
+						clock-frequency = <51668640>;
+						hactive = <1024>;
+						vactive = <600>;
+						hsync-len = <10>;
+						hback-porch = <160>;
+						hfront-porch = <160>;
+						vsync-len = <1>;
+						vback-porch = <23>;
+						vfront-porch = <12>;
+						hsync-active = <0>;
+						vsync-active = <0>;
+						de-active = <0>;
+						pixelclk-active = <0>;
+					};
+				};
 
 				ports {
 					#address-cells = <1>;
@@ -109,28 +142,8 @@
 				interrupts = <RK_PB7 IRQ_TYPE_LEVEL_LOW>;
 				reset-gpios = <&gpio6 14 GPIO_ACTIVE_LOW>;
 				irq-gpios = <&gpio3 RK_PB7 GPIO_ACTIVE_HIGH>;
-				pinctrl-names = "default";
-				pinctrl-0 = <&tp1_irq>;
-
-				nvmem = <&eeprom1>;
-				nvmem-names = "eeprom";
-			};
-
-			eeprom1: eeprom@51 {
-				compatible = "atmel,24c64";
-				reg = <0x51>;
-				label = "eeprom";
-			};
-		};
-	};
-
-	fragment@5 {
-		target = <&pinctrl>;
-		__overlay__ {
-			dsi {
-				tp1_irq: tp1-irq {
-					rockchip,pins = <3 RK_PB7 RK_FUNC_GPIO &pcfg_pull_none>;
-				};
+				touchscreen-inverted-x = <1>;
+				touchscreen-inverted-y = <1>;
 			};
 		};
 	};
