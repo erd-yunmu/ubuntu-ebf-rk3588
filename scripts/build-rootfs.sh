@@ -12,15 +12,15 @@ cd "$(dirname -- "$(readlink -f -- "$0")")" && cd ..
 mkdir -p build && cd build
 
 if [[ ${DESKTOP_ONLY} == "Y" ]]; then
-    if [[ -f ubuntu-24.04-desktop-arm64.rootfs.tar.xz ]]; then
+    if [[ -f ubuntu-26.04-desktop-arm64.rootfs.tar.xz ]]; then
         exit 0
     fi
 elif [[ ${SERVER_ONLY} == "Y" ]]; then
-    if [[ -f ubuntu-24.04-server-arm64.rootfs.tar.xz ]]; then
+    if [[ -f ubuntu-26.04-server-arm64.rootfs.tar.xz ]]; then
         exit 0
     fi
 else
-    if [[ -f ubuntu-24.04-server-arm64.rootfs.tar.xz && -f ubuntu-24.04-desktop-arm64.rootfs.tar.xz ]]; then
+    if [[ -f ubuntu-26.04-server-arm64.rootfs.tar.xz && -f ubuntu-26.04-desktop-arm64.rootfs.tar.xz ]]; then
         exit 0
     fi
 fi
@@ -35,7 +35,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 # Debootstrap options
 arch=arm64
-release=noble
+release=resolute
 mirror=http://mirrors.aliyun.com/ubuntu-ports/
 chroot_dir=rootfs
 overlay_dir=../overlay
@@ -297,7 +297,7 @@ umount -lf ${chroot_dir}/dev/pts 2> /dev/null || true
 umount -lf ${chroot_dir}/* 2> /dev/null || true
 
 # Tar the entire rootfs
-[[ ${DESKTOP_ONLY} != "Y" ]] && cd ${chroot_dir} && XZ_OPT="-3 -T0" tar -cpJf ../ubuntu-24.04-server-arm64.rootfs.tar.xz . && cd ..
+[[ ${DESKTOP_ONLY} != "Y" ]] && cd ${chroot_dir} && XZ_OPT="-3 -T0" tar -cpJf ../ubuntu-26.04-server-arm64.rootfs.tar.xz . && cd ..
 [[ ${SERVER_ONLY} == "Y" ]] && exit 0
 
 # Mount the temporary API filesystems
@@ -430,4 +430,4 @@ umount -lf ${chroot_dir}/dev/pts 2> /dev/null || true
 umount -lf ${chroot_dir}/* 2> /dev/null || true
 
 # Tar the entire rootfs
-cd ${chroot_dir} && XZ_OPT="-3 -T0" tar -cpJf ../ubuntu-24.04-desktop-arm64.rootfs.tar.xz . && cd ..
+cd ${chroot_dir} && XZ_OPT="-3 -T0" tar -cpJf ../ubuntu-26.04-desktop-arm64.rootfs.tar.xz . && cd ..

@@ -58,7 +58,7 @@ python-is-python3
 
 ## 获取源码
 ```bash
-git clone -b 24.04-panfrost https://github.com/erd-yunmu/ubuntu-ebf-rk3588
+git clone -b 26.04-panfrost https://github.com/erd-yunmu/ubuntu-ebf-rk3588
 cd ubuntu-ebf-rk3588
 git lfs fetch && git lfs checkout
 ```
