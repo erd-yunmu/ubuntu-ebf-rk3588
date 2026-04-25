@@ -46,15 +46,15 @@ umount -lf ${chroot_dir}/* 2> /dev/null || true
 rm -rf ${chroot_dir}
 mkdir -p ${chroot_dir}
 
-# Install the base system into a directory 
-if [ -f /usr/bin/qemu-aarch64-static ]; then
-    # Run debootstrap with --foreign and copy qemu-aarch64-static
-    # for cross compile with x86_64 machine, we need sure that /usr/bin/qemu-aarch64-static has been downloaded
+# Detect current system architecture
+HOST_ARCH=$(uname -m)
+
+if [[ "${HOST_ARCH}" == "x86_64" ]]; then
+    echo "Detected x86_64 architecture, using QEMU cross compilation"
     debootstrap --foreign --arch ${arch} ${release} ${chroot_dir} ${mirror}
     sudo cp /usr/bin/qemu-aarch64-static ${chroot_dir}/usr/bin/
     chroot ${chroot_dir} /debootstrap/debootstrap --second-stage
-else
-    # Run debootstrap without --foreign
+elif [[ "${HOST_ARCH}" == "aarch64" ]] || [[ "${HOST_ARCH}" == "arm64" ]]; then
     debootstrap --arch "${arch}" "${release}" "${chroot_dir}" "${mirror}"
 fi
 
