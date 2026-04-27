@@ -50,10 +50,10 @@
 ## 安装依赖
 ```bash
 sudo apt-get install -y build-essential gcc-aarch64-linux-gnu bison \
-qemu-user-static qemu-system-arm u-boot-tools binfmt-support \
+qemu-system-arm u-boot-tools binfmt-support python-is-python3 fdisk \
 debootstrap flex libssl-dev bc rsync kmod cpio xz-utils fakeroot parted \
-udev dosfstools uuid-runtime git-lfs device-tree-compiler python3 fdisk \
-python-is-python3
+udev dosfstools uuid-runtime git-lfs device-tree-compiler python3 
+
 ```
 
 ## 获取源码

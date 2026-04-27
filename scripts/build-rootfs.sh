@@ -172,9 +172,6 @@ apt-get -y full-upgrade
 
 # Remove cryptsetup and needrestart
 apt-get -y remove cryptsetup needrestart brltty
-apt-get purge -y flash-kernel
-
-rm -rf /etc/initramfs/post-update.d/flash-kernel
 
 # Clean package cache
 apt-get -y autoremove && apt-get -y clean
@@ -193,8 +190,9 @@ EOF
 
 # Install arm64 deb package
 cp -r ../packages/arm64/* ${chroot_dir}/tmp
+chroot ${chroot_dir} /bin/bash -c "apt install -y libglib2.0-dev libunwind-dev libdw-dev liblzma-doc"
 chroot ${chroot_dir} /bin/bash -c "dpkg -i /tmp/*.deb"
-chroot ${chroot_dir} /bin/bash -c "apt-mark hold ffmpeg"
+chroot ${chroot_dir} /bin/bash -c "apt-mark hold ffmpeg && apt -y --fix-broken install"
 rm -f ${chroot_dir}/tmp/*
 
 # Customize header content
@@ -217,7 +215,6 @@ cp ${overlay_dir}/etc/adduser.conf ${chroot_dir}/etc/adduser.conf
 
 mkdir -p ${chroot_dir}/etc/initramfs/post-update.d/
 cp ${overlay_dir}/etc/initramfs/post-update.d/zz-update-firmware ${chroot_dir}/etc/initramfs/post-update.d/zz-update-firmware
-
 
 # Fix root filesystem issues by changing fsck -a to -y.
 cp ${overlay_dir}/usr/share/initramfs-tools/scripts/functions ${chroot_dir}/usr/share/initramfs-tools/scripts/functions
@@ -308,12 +305,11 @@ trap 'echo Error: in $0 on line $LINENO' ERR
 # Desktop packages
 apt-get -y install ubuntu-desktop dbus-x11 xterm pulseaudio pavucontrol qtwayland5 \
 gstreamer1.0-plugins-bad gstreamer1.0-plugins-base gstreamer1.0-plugins-good mpv \
-gstreamer1.0-tools chromium-browser mesa-utils libcanberra-pulse \
-librist4 librist-dev rist-tools dvb-tools ir-keytable \
+gstreamer1.0-tools chromium-browser mesa-utils libcanberra-pulse ir-keytable dvb-tools\
 libdvbv5-0 libdvbv5-dev libdvbv5-doc libv4l-0 libv4l2rds0 libv4lconvert0 libv4l-dev \
-qv4l2 v4l-utils libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview \
+qv4l2 v4l-utils libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview librist4 librist-dev \
 libgl1-mesa-dev libgles2-mesa-dev libglx-mesa0 mesa-common-dev mesa-vulkan-drivers \
-gnome-software language-pack-zh-han*
+rist-tools gnome-software language-pack-zh-han*
 
 export LANGUAGE="zh_CN"
 export LANG="zh_CN.UTF-8"
@@ -340,7 +336,6 @@ ln -rsf /usr/lib/*/libv4l2.so /usr/lib/
 
 # Clean package cache
 apt-get -y autoremove && apt-get -y clean && apt-get -y autoclean
-
 EOF
 
 # Hack for GDM to restart on first HDMI hotplug
@@ -396,24 +391,9 @@ cp ${overlay_dir}/etc/systemd/system/plymouth-quit-wait.service.d/check-hdmi.con
 mkdir -p ${chroot_dir}/usr/local/bin
 cp ${overlay_dir}/usr/local/bin/check-hdmi-plymouth.sh ${chroot_dir}/usr/local/bin/check-hdmi-plymouth.sh
 
-# fuck tracker3
-cat << EOF | chroot ${chroot_dir} /bin/bash
-rm /usr/lib/systemd/user/tracker-*
-chmod -x /usr/libexec/tracker-* /usr/libexec/tracker3/* /usr/bin/tracker3
-rm -rf ~/.cache/tracker3
-apt-get purge -y flash-kernel
-rm -rf /etc/initramfs/post-update.d/flash-kernel
-EOF
-
 # Fix 24.04 audio renaming issue
 mkdir -p ${chroot_dir}/etc/wireplumber/main.lua.d/
 cp ${overlay_dir}/etc/wireplumber/main.lua.d/51-alsa-custom.lua ${chroot_dir}/etc/wireplumber/main.lua.d/51-alsa-custom.lua
-
-# Mouse lag/stutter (missed frames) in Wayland sessions
-# https://bugs.launchpad.net/ubuntu/+source/mutter/+bug/1982560
-# echo "MUTTER_DEBUG_ENABLE_ATOMIC_KMS=0" >> ${chroot_dir}/etc/environment
-# echo "MUTTER_DEBUG_FORCE_KMS_MODE=simple" >> ${chroot_dir}/etc/environment
-# echo "CLUTTER_PAINT=disable-dynamic-max-render-time" >> ${chroot_dir}/etc/environment
 
 # Update initramfs
 chroot ${chroot_dir} /bin/bash -c "update-initramfs -u"
