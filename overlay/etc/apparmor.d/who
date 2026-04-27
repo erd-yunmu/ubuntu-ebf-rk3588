@@ -1,0 +1,39 @@
+abi <abi/5.0>,
+include <tunables/global>
+
+profile who @{coreutil_dirs}who {
+  include <abstractions/base>
+  # who can theoretically take an arbitrary file argument but there seems to be
+  # no common reason why one would want to pass a file not listed in the below
+  # abstraction, or their rotated equivalents
+  include <abstractions/wutmp>
+  # rotated logs
+  /var/log/wtmp.@{d} r,
+  /var/log/btmp.@{d} r,
+  
+  # Despite listing information about consoles, <abstractions/consoles> does not
+  # seem to be needed:
+  # - Current logged-in users and their terminals is grabbed from files listed
+  #   in <abstractions/wutmp>
+  # - Any additional information about the terminals is obtained via a
+  #   combination of dirfd=openat(AT_FDCWD, "/dev", O_RDONLY|O_PATH|O_DIRECTORY)
+  #   and newfstatat(dirfd, terminal_name, out_ptr)
+  # - O_PATH fds bypass mediation so /dev/ r, is not needed for the first step
+  # - fstatat does not require permissions on the file itself, as stated in its
+  #   man page
+  # Overall result: the above calls are not mediated by LSMs
+
+  @{coreutil_dirs}who mr,
+
+  # Language files for localization
+  /usr/share/coreutils/locales/uucore/*.ftl r,
+
+  # who sends the "exists" signal via kill(pid, 0)
+  capability kill,
+
+  # Deny the writes allowed by abstractions/wutmp
+  audit deny /var/** w,
+  audit deny @{run}/utmp w,
+  
+  include if exists <local/who>
+}

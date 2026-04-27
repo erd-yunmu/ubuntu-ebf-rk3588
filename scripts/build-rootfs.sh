@@ -400,6 +400,10 @@ cp ${overlay_dir}/usr/local/bin/check-hdmi-plymouth.sh ${chroot_dir}/usr/local/b
 mkdir -p ${chroot_dir}/etc/wireplumber/main.lua.d/
 cp ${overlay_dir}/etc/wireplumber/main.lua.d/51-alsa-custom.lua ${chroot_dir}/etc/wireplumber/main.lua.d/51-alsa-custom.lua
 
+# Fix AppArmor who command language file access
+mkdir -p ${chroot_dir}/etc/apparmor.d/
+cp ${overlay_dir}/etc/apparmor.d/who ${chroot_dir}/etc/apparmor.d/who
+
 # Update initramfs
 chroot ${chroot_dir} /bin/bash -c "update-initramfs -u"
 
