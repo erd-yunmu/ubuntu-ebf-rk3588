@@ -154,6 +154,7 @@ echo lubancat > /etc/hostname
 ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
 if [[ ${MAINLINE} != "Y" ]]; then
+    apt-get -y update && apt-get -y install software-properties-common
     add-apt-repository -y ppa:xtradeb/apps
 fi
 
