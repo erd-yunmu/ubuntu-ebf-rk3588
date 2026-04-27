@@ -310,7 +310,7 @@ trap 'echo Error: in $0 on line $LINENO' ERR
 # Desktop packages
 apt-get -y install ubuntu-desktop dbus-x11 xterm pulseaudio pavucontrol qtwayland5 \
 gstreamer1.0-plugins-bad gstreamer1.0-plugins-base gstreamer1.0-plugins-good mpv \
-gstreamer1.0-tools chromium-browser mesa-utils libcanberra-pulse ir-keytable dvb-tools\
+gstreamer1.0-tools chromium-browser mesa-utils libcanberra-pulse ir-keytable dvb-tools \
 rist-tools libdvbv5-dev libdvbv5-doc libv4l-0 libv4l2rds0 libv4lconvert0 libv4l-dev \
 qv4l2 v4l-utils libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview librist4 librist-dev \
 libgl1-mesa-dev libgles2-mesa-dev libglx-mesa0 mesa-common-dev mesa-vulkan-drivers \
