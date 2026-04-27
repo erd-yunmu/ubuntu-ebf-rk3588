@@ -153,6 +153,10 @@ echo lubancat > /etc/hostname
 # set localtime
 ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
+if [[ ${MAINLINE} != "Y" ]]; then
+    add-apt-repository -y ppa:xtradeb/apps
+fi
+
 # Download and update installed packages
 apt-get -y update && apt-get -y upgrade && apt-get -y dist-upgrade
 
@@ -309,7 +313,7 @@ gstreamer1.0-tools chromium-browser mesa-utils libcanberra-pulse ir-keytable dvb
 libdvbv5-0 libdvbv5-dev libdvbv5-doc libv4l-0 libv4l2rds0 libv4lconvert0 libv4l-dev \
 qv4l2 v4l-utils libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview librist4 librist-dev \
 libgl1-mesa-dev libgles2-mesa-dev libglx-mesa0 mesa-common-dev mesa-vulkan-drivers \
-rist-tools gnome-software language-pack-zh-han*
+rist-tools chromium gnome-software language-pack-zh-han*
 
 export LANGUAGE="zh_CN"
 export LANG="zh_CN.UTF-8"
