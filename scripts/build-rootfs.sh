@@ -153,13 +153,6 @@ echo lubancat > /etc/hostname
 # set localtime
 ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
-# Add mesa and rockchip multimedia ppa
-if [[ ${MAINLINE} != "Y" ]]; then
-    apt-get -y update && apt-get -y install software-properties-common
-    add-apt-repository -y ppa:liujianfeng1994/rockchip-multimedia
-    add-apt-repository -y ppa:kisak/kisak-mesa
-fi
-
 # Download and update installed packages
 apt-get -y update && apt-get -y upgrade && apt-get -y dist-upgrade
 
@@ -168,7 +161,7 @@ apt-get -y install dmidecode mtd-tools i2c-tools u-boot-tools linux-firmware \
 bash-completion man-db manpages nano gnupg initramfs-tools python3-dev tree \
 ubuntu-drivers-common ubuntu-server dosfstools mtools parted ntfs-3g zip atop \
 p7zip-full htop iotop pciutils lshw lsof landscape-common exfat-fuse hwinfo \
-net-tools wireless-tools openssh-client openssh-server wpasupplicant ifupdown \
+net-tools openssh-client openssh-server wpasupplicant ifupdown \
 pigz wget curl lm-sensors bluez gdisk usb-modeswitch usb-modeswitch-data make \
 gcc libc6-dev bison libssl-dev flex fake-hwclock rfkill wireless-regdb mmc-utils \
 network-manager python3-opencv python3-pip python3-numpy python3-venv pulseaudio \
@@ -315,10 +308,10 @@ trap 'echo Error: in $0 on line $LINENO' ERR
 # Desktop packages
 apt-get -y install ubuntu-desktop dbus-x11 xterm pulseaudio pavucontrol qtwayland5 \
 gstreamer1.0-plugins-bad gstreamer1.0-plugins-base gstreamer1.0-plugins-good mpv \
-gstreamer1.0-tools gstreamer1.0-rockchip1 chromium-browser mesa-utils libcanberra-pulse \
-librist4 librist-dev rist-tools dvb-tools ir-keytable rockchip-multimedia-config \
+gstreamer1.0-tools chromium-browser mesa-utils libcanberra-pulse \
+librist4 librist-dev rist-tools dvb-tools ir-keytable \
 libdvbv5-0 libdvbv5-dev libdvbv5-doc libv4l-0 libv4l2rds0 libv4lconvert0 libv4l-dev \
-libv4l-rkmpp qv4l2 v4l-utils libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview \
+qv4l2 v4l-utils libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview \
 libgl1-mesa-dev libgles2-mesa-dev libglx-mesa0 mesa-common-dev mesa-vulkan-drivers \
 gnome-software language-pack-zh-han*
 
