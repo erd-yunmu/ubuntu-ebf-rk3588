@@ -157,7 +157,6 @@ ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 if [[ ${MAINLINE} != "Y" ]]; then
     apt-get -y update && apt-get -y install software-properties-common
     add-apt-repository -y ppa:liujianfeng1994/rockchip-multimedia
-    add-apt-repository -y ppa:kisak/kisak-mesa
 fi
 
 # Download and update installed packages
