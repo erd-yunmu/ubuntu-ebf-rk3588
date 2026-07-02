@@ -12,24 +12,24 @@
 
 / {
 /* Link path:
- * sensor->csi2_dcphy1->mipi1_csi2->rkcif_mipi_lvds1->rkcif_mipi_lvds1_sditf->rkisp0_vir1
+ * sensor->csi2_dcphy0->mipi0_csi2->rkcif_mipi_lvds->rkcif_mipi_lvds_sditf->rkisp0_vir0
  */
 	fragment@0 {
-		target = <&i2c5>;
+		target = <&i2c2>;
 		__overlay__ {
 			status = "okay";
 		};
 	};
 
 	fragment@1 {
-		target = <&dcphy1_imx415>;
+		target = <&dcphy0_ov8858>;
 		__overlay__ {
 			status = "okay";
 		};
 	};
 
 	fragment@2 {
-		target = <&csi2_dcphy1>;
+		target = <&csi2_dcphy0>;
 
 		__overlay__ {
 			status = "okay";
@@ -37,7 +37,7 @@
 	};
 
 	fragment@3 {
-		target = <&mipi1_csi2>;
+		target = <&mipi0_csi2>;
 
 		__overlay__ {
 			status = "okay";
@@ -45,7 +45,7 @@
 	};
 
 	fragment@4 {
-		target = <&mipi_dcphy1>;
+		target = <&mipi_dcphy0>;
 
 		__overlay__ {
 			status = "okay";
@@ -61,7 +61,7 @@
 	};
 
 	fragment@6 {
-		target = <&rkcif_mipi_lvds1>;
+		target = <&rkcif_mipi_lvds>;
 
 		__overlay__ {
 			status = "okay";
@@ -69,7 +69,7 @@
 	};
 
 	fragment@7 {
-		target = <&rkcif_mipi_lvds1_sditf>;
+		target = <&rkcif_mipi_lvds_sditf>;
 
 		__overlay__ {
 			status = "okay";
@@ -101,11 +101,10 @@
 	};
 
 	fragment@11 {
-		target = <&rkisp0_vir1>;
+		target = <&rkisp0_vir0>;
 
 		__overlay__ {
 			status = "okay";
 		};
 	};
 };
-
