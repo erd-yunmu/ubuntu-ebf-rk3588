@@ -3551,8 +3551,6 @@ static ssize_t dw_dp_aux_transfer(struct drm_dp_aux *aux,
 		 * native AUX functionality for link training.
 		 */
 		if (retry == 0) {
-			dev_warn_ratelimited(dp->dev, "AUX timeout, resetting (cmd=0x%x addr=0x%x)\n",
-					     msg->request, msg->address);
 			regmap_update_bits(dp->regmap, DPTX_SOFT_RESET_CTRL,
 					   AUX_RESET, AUX_RESET);
 			usleep_range(10, 20);
