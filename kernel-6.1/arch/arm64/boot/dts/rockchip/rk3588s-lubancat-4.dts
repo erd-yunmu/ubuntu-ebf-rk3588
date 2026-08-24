@@ -22,9 +22,9 @@
 /* MIPI CSI 节点配置 */
 #include "rk3588s-lubancat-4-csi.dtsi"
 /* IMX415 示例, 开启链路节点 */
-// #include "rk3588s-lubancat-4-cam0-imx415.dtsi"
-// #include "rk3588s-lubancat-4-cam1-imx415.dtsi"
-// #include "rk3588s-lubancat-4-cam2-imx415.dtsi"
+// #include "rk3588s-lubancat-4-cam0.dtsi"
+// #include "rk3588s-lubancat-4-cam1.dtsi"
+// #include "rk3588s-lubancat-4-cam2.dtsi"
 
 /* 显示输出配置，
  * 同一个vp同时只能开启一个配置
@@ -33,25 +33,25 @@
  */
 /***** vp0 *****/
 /* hdmi0 display */
-// #include "rk3588s-lubancat-4-hdmi0.dtsi"
+// #include "rk3588s-lubancat-4-hdmi0-vp0.dtsi"
 
 /***** vp1 *****/
 /* dp0 display */
-// #include "rk3588s-lubancat-4-dp0.dtsi"
+// #include "rk3588s-lubancat-4-dp0-vp1.dtsi"
 
 /***** vp2 *****/
-// #include "rk3588s-lubancat-4-dsi0-1080x1920-5.5inch-ebf410125.dtsi"
-// #include "rk3588s-lubancat-4-dsi0-1024x600-7inch-ebf410173.dtsi"
-// #include "rk3588s-lubancat-4-dsi0-800x1280-10.1inch-ebf410177.dtsi"
+// #include "rk3588s-lubancat-4-dsi0-vp2-1080x1920-5.5inch-ebf410125.dtsi"
+// #include "rk3588s-lubancat-4-dsi0-vp2-1024x600-7inch-ebf410173.dtsi"
+// #include "rk3588s-lubancat-4-dsi0-vp2-800x1280-10.1inch-ebf410177.dtsi"
 
 /***** vp3 *****/
-// #include "rk3588s-lubancat-4-dsi1-1080x1920-5.5inch-ebf410125.dtsi"
-// #include "rk3588s-lubancat-4-dsi1-1024x600-7inch-ebf410173.dtsi"
-// #include "rk3588s-lubancat-4-dsi1-800x1280-10.1inch-ebf410177.dtsi"
+// #include "rk3588s-lubancat-4-dsi1-vp3-1080x1920-5.5inch-ebf410125.dtsi"
+// #include "rk3588s-lubancat-4-dsi1-vp3-1024x600-7inch-ebf410173.dtsi"
+// #include "rk3588s-lubancat-4-dsi1-vp3-800x1280-10.1inch-ebf410177.dtsi"
 
 / {
 	model = "Embedfire LubanCat-4";
-	compatible = "rockchip,rk3588s-lubancat-4", "rockchip,rk3588";
+	compatible = "embedfire,rk3588s-lubancat-4", "rockchip,rk3588";
 
 	leds: leds {
 		status = "okay";
@@ -220,26 +220,6 @@
 		regulator-always-on;
 	};
 
-	dp0_sound: dp0-sound {
-		status = "okay";
-		compatible = "rockchip,hdmi";
-		rockchip,card-name = "rockchip-dp0";
-		rockchip,mclk-fs = <512>;
-		rockchip,cpu = <&spdif_tx2>;
-		rockchip,codec = <&dp0 1>;
-		rockchip,jack-det;
-	};
-
-	hdmi0_sound: hdmi0-sound {
-		status = "okay";
-		compatible = "rockchip,hdmi";
-		rockchip,mclk-fs = <128>;
-		rockchip,card-name = "rockchip-hdmi0";
-		rockchip,cpu = <&i2s5_8ch>;
-		rockchip,codec = <&hdmi0>;
-		rockchip,jack-det;
-	};
-
 	es8388_sound: es8388-sound {
 		status = "okay";
 		compatible = "rockchip,multicodecs-card";
@@ -298,6 +278,7 @@
 	};
 
 	backlight_dsi0: backlight-dsi0 {
+		status = "okay";
 		compatible = "pwm-backlight";
 		pwms = <&pwm2 0 25000 0>;
 		brightness-levels = <
@@ -338,6 +319,7 @@
 	};
 
 	backlight_dsi1: backlight-dsi1 {
+		status = "okay";
 		compatible = "pwm-backlight";
 		pwms = <&pwm6 0 25000 0>;
 		brightness-levels = <
@@ -377,6 +359,20 @@
 		default-brightness-level = <200>;
 	};
 
+	adc_rec_keys: adc-rec-keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 1>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+		
+		adc-rec-key {
+			label = "adc_rec_key";
+			linux,code = <250>;
+			press-threshold-microvolt = <1750>;
+		};
+	};
+
 	test-power {
 		status = "okay";
 	};
@@ -387,14 +383,6 @@
 };
 
 &av1d_mmu {
-	status = "okay";
-};
-
-&spdif_tx2 {
-	status = "okay";
-};
-
-&i2s5_8ch {
 	status = "okay";
 };
 
@@ -591,6 +579,18 @@
 	};
 };
 
+&i2c5 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c5m3_xfer>;
+};
+
+&i2c6 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c6m3_xfer>;
+};
+
 &spi2 {
 	status = "okay";
 	assigned-clocks = <&cru CLK_SPI2>;
@@ -736,7 +736,6 @@
 		regulators {
 			vdd_gpu_s0: vdd_gpu_mem_s0: DCDC_REG1 {
 				regulator-boot-on;
-				regulator-always-on;
 				regulator-min-microvolt = <550000>;
 				regulator-max-microvolt = <950000>;
 				regulator-ramp-delay = <12500>;
@@ -763,11 +762,11 @@
 				regulator-always-on;
 				regulator-boot-on;
 				regulator-min-microvolt = <675000>;
-				regulator-max-microvolt = <750000>;
+				regulator-max-microvolt = <800000>;
 				regulator-ramp-delay = <12500>;
 				regulator-name = "vdd_log_s0";
 				regulator-state-mem {
-					regulator-on-in-suspend;
+					regulator-off-in-suspend;
 					regulator-suspend-microvolt = <750000>;
 				};
 			};
@@ -990,7 +989,7 @@
 
 &i2s0_8ch {
 	status = "okay";
-	rockchip,clk-trcm = <1>;
+	rockchip,trcm-sync-tx-only;
 	pinctrl-0 = <&i2s0_lrck
 			 &i2s0_sclk
 			 &i2s0_sdi0
@@ -1266,6 +1265,10 @@
 	status = "okay";
 };
 
+&rkvtunnel {
+	status = "okay";
+};
+
 /* this is a watchdog */
 &wdt {
 	status = "okay";
@@ -1291,14 +1294,21 @@
 	tx_delay = <0x1b>;
 	/* rx_delay = <0x00>; */
 
+	jl2xxx,tx-delay = <0x08>;
+	/* jl2xxx,rx-delay = <0x01>; */
+
+	rtl8211f,tx-delay = <0x1b>;
+	/* rtl8211f,rx-delay = <0x01>; */
+
 	phy-handle = <&rgmii_phy1>;
 	status = "okay";
 };
 
 &mdio1 {
-	rgmii_phy1: phy@1 {
+	rgmii_phy1: phy@0 {
 		compatible = "ethernet-phy-ieee802.3-c22";
-		reg = <0x1>;
+		reg = <0x0>;
+		realtek,clkout-disable;
 		jl2xxx,led-enable = <(JL2XXX_LED_STATIC_OP_EN | JL1XXX_LED_MODE_EN)>;
 		jl2xxx,led-mode = <(JL2XXX_LED1_LINK10  | \
 				 JL2XXX_LED1_LINK100  | \
@@ -1451,6 +1461,7 @@
 
 &vop {
 	status = "okay";
+	vop-supply = <&vdd_log_s0>;
 	// disable-win-move;
 };
 
@@ -1490,16 +1501,15 @@
 
 &pinctrl {
 	dsi {
-                dsi0_reset: dsi0-reset {
-                        rockchip,pins = <0 RK_PD7 RK_FUNC_GPIO &pcfg_pull_up>;
-                };
+		dsi0_reset: dsi0-reset {
+			rockchip,pins = <1 RK_PA1 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
 
-                tp1_irq: tp1-irq {
-                        rockchip,pins = <3 RK_PC4 RK_FUNC_GPIO &pcfg_pull_up>;
-                };
-        };
+		tp1_irq: tp1-irq {
+			rockchip,pins = <4 RK_PA1 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
 
-	
 	hym8563 {
 		hym8563_int: hym8563-int {
 			rockchip,pins = <0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_up>;

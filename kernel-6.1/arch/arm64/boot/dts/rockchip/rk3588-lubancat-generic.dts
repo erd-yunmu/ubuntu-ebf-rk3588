@@ -133,10 +133,6 @@
 	};
 };
 
-&dmc_opp_table {
-	/delete-node/ opp-2750000000;
-};
-
 &av1d {
 	status = "okay";
 };
@@ -416,11 +412,11 @@
 				regulator-always-on;
 				regulator-boot-on;
 				regulator-min-microvolt = <675000>;
-				regulator-max-microvolt = <750000>;
+				regulator-max-microvolt = <800000>;
 				regulator-ramp-delay = <12500>;
 				regulator-name = "vdd_log_s0";
 				regulator-state-mem {
-					regulator-on-in-suspend;
+					regulator-off-in-suspend;
 					regulator-suspend-microvolt = <750000>;
 				};
 			};
@@ -643,7 +639,7 @@
 
 &i2s0_8ch {
 	status = "okay";
-	rockchip,clk-trcm = <1>;
+	rockchip,trcm-sync-tx-only;
 	pinctrl-0 = <&i2s0_lrck
 			 &i2s0_sclk
 			 &i2s0_sdi0
@@ -844,6 +840,7 @@
 
 &vop {
 	status = "okay";
+	vop-supply = <&vdd_log_s0>;
 };
 
 &vop_mmu {

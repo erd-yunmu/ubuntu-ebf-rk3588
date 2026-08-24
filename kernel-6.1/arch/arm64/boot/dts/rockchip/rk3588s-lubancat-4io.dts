@@ -15,6 +15,7 @@
 #include <dt-bindings/display/drm_mipi_dsi.h>
 #include <dt-bindings/display/rockchip_vop.h>
 #include <dt-bindings/sensor-dev.h>
+#include <dt-bindings/phy/jlsemi-dt-phy.h>
 #include "rk3588s.dtsi"
 #include "rk3588-linux.dtsi"
 
@@ -33,27 +34,27 @@
  */
 /***** vp0 *****/
 /* hdmi0 display */
-// #include "rk3588s-lubancat-4io-hdmi0.dtsi"
+// #include "rk3588s-lubancat-4io-hdmi0-vp0.dtsi"
 
 /***** vp1 *****/
 /* dp0 display */
-// #include "rk3588s-lubancat-4io-dp0.dtsi"
+// #include "rk3588s-lubancat-4io-dp0-vp1.dtsi"
 
 /***** vp2 *****/
-// #include "rk3588s-lubancat-4io-dsi0-1080x1920-5.5inch-ebf410125.dtsi"
-// #include "rk3588s-lubancat-4io-dsi0-1024x600-7inch-ebf410173.dtsi"
-// #include "rk3588s-lubancat-4io-dsi0-800x1280-10.1inch-ebf410177.dtsi"
-// #include "rk3588s-lubancat-4io-dsi0-800x1280-10.1inch-s8001280b1060b.dtsi"
+// #include "rk3588s-lubancat-4io-dsi0-vp2-1080x1920-5.5inch-ebf410125.dtsi"
+// #include "rk3588s-lubancat-4io-dsi0-vp2-1024x600-7inch-ebf410173.dtsi"
+// #include "rk3588s-lubancat-4io-dsi0-vp2-800x1280-10.1inch-ebf410177.dtsi"
+// #include "rk3588s-lubancat-4io-dsi0-vp2-800x1280-10.1inch-s8001280b1060b.dtsi"
 
 /***** vp3 *****/
-// #include "rk3588s-lubancat-4io-dsi1-1080x1920-5.5inch-ebf410125.dtsi"
-// #include "rk3588s-lubancat-4io-dsi1-1024x600-7inch-ebf410173.dtsi"
-// #include "rk3588s-lubancat-4io-dsi1-800x1280-10.1inch-ebf410177.dtsi"
-// #include "rk3588s-lubancat-4io-dsi1-800x1280-10.1inch-s8001280b1060b.dtsi"
+// #include "rk3588s-lubancat-4io-dsi1-vp3-1080x1920-5.5inch-ebf410125.dtsi"
+// #include "rk3588s-lubancat-4io-dsi1-vp3-1024x600-7inch-ebf410173.dtsi"
+// #include "rk3588s-lubancat-4io-dsi1-vp3-800x1280-10.1inch-ebf410177.dtsi"
+// #include "rk3588s-lubancat-4io-dsi1-vp3-800x1280-10.1inch-s8001280b1060b.dtsi"
 
 / {
 	model = "Embedfire LubanCat-4IO";
-	compatible = "rockchip,rk3588s-lubancat-4io", "rockchip,rk3588";
+	compatible = "embedfire,rk3588s-lubancat-4io", "rockchip,rk3588";
 
 	leds: leds {
 		status = "okay";
@@ -75,6 +76,20 @@
 			gpios = <&gpio1 RK_PD2 GPIO_ACTIVE_HIGH>;
 			pinctrl-names = "default";
 			pinctrl-0 = <&user_led_pin>;
+		};
+	};
+
+	adc_rec_keys: adc-rec-keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 1>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+		
+		adc-rec-key {
+			label = "adc_rec_key";
+			linux,code = <250>;
+			press-threshold-microvolt = <1750>;
 		};
 	};
 
@@ -237,9 +252,9 @@
 		pinctrl-0 = <&usb20_host_pwr_en>;
 	};
 
-	minipcie_3v3: minipcie-3v3{
+	vcc3v3_pcie20: vcc3v3-pcie20 {
 		compatible = "regulator-fixed";
-		regulator-name = "minipcie_3v3";
+		regulator-name = "vcc3v3_pcie20";
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
 		enable-active-high;
@@ -312,26 +327,6 @@
 		pinctrl-0 = <&mipi_dsi1_power_en>;
 	};
 
-	dp0_sound: dp0-sound {
-		status = "okay";
-		compatible = "rockchip,hdmi";
-		rockchip,card-name = "rockchip-dp0";
-		rockchip,mclk-fs = <512>;
-		rockchip,cpu = <&spdif_tx2>;
-		rockchip,codec = <&dp0 1>;
-		rockchip,jack-det;
-	};
-
-	hdmi0_sound: hdmi0-sound {
-		status = "okay";
-		compatible = "rockchip,hdmi";
-		rockchip,mclk-fs = <128>;
-		rockchip,card-name = "rockchip-hdmi0";
-		rockchip,cpu = <&i2s5_8ch>;
-		rockchip,codec = <&hdmi0>;
-		rockchip,jack-det;
-	};
-
 	es8388_sound: es8388-sound {
 		status = "okay";
 		compatible = "rockchip,multicodecs-card";
@@ -393,6 +388,7 @@
 	};
 
 	backlight_dsi0: backlight-dsi0 {
+		status = "okay";
 		compatible = "pwm-backlight";
 		pwms = <&pwm0 0 25000 0>;
 		brightness-levels = <
@@ -433,6 +429,7 @@
 	};
 
 	backlight_dsi1: backlight-dsi1 {
+		status = "okay";
 		compatible = "pwm-backlight";
 		pwms = <&pwm1 0 25000 0>;
 		brightness-levels = <
@@ -482,14 +479,6 @@
 };
 
 &av1d_mmu {
-	status = "okay";
-};
-
-&spdif_tx2 {
-	status = "okay";
-};
-
-&i2s5_8ch {
 	status = "okay";
 };
 
@@ -686,6 +675,18 @@
 	};
 };
 
+&i2c2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c2m4_xfer>;
+	status = "okay";
+};
+
+&i2c5 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c5m3_xfer>;
+	status = "okay";
+};
+
 &spi2 {
 	status = "okay";
 	assigned-clocks = <&cru CLK_SPI2>;
@@ -856,12 +857,13 @@
 			vdd_log_s0: DCDC_REG3 {
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-min-microvolt = <750000>;
-				regulator-max-microvolt = <750000>;
+				regulator-min-microvolt = <675000>;
+				regulator-max-microvolt = <800000>;
 				regulator-ramp-delay = <12500>;
 				regulator-name = "vdd_log_s0";
 				regulator-state-mem {
-					regulator-on-in-suspend;
+					regulator-off-in-suspend;
+					regulator-suspend-microvolt = <750000>;
 				};
 			};
 
@@ -1093,7 +1095,7 @@
 
 &i2s0_8ch {
 	status = "okay";
-	rockchip,clk-trcm = <1>;
+	rockchip,trcm-sync-tx-only;
 	pinctrl-0 = <&i2s0_lrck
 			 &i2s0_sclk
 			 &i2s0_sdi0
@@ -1384,6 +1386,10 @@
 	status = "okay";
 };
 
+&rkvtunnel {
+	status = "okay";
+};
+
 /* this is a watchdog */
 &wdt {
 	status = "okay";
@@ -1409,14 +1415,30 @@
 	tx_delay = <0x18>;
 	/* rx_delay = <0x4f>; */
 
+	jl2xxx,tx-delay = <0x08>;
+	/* jl2xxx,rx-delay = <0x01>; */
+
+	rtl8211f,tx-delay = <0x18>;
+	/* rtl8211f,rx-delay = <0x01>; */
+
 	phy-handle = <&rgmii_phy1>;
 	status = "okay";
 };
 
 &mdio1 {
-	rgmii_phy1: phy@1 {
+	rgmii_phy1: phy@0 {
 		compatible = "ethernet-phy-ieee802.3-c22";
-		reg = <0x01>;
+		reg = <0x0>;
+		realtek,clkout-disable;
+		jl2xxx,led-enable = <(JL2XXX_LED_STATIC_OP_EN | JL1XXX_LED_MODE_EN)>;
+		jl2xxx,led-mode = <(JL2XXX_LED1_LINK10  | \
+				 JL2XXX_LED1_LINK100  | \
+				 JL2XXX_LED1_LINK1000 | \
+				 JL2XXX_LED2_LINK10   | \
+				 JL2XXX_LED2_LINK100  | \
+				 JL2XXX_LED2_LINK1000 | \
+				 JL2XXX_LED2_ACTIVITY )>; //JL PHY
+		realtek,led-data = <0x6d60>;  //8211F phy
 	};
 };
 
@@ -1428,7 +1450,7 @@
 &pcie2x1l2 {
 	reset-gpios = <&gpio3 RK_PD1 GPIO_ACTIVE_HIGH>;
 	disable-gpios = <&gpio3 RK_PA6 GPIO_ACTIVE_HIGH>;
-	vpcie3v3-supply = <&minipcie_3v3>;
+	vpcie3v3-supply = <&vcc3v3_pcie20>;
 	status = "okay";
 };
 
@@ -1560,6 +1582,7 @@
 
 &vop {
 	status = "okay";
+	vop-supply = <&vdd_log_s0>;
 	// disable-win-move;
 };
 

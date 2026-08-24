@@ -20,29 +20,36 @@
 #include "rk3588-linux.dtsi"
 
 //vp0
+// #include "rk3588-lubancat-5-hdmi0-vp0.dtsi"
 // #include "rk3588-lubancat-5-hdmi1-vp0.dtsi"
-// #include "rk3588-lubancat-5-hdmi0.dtsi"
+
+//vp1
+// #include "rk3588-lubancat-5-dp0-vp1.dtsi"
 
 //vp2 二选一
-// #include "rk3588-lubancat-5-dp1-edp_port.dtsi"
-// #include "rk3588-lubancat-5-hdmi1.dtsi"
-// #include "rk3588-lubancat-5-dsi0-ebf410125_1080p.dtsi"
+// #include "rk3588-lubancat-5-dp1-vp2-edp-port.dtsi"
+// #include "rk3588-lubancat-5-hdmi1-vp2.dtsi"
+// #include "rk3588-lubancat-5-dsi0-vp2-1080x1920-5.5inch-ebf410125.dtsi"
 
 //vp3
-// #include "rk3588-lubancat-5-dsi1-ebf410125_1080p.dtsi"
+// #include "rk3588-lubancat-5-dsi1-vp3-1080x1920-5.5inch-ebf410125.dtsi"
 
+/* HDMI-RX */
+// #include "rk3588-lubancat-5io-hdmirx.dtsi"
+
+/* Camera */
 #include "rk3588-lubancat-5-csi.dtsi"
 
-// #include "rk3588-lubancat-5-cam0-imx415.dtsi"
-// #include "rk3588-lubancat-5-cam1-imx415.dtsi"
-// #include "rk3588-lubancat-5-cam2-imx415.dtsi"
-// #include "rk3588-lubancat-5-cam3-imx415.dtsi"
-// #include "rk3588-lubancat-5-cam4-imx415.dtsi"
-// #include "rk3588-lubancat-5-cam5-imx415.dtsi"
+// #include "rk3588-lubancat-5-cam0.dtsi"
+// #include "rk3588-lubancat-5-cam1.dtsi"
+// #include "rk3588-lubancat-5-cam2.dtsi"
+// #include "rk3588-lubancat-5-cam3.dtsi"
+// #include "rk3588-lubancat-5-cam4.dtsi"
+// #include "rk3588-lubancat-5-cam5.dtsi"
 
 / {
 	model = "Embedfire LubanCat-5";
-	compatible = "rockchip,rk3588-lubancat-5", "rockchip,rk3588";
+	compatible = "embedfire,rk3588-lubancat-5", "rockchip,rk3588";
 
 	/* If hdmirx node is disabled, delete the reserved-memory node here. */
 	reserved-memory {
@@ -58,16 +65,16 @@
 		};
 	};
 
-	adc_keys: adc-keys {
+	adc_rec_keys: adc-rec-keys {
 		compatible = "adc-keys";
 		io-channels = <&saradc 1>;
 		io-channel-names = "buttons";
 		keyup-threshold-microvolt = <1800000>;
 		poll-interval = <100>;
 
-		up {
-			label = "up";
-			linux,code = <KEY_UP>;
+		adc-rec-key {
+			label = "adc_rec_key";
+			linux,code = <250>;
 			press-threshold-microvolt = <1750>;
 		};
 	};
@@ -212,28 +219,6 @@
 		enable-active-high;
 		regulator-boot-on;
 		regulator-always-on;
-	};
-
-	hdmiin_sound: hdmiin-sound {
-		compatible = "rockchip,hdmi";
-		rockchip,mclk-fs = <128>;
-		rockchip,format = "i2s";
-		rockchip,bitclock-master = <&hdmirx_ctrler>;
-		rockchip,frame-master = <&hdmirx_ctrler>;
-		rockchip,card-name = "rockchip-hdmiin";
-		rockchip,cpu = <&i2s7_8ch>;
-		rockchip,codec = <&hdmirx_ctrler 0>;
-		rockchip,jack-det;
-	};
-
-	dp0_sound: dp0-sound {
-		status = "okay";
-		compatible = "rockchip,hdmi";
-		rockchip,card-name = "rockchip-dp0";
-		rockchip,mclk-fs = <512>;
-		rockchip,cpu = <&spdif_tx2>;
-		rockchip,codec = <&dp0 1>;
-		rockchip,jack-det;
 	};
 
 	es8388_sound: es8388-sound {
@@ -400,18 +385,6 @@
 };
 
 &av1d_mmu {
-	status = "okay";
-};
-
-&spdif_tx2 {
-    status = "okay";
-};
-
-&i2s5_8ch {
-	status = "okay";
-};
-
-&i2s6_8ch {
 	status = "okay";
 };
 
@@ -793,7 +766,6 @@
 		regulators {
 			vdd_gpu_s0: vdd_gpu_mem_s0: DCDC_REG1 {
 				regulator-boot-on;
-				regulator-always-on;
 				regulator-min-microvolt = <550000>;
 				regulator-max-microvolt = <950000>;
 				regulator-ramp-delay = <12500>;
@@ -820,11 +792,11 @@
 				regulator-always-on;
 				regulator-boot-on;
 				regulator-min-microvolt = <675000>;
-				regulator-max-microvolt = <750000>;
+				regulator-max-microvolt = <800000>;
 				regulator-ramp-delay = <12500>;
 				regulator-name = "vdd_log_s0";
 				regulator-state-mem {
-					regulator-on-in-suspend;
+					regulator-off-in-suspend;
 					regulator-suspend-microvolt = <750000>;
 				};
 			};
@@ -1057,12 +1029,12 @@
 };
 
 &i2s0_8ch {
-    status = "okay";
-    rockchip,clk-trcm = <1>;
-    pinctrl-0 = <&i2s0_lrck
-             &i2s0_sclk
-             &i2s0_sdi0
-             &i2s0_sdo0>;
+	status = "okay";
+	rockchip,trcm-sync-tx-only;
+	pinctrl-0 = <&i2s0_lrck
+			 &i2s0_sclk
+			 &i2s0_sdi0
+			 &i2s0_sdo0>;
 };
 
 &saradc {
@@ -1175,26 +1147,26 @@
 	ir_key_lubancat{
 	rockchip,usercode = <0xff00>;
 	rockchip,key_table =
-        <0xba   KEY_POWER>,   //电源按键
-        <0xb8   KEY_MENU>,     //菜单按键
-        <0xbc   KEY_BACK>,      //返回按键
-        <0xbb   KEY_HOME>,      //home键按键
-        <0xea   KEY_PLAY>,      //播放按键
-        <0xbf   KEY_VOLUMEUP>,  //音量加按键
-        <0xe6   KEY_VOLUMEDOWN>,   //音量键按键
-        <0xf6   KEY_FASTFORWARD>,  //快进按键
-        <0xf8   KEY_FASTREVERSE>,  //快退按键
-        <0xf2   KEY_BACKSPACE>,    //BaskSpace按键
-        <0xf3   KEY_1>,            //按键1
-        <0xe7   KEY_2>,
-        <0xa1   KEY_3>,
-        <0xf7   KEY_4>,
-        <0xe3   KEY_5>,
-        <0xa5   KEY_6>,
-        <0xbd   KEY_7>,
-        <0xad   KEY_8>,
-        <0xb5   KEY_9>,
-        <0xe9   KEY_0>;            //按键0
+		<0xba   KEY_POWER>,   //电源按键
+		<0xb8   KEY_MENU>,     //菜单按键
+		<0xbc   KEY_BACK>,      //返回按键
+		<0xbb   KEY_HOME>,      //home键按键
+		<0xea   KEY_PLAY>,      //播放按键
+		<0xbf   KEY_VOLUMEUP>,  //音量加按键
+		<0xe6   KEY_VOLUMEDOWN>,   //音量键按键
+		<0xf6   KEY_FASTFORWARD>,  //快进按键
+		<0xf8   KEY_FASTREVERSE>,  //快退按键
+		<0xf2   KEY_BACKSPACE>,    //BaskSpace按键
+		<0xf3   KEY_1>,            //按键1
+		<0xe7   KEY_2>,
+		<0xa1   KEY_3>,
+		<0xf7   KEY_4>,
+		<0xe3   KEY_5>,
+		<0xa5   KEY_6>,
+		<0xbd   KEY_7>,
+		<0xad   KEY_8>,
+		<0xb5   KEY_9>,
+		<0xe9   KEY_0>;            //按键0
 	};
 };
 
@@ -1268,6 +1240,10 @@
 	status = "okay";
 };
 
+&rkvtunnel {
+	status = "okay";
+};
+
 /* this is a watchdog */
 &wdt {
 	status = "okay";
@@ -1293,6 +1269,12 @@
 	tx_delay = <0x20>;
 	/* rx_delay = <0x4f>; */
 
+	jl2xxx,tx-delay = <0x08>;
+	/* jl2xxx,rx-delay = <0x01>; */
+
+	rtl8211f,tx-delay = <0x20>;
+	/* rtl8211f,rx-delay = <0x4f>; */
+
 	phy-handle = <&rgmii_phy0>;
 	status = "okay";
 };
@@ -1317,6 +1299,12 @@
 	tx_delay = <0x20>;
 	/* rx_delay = <0x4f>; */
 
+	jl2xxx,tx-delay = <0x08>;
+	/* jl2xxx,rx-delay = <0x01>; */
+
+	rtl8211f,tx-delay = <0x20>;
+	/* rtl8211f,rx-delay = <0x4f>; */
+
 	phy-handle = <&rgmii_phy1>;
 	status = "okay";
 };
@@ -1325,6 +1313,7 @@
 	rgmii_phy0: phy@0 {
 		compatible = "ethernet-phy-ieee802.3-c22";
 		reg = <0x00>;
+		realtek,clkout-disable;
 		jl2xxx,led-enable = <(JL2XXX_LED_STATIC_OP_EN | JL1XXX_LED_MODE_EN)>;
 		jl2xxx,led-mode = <(JL2XXX_LED1_LINK10  | \
 				 JL2XXX_LED1_LINK100  | \
@@ -1340,7 +1329,8 @@
 &mdio1 {
 	rgmii_phy1: phy@0 {
 		compatible = "ethernet-phy-ieee802.3-c22";
-		reg = <0x00>;
+		reg = <0x0>;
+		realtek,clkout-disable;
 		jl2xxx,led-enable = <(JL2XXX_LED_STATIC_OP_EN | JL1XXX_LED_MODE_EN)>;
 		jl2xxx,led-mode = <(JL2XXX_LED1_LINK10  | \
 				 JL2XXX_LED1_LINK100  | \
@@ -1544,53 +1534,13 @@
 	status = "okay";
 };
 
-/* dp0 display */
-&dp0 {
-	status = "okay";
-};
-
-&route_dp0 {
-	status = "okay";
-	connect = <&vp1_out_dp0>;
-};
-
-&dp0_in_vp0 {
-	status = "disabled";
-};
-
-&dp0_in_vp1 {
-	status = "okay";
-};
-
-&dp0_in_vp2 {
-	status = "disabled";
-};
-
 &vop {
 	status = "okay";
+	vop-supply = <&vdd_log_s0>;
 	// disable-win-move;
 };
 
 &vop_mmu {
-	status = "okay";
-};
-
-&hdmirx_ctrler {
-	status = "okay";
-	#sound-dai-cells = <1>;
-	/* Effective level used to trigger HPD: 0-low, 1-high */
-	hpd-trigger-level = <1>;
-	hdmirx-det-gpios = <&gpio1 RK_PD5 GPIO_ACTIVE_LOW>;
-	pinctrl-0 = <&hdmim0_rx_cec &hdmim1_rx_hpdin &hdmim1_rx_scl &hdmim1_rx_sda &hdmirx_det>;
-	pinctrl-names = "default";
-};
-
-/* HDMI IN Audio */
-&hdmiin_sound {
-	status = "okay";
-};
-
-&i2s7_8ch {
 	status = "okay";
 };
 
@@ -1629,11 +1579,11 @@
 };
 
 &pinctrl {
-    hym8563 {
-        hym8563_int: hym8563-int {
-            rockchip,pins = <0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_up>;
-        };
-    };
+	hym8563 {
+		hym8563_int: hym8563-int {
+			rockchip,pins = <0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
 
 	headphone {
 		hp_det: hp-det {
@@ -1677,6 +1627,7 @@
 			rockchip,pins = <3 RK_PC1 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
+
 	dsi {
 		dsi0_reset: dsi0-reset {
 			rockchip,pins = <1 RK_PA4 RK_FUNC_GPIO &pcfg_pull_up>;

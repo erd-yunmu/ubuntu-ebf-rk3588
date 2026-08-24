@@ -67,3 +67,4 @@ overlays=rk3588s-lubancat-4io-hdmi0-vp0-overlay rk3588s-lubancat-dp0-vp1-overlay
 
 # 开启sata0, mini pcie接口可接msata硬盘
 # rk3588s-lubancat-sata0-overlay
+
