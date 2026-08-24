@@ -92,6 +92,7 @@ struct csi2_dphy {
 	int lane_mode;
 	const struct dphy_drv_data *drv_data;
 	struct rkmodule_csi_dphy_param dphy_param;
+	u32 clk_phase;
 };
 
 struct dphy_hw_drv_data {
@@ -128,6 +129,7 @@ struct csi2_dphy_hw {
 	int dphy_dev_num;
 	enum csi2_dphy_lane_mode lane_mode;
 	struct resource *res;
+	int hw_idx;
 
 	int (*stream_on)(struct csi2_dphy *dphy, struct v4l2_subdev *sd);
 	int (*stream_off)(struct csi2_dphy *dphy, struct v4l2_subdev *sd);

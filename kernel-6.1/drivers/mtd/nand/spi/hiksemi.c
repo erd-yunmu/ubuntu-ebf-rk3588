@@ -13,7 +13,6 @@
 #define SPINAND_MFR_HIKSEMI		0x3C
 
 static SPINAND_OP_VARIANTS(read_cache_variants,
-		SPINAND_PAGE_READ_FROM_CACHE_QUADIO_OP(0, 2, NULL, 0),
 		SPINAND_PAGE_READ_FROM_CACHE_X4_OP(0, 1, NULL, 0),
 		SPINAND_PAGE_READ_FROM_CACHE_DUALIO_OP(0, 1, NULL, 0),
 		SPINAND_PAGE_READ_FROM_CACHE_X2_OP(0, 1, NULL, 0),
@@ -34,8 +33,8 @@ static int hsesyhdswxg_ooblayout_ecc(struct mtd_info *mtd, int section,
 	if (section)
 		return -ERANGE;
 
-	region->offset = 64;
-	region->length = 64;
+	region->offset = mtd->oobsize / 2;
+	region->length = mtd->oobsize / 2;
 
 	return 0;
 }
@@ -47,7 +46,7 @@ static int hsesyhdswxg_ooblayout_free(struct mtd_info *mtd, int section,
 		return -ERANGE;
 
 	region->offset = 2;
-	region->length = 62;
+	region->length = mtd->oobsize / 2 - 2;
 
 	return 0;
 }
@@ -61,6 +60,24 @@ static const struct spinand_info hiksemi_spinand_table[] = {
 	SPINAND_INFO("HSESYHDSW2G",
 		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_DUMMY, 0xD2),
 		     NAND_MEMORG(1, 2048, 128, 64, 2048, 40, 1, 1, 1),
+		     NAND_ECCREQ(4, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     0,
+		     SPINAND_ECCINFO(&hsesyhdswxg_ooblayout, NULL)),
+	SPINAND_INFO("HSESDFDSW4G",
+		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_DUMMY, 0xD4),
+		     NAND_MEMORG(1, 2048, 128, 64, 4096, 40, 1, 1, 1),
+		     NAND_ECCREQ(4, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     0,
+		     SPINAND_ECCINFO(&hsesyhdswxg_ooblayout, NULL)),
+	SPINAND_INFO("HSESYHDSW1G",
+		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_DUMMY, 0xD1, 0xD1),
+		     NAND_MEMORG(1, 2048, 64, 64, 1024, 20, 1, 1, 1),
 		     NAND_ECCREQ(4, 512),
 		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
 					      &write_cache_variants,

@@ -41,11 +41,12 @@ static struct mipi_dsi_device *serdes_attach_dsi(struct serdes_bridge_split *ser
 		return dsi;
 	}
 
-	dsi->lanes = 4;
-	dsi->format = MIPI_DSI_FMT_RGB888;
-	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_SYNC_PULSE;
-	SERDES_DBG_MFD("%s: %s dsi_mode MIPI_DSI_MODE_VIDEO_SYNC_PULSE 0x%lx\n",
-		       __func__, serdes->chip_data->name, dsi->mode_flags);
+	dsi->lanes = serdes_bridge_split->lanes;
+	dsi->format = serdes_bridge_split->format;
+	dsi->mode_flags = serdes_bridge_split->flags;
+
+	SERDES_DBG_MFD("%s: %s lanes=0x%lx format=0x%lx mode_flags=0x%lx\n",
+		__func__, serdes->chip_data->name, dsi->lanes, dsi->format, dsi->mode_flags);
 
 	ret = mipi_dsi_attach(dsi);
 	if (ret < 0) {
@@ -156,8 +157,6 @@ static void serdes_bridge_split_pre_enable(struct drm_bridge *bridge)
 	if (serdes_bridge_split->panel)
 		ret = drm_panel_prepare(serdes_bridge_split->panel);
 
-	serdes_set_pinctrl_default(serdes);
-
 	SERDES_DBG_MFD("%s: %s ret=%d\n", __func__, dev_name(serdes->dev), ret);
 }
 
@@ -167,11 +166,13 @@ static void serdes_bridge_split_enable(struct drm_bridge *bridge)
 	struct serdes *serdes = serdes_bridge_split->parent;
 	int ret = 0;
 
-	if (serdes_bridge_split->panel)
-		ret = drm_panel_enable(serdes_bridge_split->panel);
-
 	if (serdes->chip_data->bridge_ops->enable)
 		ret = serdes->chip_data->bridge_ops->enable(serdes);
+
+	serdes_set_pinctrl_init(serdes);
+
+	if (serdes_bridge_split->panel)
+		ret = drm_panel_enable(serdes_bridge_split->panel);
 
 	if (!ret) {
 		extcon_set_state_sync(serdes->extcon, EXTCON_JACK_VIDEO_OUT, true);
@@ -238,11 +239,42 @@ static const struct drm_bridge_funcs serdes_bridge_split_funcs = {
 	.atomic_reset = drm_atomic_helper_bridge_reset,
 };
 
+static int serdes_bridge_split_parse_dt(struct serdes_bridge_split *serdes_bridge_split)
+{
+	unsigned int val = 0;
+	struct device *dev = serdes_bridge_split->dev;
+	struct device_node *node = serdes_bridge_split->base_bridge.of_node;
+
+	serdes_bridge_split->sel_mipi = of_property_read_bool(dev->parent->of_node, "sel-mipi");
+
+	if (serdes_bridge_split->sel_mipi) {
+		if (!of_property_read_u32(node, "dsi,lanes", &val))
+			serdes_bridge_split->lanes = val;
+		else
+			serdes_bridge_split->lanes = 4;
+
+		if (!of_property_read_u32(node, "dsi,format", &val))
+			serdes_bridge_split->format = val;
+		else
+			serdes_bridge_split->format = MIPI_DSI_FMT_RGB888;
+
+		if (!of_property_read_u32(node, "dsi,flags", &val))
+			serdes_bridge_split->flags = val;
+		else
+			serdes_bridge_split->flags = MIPI_DSI_MODE_VIDEO |
+						     MIPI_DSI_MODE_VIDEO_SYNC_PULSE;
+	}
+
+	return 0;
+}
+
 static int serdes_bridge_split_probe(struct platform_device *pdev)
 {
 	struct serdes *serdes = dev_get_drvdata(pdev->dev.parent);
+	struct device_node *remote_node;
 	struct device *dev = &pdev->dev;
 	struct serdes_bridge_split *serdes_bridge_split;
+	int ret = 0;
 
 	if (!serdes->dev || !serdes->chip_data)
 		return -1;
@@ -259,21 +291,22 @@ static int serdes_bridge_split_probe(struct platform_device *pdev)
 	if (!serdes_bridge_split->regmap)
 		return dev_err_probe(dev, -ENODEV, "failed to get serdes regmap\n");
 
-	serdes_bridge_split->sel_mipi = of_property_read_bool(dev->parent->of_node, "sel-mipi");
-	SERDES_DBG_MFD("%s: sel_mipi=%d\n", __func__, serdes_bridge_split->sel_mipi);
-
 	serdes_bridge_split->base_bridge.of_node = dev->parent->of_node;
-	serdes_bridge_split->remote_node = of_graph_get_remote_node(dev->parent->of_node, 0, -1);
-	if (!serdes_bridge_split->remote_node) {
+	remote_node = of_graph_get_remote_node(dev->parent->of_node, 0, -1);
+	if (!remote_node) {
 		serdes_bridge_split->base_bridge.of_node = dev->of_node;
 		SERDES_DBG_MFD("warning: failed to get remote node for serdes on %s\n",
 			       dev_name(dev->parent));
-		serdes_bridge_split->remote_node = of_graph_get_remote_node(dev->of_node, 0, -1);
-		if (!serdes_bridge_split->remote_node) {
+		remote_node = of_graph_get_remote_node(dev->of_node, 0, -1);
+		if (!remote_node) {
 			return dev_err_probe(dev, -ENODEV,
 				     "failed to get remote node for serdes dsi\n");
 		}
 	}
+
+	ret = serdes_bridge_split_parse_dt(serdes_bridge_split);
+	if (ret)
+		goto err_free_node;
 
 	serdes_bridge_split->base_bridge.funcs = &serdes_bridge_split_funcs;
 	serdes_bridge_split->base_bridge.ops = DRM_BRIDGE_OP_DETECT | DRM_BRIDGE_OP_MODES;
@@ -287,7 +320,7 @@ static int serdes_bridge_split_probe(struct platform_device *pdev)
 		SERDES_DBG_MFD("%s: type %d\n", __func__, serdes_bridge_split->base_bridge.type);
 	} else {
 		serdes_bridge_split->base_bridge.type = DRM_MODE_CONNECTOR_eDP;
-		SERDES_DBG_MFD("%s: type DRM_MODE_CONNECTOR_LVDS\n", __func__);
+		SERDES_DBG_MFD("%s: type DRM_MODE_CONNECTOR_eDP\n", __func__);
 	}
 
 	drm_bridge_add(&serdes_bridge_split->base_bridge);
@@ -296,19 +329,25 @@ static int serdes_bridge_split_probe(struct platform_device *pdev)
 		dev_info(serdes_bridge_split->dev->parent, "serdes sel_mipi %d\n",
 			 serdes_bridge_split->sel_mipi);
 		/* Attach primary DSI */
-		serdes_bridge_split->dsi = serdes_attach_dsi(serdes_bridge_split,
-							     serdes_bridge_split->remote_node);
+		serdes_bridge_split->dsi = serdes_attach_dsi(serdes_bridge_split, remote_node);
 		if (IS_ERR(serdes_bridge_split->dsi)) {
 			drm_bridge_remove(&serdes_bridge_split->base_bridge);
-			return PTR_ERR(serdes_bridge_split->dsi);
+			ret = PTR_ERR(serdes_bridge_split->dsi);
+			goto err_free_node;
 		}
 	}
+
+	of_node_put(remote_node);
 
 	dev_info(dev, "serdes %s, %s successful mipi=%d, of_node=%s\n",
 		 serdes->chip_data->name, __func__, serdes_bridge_split->sel_mipi,
 		 serdes_bridge_split->base_bridge.of_node->name);
 
 	return 0;
+
+err_free_node:
+	of_node_put(remote_node);
+	return ret;
 }
 
 static int serdes_bridge_split_remove(struct platform_device *pdev)
@@ -342,7 +381,7 @@ static struct platform_driver serdes_bridge_split_driver = {
 		.of_match_table = of_match_ptr(serdes_bridge_split_of_match),
 	},
 	.probe = serdes_bridge_split_probe,
-	.remove = serdes_bridge_split_remove,
+	.remove = (void *)serdes_bridge_split_remove,
 };
 
 static int __init serdes_bridge_split_init(void)

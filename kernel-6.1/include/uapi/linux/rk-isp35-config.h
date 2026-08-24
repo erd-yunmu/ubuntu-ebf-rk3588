@@ -58,6 +58,7 @@
 #define ISP35_MODULE_AI			BIT_ULL(51)
 #define ISP35_MODULE_AIAWB		BIT_ULL(52)
 #define ISP35_MODULE_AWBSYNC		BIT_ULL(53)
+#define ISP35_MODULE_BAY3D_L2		BIT_ULL(54)
 
 #define ISP35_MODULE_FORCE		ISP3X_MODULE_FORCE
 
@@ -75,6 +76,7 @@
 #define ISP35_STAT_SHARP		ISP33_STAT_SHARP
 #define ISP35_STAT_AIAWB		BIT(24)
 #define ISP35_STAT_AWBSYNC		BIT(25)
+#define ISP35_STAT_BAY3D_L2		BIT(26)
 #define ISP35_STAT_RTT_FST		ISP33_STAT_RTT_FST
 
 #define ISP35_MESH_BUF_NUM		ISP3X_MESH_BUF_NUM
@@ -603,6 +605,8 @@ struct isp35_bay3d_cfg {
 	/* B3DLDC_EXTBOUND1 */
 	__u8 btnr_ldcltp_mode;
 	__u16 btnr_ldc_wrap_ext_bound_offset;
+	/* B3DLDC_FFFF_OFF */
+	__u16 b3dldc_last;
 	/* lut_ldch:offset data_oft; lut_ldcv:offset data1_oft */
 	__s32 lut_buf_fd;
 } __attribute__ ((packed));
@@ -1722,6 +1726,7 @@ struct isp35_isp_other_cfg {
 	struct isp35_hdrmge_cfg hdrmge_cfg;
 	struct isp3x_gain_cfg gain_cfg;
 	struct isp35_bay3d_cfg bay3d_cfg;
+	struct isp35_bay3d_cfg bay3d_l2_cfg;
 	struct isp35_ai_cfg ai_cfg;
 
 	struct isp33_cac_cfg cac_cfg;

@@ -153,6 +153,7 @@
 		regulator-name = "vccio_sd";
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <3300000>;
+		regulator-init-microvolt = <3300000>;
 		gpios = <&gpio7 RK_PA3 GPIO_ACTIVE_LOW>;
 		vin-supply = <&vccsys_stb>;
 		states = <1800000 0x0
@@ -166,6 +167,7 @@
 		regulator-init-microvolt = <905000>;
 		regulator-min-microvolt = <810000>;
 		regulator-max-microvolt = <1006000>;
+		regulator-settling-time-up-us = <250>;
 		regulator-always-on;
 		regulator-boot-on;
 		pwm-supply = <&vccsys_stb>;
@@ -179,6 +181,7 @@
 		regulator-init-microvolt = <950000>;
 		regulator-min-microvolt = <750000>;
 		regulator-max-microvolt = <1100000>;
+		regulator-settling-time-up-us = <250>;
 		regulator-always-on;
 		regulator-boot-on;
 		pwm-supply = <&vccsys_stb>;
@@ -192,6 +195,7 @@
 		regulator-init-microvolt = <950000>;
 		regulator-min-microvolt = <750000>;
 		regulator-max-microvolt = <1100000>;
+		regulator-settling-time-up-us = <250>;
 		regulator-always-on;
 		regulator-boot-on;
 		pwm-supply = <&vccsys_stb>;

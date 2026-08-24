@@ -1378,6 +1378,9 @@ static struct configfs_attribute *uvcg_frame_attrs2[] = {
 	&uvcg_frame_attr_w_height,
 	&uvcg_frame_attr_dw_min_bit_rate,
 	&uvcg_frame_attr_dw_max_bit_rate,
+#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+	&uvcg_frame_attr_dw_max_video_frame_buffer_size,
+#endif
 	&uvcg_frame_attr_dw_default_frame_interval,
 	&uvcg_frame_attr_dw_frame_interval,
 	&uvcg_frame_attr_dw_bytes_perline,
@@ -2791,67 +2794,12 @@ UVCG_OPTS_ATTR(streaming_maxpacket, streaming_maxpacket, 3072);
 UVCG_OPTS_ATTR(streaming_maxburst, streaming_maxburst, 15);
 UVCG_OPTS_ATTR(pm_qos_latency, pm_qos_latency, PM_QOS_LATENCY_ANY);
 #if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+UVCG_OPTS_ATTR(streaming_bulk_hs_maxpayload, streaming_bulk_hs_maxpayload, 1048576);
 UVCG_OPTS_ATTR(uvc_num_request, uvc_num_request, 64);
 UVCG_OPTS_ATTR(uvc_zero_copy, uvc_zero_copy, 1);
 #endif
 
 #undef UVCG_OPTS_ATTR
-
-#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
-static ssize_t f_uvc_opts_device_name_show(struct config_item *item,
-					   char *page)
-{
-	struct f_uvc_opts *opts = to_f_uvc_opts(item);
-	int ret;
-
-	mutex_lock(&opts->lock);
-	ret = sprintf(page, "%s\n", opts->device_name ?: "");
-	mutex_unlock(&opts->lock);
-
-	return ret;
-}
-
-static ssize_t f_uvc_opts_device_name_store(struct config_item *item,
-					    const char *page, size_t len)
-{
-	struct f_uvc_opts *opts = to_f_uvc_opts(item);
-	const char *old_name;
-	char *name;
-	int ret;
-
-	if (strlen(page) < len)
-		return -EOVERFLOW;
-
-	mutex_lock(&opts->lock);
-	if (opts->refcnt) {
-		ret = -EBUSY;
-		goto unlock;
-	}
-
-	name = kstrdup(page, GFP_KERNEL);
-	if (!name) {
-		ret = -ENOMEM;
-		goto unlock;
-	}
-
-	if (name[len - 1] == '\n')
-		name[len - 1] = '\0';
-
-	old_name = opts->device_name;
-	opts->device_name = name;
-
-	if (opts->device_name_allocated)
-		kfree(old_name);
-
-	opts->device_name_allocated = true;
-	ret = len;
-unlock:
-	mutex_unlock(&opts->lock);
-
-	return ret;
-}
-UVC_ATTR(f_uvc_opts_, device_name, device_name);
-#endif
 
 #define UVCG_OPTS_STRING_ATTR(cname, aname)				\
 static ssize_t f_uvc_opts_string_##cname##_show(struct config_item *item,\
@@ -2902,7 +2850,7 @@ static struct configfs_attribute *uvc_attrs[] = {
 	&f_uvc_opts_attr_streaming_maxburst,
 	&f_uvc_opts_attr_pm_qos_latency,
 #if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
-	&f_uvc_opts_attr_device_name,
+	&f_uvc_opts_attr_streaming_bulk_hs_maxpayload,
 	&f_uvc_opts_attr_uvc_num_request,
 	&f_uvc_opts_attr_uvc_zero_copy,
 #endif

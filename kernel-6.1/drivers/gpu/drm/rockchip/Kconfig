@@ -7,6 +7,7 @@ config DRM_ROCKCHIP
 	select DRM_PANEL
 	select VIDEOMODE_HELPERS
 	select DRM_ANALOGIX_DP if ROCKCHIP_ANALOGIX_DP
+	select DRM_DP_AUX_BUS if ROCKCHIP_ANALOGIX_DP
 	select DRM_DW_HDMI if ROCKCHIP_DW_HDMI
 	select DRM_DW_MIPI_DSI if ROCKCHIP_DW_MIPI_DSI || ROCKCHIP_DW_MIPI_DSI2
 	select GENERIC_PHY if ROCKCHIP_DW_MIPI_DSI || ROCKCHIP_DW_MIPI_DSI2
@@ -49,7 +50,8 @@ config ROCKCHIP_VOP
 		   CPU_PX30   || CPU_RK3308 || CPU_RV1106 || \
 		   CPU_RV1126 || CPU_RK3288 || CPU_RK3368 || \
 		   CPU_RK3399 || CPU_RK322X || CPU_RK3328 || \
-		   CPU_RK3576 || CPU_RK3506 || CPU_RV1126B
+		   CPU_RK3576 || CPU_RK3506 || CPU_RV1126B || \
+		   CPU_RK3572
 	default y if !ROCKCHIP_MINI_KERNEL
 	help
 	  This selects support for the VOP driver. You should enable it
@@ -57,7 +59,8 @@ config ROCKCHIP_VOP
 
 config ROCKCHIP_VOP2
 	bool "Rockchip VOP2 driver"
-	depends on CPU_RK3528 || CPU_RK3562 || CPU_RK3568 || CPU_RK3588 || CPU_RK3576
+	depends on CPU_RK3528 || CPU_RK3562 || CPU_RK3568 || CPU_RK3588 || \
+		   CPU_RK3576 || CPU_RK3572 || CPU_RK3538
 	default y
 	help
 	  This selects support for the VOP2 driver. The VOP2 hardware is
@@ -82,6 +85,15 @@ config ROCKCHIP_CDN_DP
 	  RK3399 based SoC, you should select this
 	  option.
 
+config ROCKCHIP_DIMMING_PANEL
+	bool "Rockchip dimming panel support"
+	depends on SPI
+	default n
+	help
+	  Choose this option to enable support for generic dimming panel
+	  which supports to adjust the backlight brightness of different
+	  zones.
+
 config ROCKCHIP_DRM_TVE
 	bool "Rockchip TVE support"
 	depends on DRM_ROCKCHIP
@@ -96,6 +108,16 @@ config ROCKCHIP_DW_HDMI
 	  This selects support for Rockchip SoC specific extensions
 	  for the Synopsys DesignWare HDMI driver. If you want to
 	  enable HDMI on RK3288 or RK3399 based SoC, you should select
+	  this option.
+
+config ROCKCHIP_DW_HDMI_QP
+	bool "Rockchip specific extensions for Synopsys DW HDMI QP"
+	default ROCKCHIP_DW_HDMI
+	select DRM_DISPLAY_HDCP_HELPER
+	help
+	  This selects support for Rockchip SoC specific extensions
+	  for the Synopsys DesignWare HDMI QP driver. If you want to
+	  enable HDMI on RK3576 or RK3588 based SoC, you should select
 	  this option.
 
 config ROCKCHIP_DW_MIPI_DSI

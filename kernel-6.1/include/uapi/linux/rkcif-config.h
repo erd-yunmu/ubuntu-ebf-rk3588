@@ -86,6 +86,9 @@
 #define RKCIF_CMD_SUPPORT_GET_EXP \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 22, int)
 
+#define RKCIF_CMD_SINGLE_BUF_MODE \
+	_IOW('V', BASE_VIDIOC_PRIVATE + 23, int)
+
 /* cif memory mode
  * 0: raw12/raw10/raw8 8bit memory compact
  * 1: raw12/raw10 16bit memory one pixel
@@ -129,6 +132,12 @@ struct rkcif_csi_info {
 	int dphy_vendor[RKCIF_MAX_CSI_NUM];
 };
 
+/*
+ * function: to quick start or stop stream
+ * on(input): to start or stop stream
+ * frame_num(output): for aiq to record frame number after stop stream
+ * resume_mode(input): set resume_mode to driver for AOV, set -1 for other case
+ */
 struct rkcif_quick_stream_param {
 	int on;
 	__u32 frame_num;
@@ -167,6 +176,31 @@ struct rkcif_effect_exp {
 struct rkcif_buffer_info {
 	__u32 buf_num;
 	int dma_fd[VIDEO_MAX_FRAME];
+};
+
+/*
+ * enum vicap_output_path - VICAP output path selection
+ *
+ * This enum describes the selectable output paths of VICAP.
+ *
+ * FULL_IDx:
+ *   Full-resolution output paths. Image data is output without scaling.
+ *
+ * SCLx:
+ *   Scaler output paths. Image data is output from the scaler.
+ *
+ * Note:
+ *   DVP, MIPI/LVDS, and SCL are all considered output path selections
+ *   within VICAP. This enum only represents which output path is selected.
+ */
+enum vicap_output_path {
+	VICAP_OUT_PATH_FULL_ID0,
+	VICAP_OUT_PATH_FULL_ID1,
+	VICAP_OUT_PATH_FULL_ID2,
+	VICAP_OUT_PATH_FULL_ID3,
+	VICAP_OUT_PATH_SCL0,
+	VICAP_OUT_PATH_SCL1,
+	VICAP_OUT_PATH_SCL2,
 };
 
 #endif

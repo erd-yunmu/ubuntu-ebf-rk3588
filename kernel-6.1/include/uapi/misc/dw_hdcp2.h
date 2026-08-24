@@ -12,6 +12,8 @@
 #include <linux/types.h>
 
 #define HL_DRIVER_ALLOCATE_DYNAMIC_MEM 0xffffffff
+#define HDCP_MAX_PORT 6
+
 /* hl_drv_ioctl numbers */
 enum {
 	HL_DRV_NR_MIN = 0x10,
@@ -26,8 +28,20 @@ enum {
 
 	RK_DRV_NR_GET_STATUS,
 	RK_DRV_NR_RESET,
+	RK_DRV_NR_GET_INFO,
+	RK_DRV_NR_SET_HDCP_BYPASS,
+	RK_DRV_NR_GET_HDCP_BYPASS,
+	RK_DRV_NR_SET_HDCP14,
 
 	HL_DRV_NR_MAX
+};
+
+enum dw_hdcp_event {
+	DW_HDCP_SET_HDMI_BYPASS_EVENT = 0x01,
+	DW_HDCP_GET_HDMI_BYPASS_EVENT,
+	DW_HDCP_GET_HDMI_CONNECT_STATUS,
+	DW_HDCP_SET_HDMI_HDCP14_EVENT,
+	DW_HDCP_EVENT_MAX
 };
 
 /*
@@ -126,5 +140,32 @@ struct hl_drv_ioc_status {
 };
 
 #define RK_DRV_IOC_RESET _IOR('H', RK_DRV_NR_RESET, __u32)
+
+#define RK_DRV_IOC_GET_INFO _IOR('H', RK_DRV_NR_GET_INFO, struct hl_drv_ioc_intf_info)
+
+#define HL_HDCP_PROTOCOL_HDMI 0
+#define HL_HDCP_PROTOCOL_DP 1
+
+#define HL_HDCP_TX 0
+#define HL_HDCP_RX 1
+
+struct hl_drv_ioc_intf_info {
+	__u32 dev_addr;
+	__u32 protocol_type;
+	__u32 port_num;
+	__u32 port_id[HDCP_MAX_PORT];
+	__u32 port_type[HDCP_MAX_PORT];
+};
+
+#define RK_DRV_IOC_SET_HDCP_BYPASS _IOW('H', RK_DRV_NR_SET_HDCP_BYPASS, struct hdcp_event)
+
+struct hdcp_event {
+	__u8 port;
+	__u8 bypass;
+	__u8 connect_status;
+};
+
+#define RK_DRV_IOC_GET_HDCP_BYPASS _IOWR('H', RK_DRV_NR_GET_HDCP_BYPASS, struct hdcp_event)
+#define RK_DRV_IOC_SET_HDCP14 _IOW('H', RK_DRV_NR_SET_HDCP14, struct hdcp_event)
 
 #endif /* _DW_HDCP_HOST_LIB_DRIVER_LINUX_IF_H_ */

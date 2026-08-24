@@ -52,7 +52,7 @@ s32 gt1x_i2c_write(u16 addr, u8 *buffer, s32 len)
 		.flags = 0,
 		.addr = gt1x_i2c_client->addr,
 	};
-	return _do_i2c_write(&msg, addr, buffer, len);
+	return gt1x_do_i2c_write(&msg, addr, buffer, len);
 }
 
 /**
@@ -75,7 +75,7 @@ s32 gt1x_i2c_read(u16 addr, u8 *buffer, s32 len)
 		 .addr = gt1x_i2c_client->addr,
 		 .flags = I2C_M_RD}
 	};
-	return _do_i2c_read(msgs, addr, buffer, len);
+	return gt1x_do_i2c_read(msgs, addr, buffer, len);
 }
 
 static spinlock_t irq_lock;
@@ -219,7 +219,7 @@ static void gt1x_ts_work_func(struct work_struct *work)
 	s32 ret = 0;
 	u8 point_data[11] = { 0 };
 
-	if (update_info.status) {
+	if (gt1x_update_info.status) {
 		GTP_DEBUG("Ignore interrupts during fw update.");
 		return;
 	}
@@ -830,7 +830,7 @@ static void __exit gt1x_ts_exit(void)
 	i2c_del_driver(&gt1x_ts_driver);
 }
 
-module_init(gt1x_ts_init);
+late_initcall(gt1x_ts_init);
 module_exit(gt1x_ts_exit);
 
 MODULE_DESCRIPTION("GTP Series Driver");

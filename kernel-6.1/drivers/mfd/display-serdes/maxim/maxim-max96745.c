@@ -10,166 +10,13 @@
 #include "../core.h"
 #include "maxim-max96745.h"
 
-static bool max96745_volatile_reg(struct device *dev, unsigned int reg)
-{
-	switch (reg) {
-	case 0x0076:
-	case 0x0086:
-	case 0x0100:
-	case 0x0200 ... 0x02ce:
-	case 0x7000:
-	case 0x7070:
-	case 0x7074:
-		return false;
-	default:
-		return true;
-	}
-}
-
 static struct regmap_config max96745_regmap_config = {
 	.name = "max96745",
 	.reg_bits = 16,
 	.val_bits = 8,
 	.max_register = 0x8000,
-	.volatile_reg = max96745_volatile_reg,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_NONE,
 };
-
-struct serdes_function_data {
-	u8 gpio_out_dis:1;
-	u8 gpio_io_rx_en:1;
-	u8 gpio_tx_en_a:1;
-	u8 gpio_tx_en_b:1;
-	u8 gpio_rx_en_a:1;
-	u8 gpio_rx_en_b:1;
-	u8 gpio_tx_id;
-	u8 gpio_rx_id;
-};
-
-struct config_desc {
-	u16 reg;
-	u8 mask;
-	u8 val;
-};
-
-struct serdes_group_data {
-	const struct config_desc *configs;
-	int num_configs;
-};
-
-static int MAX96745_MFP0_pins[] = {0};
-static int MAX96745_MFP1_pins[] = {1};
-static int MAX96745_MFP2_pins[] = {2};
-static int MAX96745_MFP3_pins[] = {3};
-static int MAX96745_MFP4_pins[] = {4};
-static int MAX96745_MFP5_pins[] = {5};
-static int MAX96745_MFP6_pins[] = {6};
-static int MAX96745_MFP7_pins[] = {7};
-
-static int MAX96745_MFP8_pins[] = {8};
-static int MAX96745_MFP9_pins[] = {9};
-static int MAX96745_MFP10_pins[] = {10};
-static int MAX96745_MFP11_pins[] = {11};
-static int MAX96745_MFP12_pins[] = {12};
-static int MAX96745_MFP13_pins[] = {13};
-static int MAX96745_MFP14_pins[] = {14};
-static int MAX96745_MFP15_pins[] = {15};
-
-static int MAX96745_MFP16_pins[] = {16};
-static int MAX96745_MFP17_pins[] = {17};
-static int MAX96745_MFP18_pins[] = {18};
-static int MAX96745_MFP19_pins[] = {19};
-static int MAX96745_MFP20_pins[] = {20};
-static int MAX96745_MFP21_pins[] = {21};
-static int MAX96745_MFP22_pins[] = {22};
-static int MAX96745_MFP23_pins[] = {23};
-
-static int MAX96745_MFP24_pins[] = {24};
-static int MAX96745_MFP25_pins[] = {25};
-static int MAX96745_I2C_pins[] = {3, 7};
-static int MAX96745_UART_pins[] = {3, 7};
-
-#define GROUP_DESC(nm) \
-{ \
-	.name = #nm, \
-	.pins = nm ## _pins, \
-	.num_pins = ARRAY_SIZE(nm ## _pins), \
-}
-
-static const char *serdes_gpio_groups[] = {
-	"MAX96745_MFP0", "MAX96745_MFP1", "MAX96745_MFP2", "MAX96745_MFP3",
-	"MAX96745_MFP4", "MAX96745_MFP5", "MAX96745_MFP6", "MAX96745_MFP7",
-
-	"MAX96745_MFP8", "MAX96745_MFP9", "MAX96745_MFP10", "MAX96745_MFP11",
-	"MAX96745_MFP12", "MAX96745_MFP13", "MAX96745_MFP14", "MAX96745_MFP15",
-
-	"MAX96745_MFP16", "MAX96745_MFP17", "MAX96745_MFP18", "MAX96745_MFP19",
-	"MAX96745_MFP20", "MAX96745_MFP21", "MAX96745_MFP22", "MAX96745_MFP23",
-
-	"MAX96745_MFP24", "MAX96745_MFP25",
-};
-
-static const char *MAX96745_I2C_groups[] = { "MAX96745_I2C" };
-static const char *MAX96745_UART_groups[] = { "MAX96745_UART" };
-
-#define FUNCTION_DESC(nm) \
-{ \
-	.name = #nm, \
-	.group_names = nm##_groups, \
-	.num_group_names = ARRAY_SIZE(nm##_groups), \
-} \
-
-#define FUNCTION_DESC_GPIO_OUTPUT_A(id) \
-{ \
-	.name = "SER_TXID"#id"_TO_DES_LINKA", \
-	.group_names = serdes_gpio_groups, \
-	.num_group_names = ARRAY_SIZE(serdes_gpio_groups), \
-	.data = (void *)(const struct serdes_function_data []) { \
-		{ .gpio_out_dis = 1, .gpio_tx_en_a = 1, \
-		  .gpio_io_rx_en = 1, .gpio_tx_id = id } \
-	}, \
-} \
-
-#define FUNCTION_DESC_GPIO_OUTPUT_B(id) \
-{ \
-	.name = "SER_TXID"#id"_TO_DES_LINKB", \
-	.group_names = serdes_gpio_groups, \
-	.num_group_names = ARRAY_SIZE(serdes_gpio_groups), \
-	.data = (void *)(const struct serdes_function_data []) { \
-		{ .gpio_out_dis = 1, .gpio_tx_en_b = 1, \
-		  .gpio_io_rx_en = 1, .gpio_tx_id = id } \
-	}, \
-} \
-
-#define FUNCTION_DESC_GPIO_INPUT_A(id) \
-{ \
-	.name = "DES_RXID"#id"_TO_SER_LINKA", \
-	.group_names = serdes_gpio_groups, \
-	.num_group_names = ARRAY_SIZE(serdes_gpio_groups), \
-	.data = (void *)(const struct serdes_function_data []) { \
-		{ .gpio_rx_en_a = 1, .gpio_rx_id = id } \
-	}, \
-} \
-
-#define FUNCTION_DESC_GPIO_INPUT_B(id) \
-{ \
-	.name = "DES_RXID"#id"_TO_SER_LINKB", \
-	.group_names = serdes_gpio_groups, \
-	.num_group_names = ARRAY_SIZE(serdes_gpio_groups), \
-	.data = (void *)(const struct serdes_function_data []) { \
-		{ .gpio_rx_en_b = 1, .gpio_rx_id = id } \
-	}, \
-} \
-
-#define FUNCTION_DESC_GPIO() \
-{ \
-	.name = "MAX96745_GPIO", \
-	.group_names = serdes_gpio_groups, \
-	.num_group_names = ARRAY_SIZE(serdes_gpio_groups), \
-	.data = (void *)(const struct serdes_function_data []) { \
-		{ } \
-	}, \
-} \
 
 static struct pinctrl_pin_desc max96745_pins_desc[] = {
 	PINCTRL_PIN(MAXIM_MAX96745_MFP0, "MAX96745_MFP0"),
@@ -359,6 +206,36 @@ static struct function_desc max96745_functions_desc[] = {
 	FUNCTION_DESC_GPIO_OUTPUT_B(24),
 	FUNCTION_DESC_GPIO_OUTPUT_B(25),
 
+	FUNCTION_DESC_GPIO_OUTPUT_AB(0),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(1),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(2),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(3),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(4),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(5),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(6),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(7),
+
+	FUNCTION_DESC_GPIO_OUTPUT_AB(8),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(9),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(10),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(11),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(12),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(13),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(14),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(15),
+
+	FUNCTION_DESC_GPIO_OUTPUT_AB(16),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(17),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(18),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(19),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(20),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(21),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(22),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(23),
+
+	FUNCTION_DESC_GPIO_OUTPUT_AB(24),
+	FUNCTION_DESC_GPIO_OUTPUT_AB(25),
+
 	FUNCTION_DESC_GPIO(),
 
 	FUNCTION_DESC(MAX96745_I2C),
@@ -401,18 +278,6 @@ static bool max96745_vid_tx_active(struct serdes *serdes)
 	return true;
 }
 
-static int max96745_bridge_init(struct serdes *serdes)
-{
-	if (max96745_vid_tx_active(serdes)) {
-		extcon_set_state(serdes->extcon, EXTCON_JACK_VIDEO_OUT, true);
-		pr_info("serdes %s, extcon is true state=%d\n", __func__, serdes->extcon->state);
-	} else {
-		pr_info("serdes %s, extcon is false\n", __func__);
-	}
-
-	return 0;
-}
-
 static bool max96745_bridge_link_locked(struct serdes *serdes)
 {
 	u32 val = 0, i;
@@ -444,6 +309,34 @@ static bool max96745_bridge_link_locked(struct serdes *serdes)
 	SERDES_DBG_CHIP("%s: serdes reg locked 0x%x\n", __func__, val);
 
 	return true;
+}
+
+static int max96745_bridge_init(struct serdes *serdes)
+{
+	bool status;
+	int loop = 0;
+	struct device *dev = serdes->dev;
+
+	if (max96745_vid_tx_active(serdes)) {
+		extcon_set_state(serdes->extcon, EXTCON_JACK_VIDEO_OUT, true);
+		pr_info("serdes %s, extcon is true state=%d\n", __func__, serdes->extcon->state);
+	} else {
+		pr_info("serdes %s, extcon is false\n", __func__);
+	}
+
+	for (loop = 0; loop < 3; loop++) {
+		if (loop != 0)
+			msleep(20);
+
+		status = max96745_bridge_link_locked(serdes);
+		if (status)
+			break;
+	}
+
+	if (!status)
+		dev_err(dev, "serdes %s link unlocked\n", serdes->chip_data->name);
+
+	return 0;
 }
 
 static int max96745_bridge_attach(struct serdes *serdes)
@@ -532,13 +425,27 @@ static struct serdes_chip_bridge_ops max96745_bridge_ops = {
 	.disable = max96745_bridge_disable,
 };
 
+static int max96745_chip_init(struct serdes *serdes)
+{
+	if (serdes->enable_gpio) {
+		gpiod_direction_output(serdes->enable_gpio, 1);
+		msleep(50);
+	}
+
+	SERDES_DBG_CHIP("%s serdes %s chip init\n",
+			dev_name(serdes->dev), serdes->chip_data->name);
+
+	return 0;
+}
+
 static int max96745_pinctrl_set_mux(struct serdes *serdes,
 				    unsigned int function, unsigned int group)
 {
 	struct serdes_pinctrl *pinctrl = serdes->pinctrl;
 	struct function_desc *func;
 	struct group_desc *grp;
-	int i;
+	unsigned int i, offset, npins;
+	const char *func_name, *grp_name;
 
 	func = pinmux_generic_get_function(pinctrl->pctl, function);
 	if (!func)
@@ -548,34 +455,41 @@ static int max96745_pinctrl_set_mux(struct serdes *serdes,
 	if (!grp)
 		return -EINVAL;
 
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
+	npins = grp->num_pins;
+	func_name = func->name;
+	grp_name = grp->name;
+#else
+	npins = grp->grp.npins;
+	func_name = func->func.name;
+	grp_name = grp->grp.name;
+#endif
+
 	SERDES_DBG_CHIP("%s: serdes chip %s func=%s data=%p group=%s data=%p, num_pin=%d\n",
-			__func__, serdes->chip_data->name,
-			func->name, func->data, grp->name, grp->data, grp->num_pins);
+			__func__, serdes->chip_data->name, func_name,
+			func->data, grp_name, grp->data, npins);
 
 	if (func->data) {
 		struct serdes_function_data *data = func->data;
 
-		for (i = 0; i < grp->num_pins; i++) {
-			serdes_set_bits(serdes,
-					GPIO_A_REG(grp->pins[i] - pinctrl->pin_base),
-					GPIO_OUT_DIS,
+		for (i = 0; i < npins; i++) {
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
+			offset = grp->pins[i] - pinctrl->pin_base;
+#else
+			offset = grp->grp.pins[i] - pinctrl->pin_base;
+#endif
+
+			serdes_set_bits(serdes, GPIO_A_REG(offset), GPIO_OUT_DIS,
 					FIELD_PREP(GPIO_OUT_DIS, data->gpio_out_dis));
-			serdes_set_bits(serdes,
-					GPIO_B_REG(grp->pins[i] - pinctrl->pin_base),
-					OUT_TYPE,
+			serdes_set_bits(serdes, GPIO_B_REG(offset), OUT_TYPE,
 					FIELD_PREP(OUT_TYPE, 1));
 			if (data->gpio_tx_en_a || data->gpio_tx_en_b)
-				serdes_set_bits(serdes,
-						GPIO_B_REG(grp->pins[i] - pinctrl->pin_base),
-						GPIO_TX_ID,
+				serdes_set_bits(serdes, GPIO_B_REG(offset), GPIO_TX_ID,
 						FIELD_PREP(GPIO_TX_ID, data->gpio_tx_id));
 			if (data->gpio_rx_en_a || data->gpio_rx_en_b)
-				serdes_set_bits(serdes,
-						GPIO_C_REG(grp->pins[i] - pinctrl->pin_base),
-						GPIO_RX_ID,
+				serdes_set_bits(serdes, GPIO_C_REG(offset), GPIO_RX_ID,
 						FIELD_PREP(GPIO_RX_ID, data->gpio_rx_id));
-			serdes_set_bits(serdes,
-					GPIO_D_REG(grp->pins[i] - pinctrl->pin_base),
+			serdes_set_bits(serdes, GPIO_D_REG(offset),
 					GPIO_TX_EN_A | GPIO_TX_EN_B | GPIO_IO_RX_EN |
 					GPIO_RX_EN_A | GPIO_RX_EN_B,
 					FIELD_PREP(GPIO_TX_EN_A, data->gpio_tx_en_a) |
@@ -856,7 +770,7 @@ static struct serdes_chip_split_ops max96745_split_ops = {
 	.deselect = max96745_deselect,
 };
 
-static const struct check_reg_data max96745_improtant_reg[10] = {
+static const struct check_reg_data max96745_important_reg[10] = {
 	{
 		"MAX96745 LINK LOCK",
 		{ 0x0013, (1 << 3) },
@@ -875,27 +789,58 @@ static const struct check_reg_data max96745_improtant_reg[10] = {
 	},
 };
 
+static int max96745_check_hw_state(struct serdes *serdes)
+{
+	int ret = 0, retry = 0;
+	unsigned int chipid = 0;
+	struct device *dev = serdes->dev;
+
+	for (retry = 0; retry < 10; retry++) {
+		if (retry != 0) {
+			SERDES_DBG_CHIP("check serdes %s hw state retry=%d",
+					serdes->chip_data->name, retry);
+			msleep(20);
+		}
+
+		ret = serdes_reg_read(serdes, MAXIM_SERDES_REG_CHIP_ID, &chipid);
+		if (!ret) {
+			dev_info(dev, "%s is Detected\n", serdes->chip_data->name);
+			return 0;
+		}
+	}
+
+	dev_err(dev, "serdes %s check hw state error, ret=%d\n", serdes->chip_data->name, ret);
+
+	return -ENODEV;
+}
+
 static int max96745_check_reg(struct serdes *serdes)
 {
 	int i =  0, ret = 0;
 	unsigned int val = 0;
 
-	for (i = 0; i < ARRAY_SIZE(max96745_improtant_reg); i++) {
-		if (!max96745_improtant_reg[i].seq.reg)
+	for (i = 0; i < ARRAY_SIZE(max96745_important_reg); i++) {
+		if (!max96745_important_reg[i].seq.reg)
 			break;
 
-		ret = serdes_reg_read(serdes, max96745_improtant_reg[i].seq.reg, &val);
-		if (!ret && !(val & max96745_improtant_reg[i].seq.def)
-		    && (!atomic_read(&serdes->flag_early_suspend)))
+		ret = serdes_reg_read(serdes, max96745_important_reg[i].seq.reg, &val);
+		if (ret)
+			return ret;
+
+		if (!(val & max96745_important_reg[i].seq.def)
+		    && (!atomic_read(&serdes->flag_early_suspend))) {
 			dev_info(serdes->dev, "warning %s %s reg[0x%x] = 0x%x\n", __func__,
-				 max96745_improtant_reg[i].name,
-				 max96745_improtant_reg[i].seq.reg, val);
+				 max96745_important_reg[i].name,
+				 max96745_important_reg[i].seq.reg, val);
+			return -EINVAL;
+		}
 	}
 
 	return 0;
 }
 
-static struct serdes_check_reg_ops max96745_check_reg_ops = {
+static struct serdes_check_state_ops max96745_check_ops = {
+	.check_hw  = max96745_check_hw_state,
 	.check_reg = max96745_check_reg,
 };
 
@@ -934,13 +879,14 @@ struct serdes_chip_data serdes_max96745_data = {
 	.serdes_type	= TYPE_SER,
 	.serdes_id	= MAXIM_ID_MAX96745,
 	.connector_type	= DRM_MODE_CONNECTOR_eDP,
+	.chip_init	= max96745_chip_init,
 	.regmap_config	= &max96745_regmap_config,
 	.pinctrl_info	= &max96745_pinctrl_info,
 	.bridge_ops	= &max96745_bridge_ops,
 	.pinctrl_ops	= &max96745_pinctrl_ops,
 	.gpio_ops	= &max96745_gpio_ops,
 	.split_ops	= &max96745_split_ops,
-	.check_ops	= &max96745_check_reg_ops,
+	.check_ops	= &max96745_check_ops,
 	.pm_ops		= &max96745_pm_ops,
 	.irq_ops	= &max96745_irq_ops,
 };

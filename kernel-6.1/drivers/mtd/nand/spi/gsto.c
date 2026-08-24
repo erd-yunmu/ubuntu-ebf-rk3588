@@ -13,7 +13,6 @@
 #define SPINAND_MFR_GSTO		0x52
 
 static SPINAND_OP_VARIANTS(read_cache_variants,
-		SPINAND_PAGE_READ_FROM_CACHE_QUADIO_OP(0, 2, NULL, 0),
 		SPINAND_PAGE_READ_FROM_CACHE_X4_OP(0, 1, NULL, 0),
 		SPINAND_PAGE_READ_FROM_CACHE_DUALIO_OP(0, 1, NULL, 0),
 		SPINAND_PAGE_READ_FROM_CACHE_X2_OP(0, 1, NULL, 0),
@@ -116,6 +115,15 @@ static const struct spinand_info gsto_spinand_table[] = {
 		     SPINAND_ECCINFO(&gss0xgsax1_ooblayout, NULL)),
 	SPINAND_INFO("GSS01GSAX1",
 		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_DUMMY, 0xCA, 0x13),
+		     NAND_MEMORG(1, 2048, 128, 64, 1024, 20, 1, 1, 1),
+		     NAND_ECCREQ(8, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     0,
+		     SPINAND_ECCINFO(&gss0xgsax1_ooblayout, NULL)),
+	SPINAND_INFO("GSS01GSBX1",
+		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_DUMMY, 0xCB, 0x13),
 		     NAND_MEMORG(1, 2048, 128, 64, 1024, 20, 1, 1, 1),
 		     NAND_ECCREQ(8, 512),
 		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,

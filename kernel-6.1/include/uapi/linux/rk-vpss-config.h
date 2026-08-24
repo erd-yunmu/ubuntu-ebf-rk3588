@@ -29,6 +29,7 @@
 
 #define RKVPSS_OUT_V10_MAX 4
 #define RKVPSS_OUT_V20_MAX 6
+#define RKVPSS_OUT_V21_MAX 4
 
 /******vpss(online mode) v4l2 ioctl***************************/
 /* set before VIDIOC_S_FMT if dynamically changing output resolution */
@@ -66,6 +67,11 @@
 #define RKVPSS_CMD_SET_AVG_SCL_DOWN \
 	_IOW('V', BASE_VIDIOC_PRIVATE + 12, int *)
 
+#define RKVPSS_CMD_GET_SHARP \
+	_IOR('V', BASE_VIDIOC_PRIVATE + 13, struct rkvpss_sharp_cfg *)
+#define RKVPSS_CMD_SET_SHARP \
+	_IOW('V', BASE_VIDIOC_PRIVATE + 14, struct rkvpss_sharp_cfg *)
+
 /******vpss(offline mode) independent video ioctl****************/
 #define RKVPSS_CMD_MODULE_SEL \
 	_IOW('V', BASE_VIDIOC_PRIVATE + 50, struct rkvpss_module_sel)
@@ -87,6 +93,9 @@
 
 #define RKVPSS_CMD_STREAM_ATTACH_INFO \
 	_IOW('V', BASE_VIDIOC_PRIVATE + 56, int)
+
+#define RKVPSS_CMD_BUF_DEL_BY_FILE \
+	_IO('V', BASE_VIDIOC_PRIVATE + 57)
 
 /****** vpss(offline mode rockit) independent ioctl*************/
 #define RKVPSS_CMD_OPEN \
@@ -121,6 +130,23 @@ struct rkvpss_mirror_flip {
 struct rkvpss_stream_size {
 	unsigned int max_width;
 	unsigned int max_height;
+} __attribute__ ((packed));
+
+/* struct rkvpss_sharp_cfg
+ * v2.1: sharpen configuration for CH0~CH2 (3-select-1)
+ * enable: enable sharp feature
+ * channel: select which channel to apply sharp (0~2: CH0~CH2)
+ * factor: sharpening strength factor (0~63, default 4 = strength 1)
+ *         0x00=0 (bypass), 0x04=1.0, 0x08=2.0, 0x10=4.0, 0x3F=15.75
+ * threshold: coring threshold to suppress noise amplification (0~255)
+ *            0=no coring (all gradients sharpened), 255=nearly no sharpening
+ *            Higher values reduce sharpening on smooth edges to avoid noise
+ */
+struct rkvpss_sharp_cfg {
+	unsigned char enable;
+	unsigned char channel;
+	unsigned char factor;
+	unsigned char threshold;
 } __attribute__ ((packed));
 
 #define RKVPSS_CMSC_WIN_MAX 8
@@ -162,6 +188,9 @@ struct rkvpss_cmsc_win {
  * win: priacy mask window
  * mosaic_block: Mosaic block size, 0:8x8 1:16x16 2:32x32 3:64x64,
  *               4: 128x128 (only for rv1126b) share for all windows
+ * disable_mosaic_avg_en: (only for v2.1) Mosaic average sampling disable
+ *                        0: enable(default), reduce noise jitter in mosaic mode
+ *                        1: disable
  * width_ro: vpss full resolution.
  * height_ro: vpss full resolution.
  * reuse_ch : (only for rv1126b) ch4 and ch5 use ch0 or ch1 or ch2 or ch3 params,
@@ -170,6 +199,7 @@ struct rkvpss_cmsc_win {
 struct rkvpss_cmsc_cfg {
 	struct rkvpss_cmsc_win win[RKVPSS_CMSC_WIN_MAX];
 	unsigned int mosaic_block;
+	unsigned int disable_mosaic_avg_en;
 	unsigned int width_ro;
 	unsigned int height_ro;
 	int reuse_ch;
@@ -328,6 +358,7 @@ struct rkvpss_output_cfg {
  * mirror: mirror enable
  * input: input configuration of image
  * output: output channel configuration of image
+ * sharp: sharpen configuration (v2.1 only)
  */
 struct rkvpss_frame_cfg {
 	int dev_id;
@@ -336,6 +367,7 @@ struct rkvpss_frame_cfg {
 	int mirror;
 	struct rkvpss_input_cfg input;
 	struct rkvpss_output_cfg output[RKVPSS_OUTPUT_MAX];
+	struct rkvpss_sharp_cfg sharp;
 } __attribute__ ((packed));
 
 #define RKVPSS_BUF_MAX 32

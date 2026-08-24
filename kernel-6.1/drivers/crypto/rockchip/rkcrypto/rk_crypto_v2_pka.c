@@ -24,11 +24,11 @@ enum {
 };
 
 /********************* Private MACRO Definition ******************************/
-#define PKA_POLL_PERIOD_US	1000
+#define PKA_POLL_PERIOD_US	200
 #define PKA_POLL_TIMEOUT_US	50000
 
 /* for private key EXP_MOD operation */
-#define PKA_MAX_POLL_PERIOD_US	20000
+#define PKA_MAX_POLL_PERIOD_US	2000
 #define PKA_MAX_POLL_TIMEOUT_US	2000000
 
 #define PKA_MAX_CALC_BITS	4096
@@ -85,13 +85,26 @@ enum pka_opcode {
 
 #define PKA_BIGNUM_WORDS(x)	(rk_bn_get_size(x) / sizeof(u32))
 
-#define PKA_RAM_FOR_PKA()	PKA_WRITE(CRYPTO_RAM_CTL_SEL_MASK | CRYPTO_RAM_CTL_PKA, \
-					  CRYPTO_RAM_CTL)
+#define PKA_RAM_FOR_PKA()	do { \
+	if ((PKA_READ(CRYPTO_RAM_CTL) & 0x03) == CRYPTO_RAM_CTL_PKA) \
+		break; \
+	if ((PKA_READ(CRYPTO_RAM_ST) & 0x01) == CRYPTO_RAM_ST_RDY) \
+		PKA_WRITE(CRYPTO_RAM_ST_RDY, CRYPTO_RAM_ST); \
+	PKA_WRITE(CRYPTO_RAM_CTL_SEL_MASK | CRYPTO_RAM_CTL_PKA, CRYPTO_RAM_CTL); \
+	while ((PKA_READ(CRYPTO_RAM_ST) & 0x01) != CRYPTO_RAM_ST_RDY) \
+		cpu_relax(); \
+	PKA_WRITE(CRYPTO_RAM_ST_RDY, CRYPTO_RAM_ST);\
+} while (0)
 
 #define PKA_RAM_FOR_CPU()	do { \
+	if ((PKA_READ(CRYPTO_RAM_CTL) & 0x03) == CRYPTO_RAM_CTL_CPU) \
+		break; \
+	if ((PKA_READ(CRYPTO_RAM_ST) & 0x01) == CRYPTO_RAM_ST_RDY) \
+		PKA_WRITE(CRYPTO_RAM_ST_RDY, CRYPTO_RAM_ST); \
 	PKA_WRITE(CRYPTO_RAM_CTL_SEL_MASK | CRYPTO_RAM_CTL_CPU, CRYPTO_RAM_CTL); \
-	while ((PKA_READ(CRYPTO_RAM_ST) & 0x01) != CRYPTO_CLK_RAM_RDY) \
+	while ((PKA_READ(CRYPTO_RAM_ST) & 0x01) != CRYPTO_RAM_ST_RDY) \
 		cpu_relax(); \
+	PKA_WRITE(CRYPTO_RAM_ST_RDY, CRYPTO_RAM_ST);\
 } while (0)
 
 #define PKA_GET_SRAM_ADDR(addr)	((void *)(pka_base + CRYPTO_SRAM_BASE + (addr)))

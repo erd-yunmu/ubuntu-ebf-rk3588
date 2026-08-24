@@ -29,6 +29,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/scatterlist.h>
 #include <linux/timer.h>
+#include <linux/version.h>
 
 #include "rk_crypto_bignum.h"
 
@@ -90,6 +91,8 @@ struct rk_crypto_dev {
 	void				*addr_vir;
 	u32				vir_max;
 	void				*addr_aad;
+	void				*block_virt;
+	dma_addr_t			block_dma;
 	int				aad_max;
 	struct scatterlist		src[2];
 	struct scatterlist		dst[2];
@@ -153,6 +156,7 @@ struct rk_alg_ctx {
 	unsigned int			assoclen;
 	unsigned int			count;
 	unsigned int			left_bytes;
+	unsigned int			processed_bytes;
 
 	dma_addr_t			addr_in;
 	dma_addr_t			addr_out;
@@ -474,7 +478,6 @@ enum rk_cipher_mode {
 		.max_size = rk_ecc_max_size, \
 		.init = rk_ecc_init_tfm, \
 		.exit = rk_ecc_exit_tfm, \
-		.reqsize = 64, \
 		.base = { \
 			.cra_name = "ecdsa-nist-p" #key_bits, \
 			.cra_driver_name = "ecdsa-nist-p" #key_bits "-rk", \
@@ -484,6 +487,12 @@ enum rk_cipher_mode {
 		},\
 	} \
 }
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0))
+#define COMPLETE_PARAM(req)	(req)
+#else
+#define COMPLETE_PARAM(req)	(req->data)
+#endif
 
 #define CRYPTO_MAJOR_VER(ver)	((ver) & 0x0f000000)
 

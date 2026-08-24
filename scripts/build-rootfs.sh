@@ -36,7 +36,7 @@ export DEBIAN_FRONTEND=noninteractive
 # Debootstrap options
 arch=arm64
 release=resolute
-mirror=http://mirrors.aliyun.com/ubuntu-ports/
+mirror=https://mirrors.ustc.edu.cn/ubuntu-ports/
 chroot_dir=rootfs
 overlay_dir=../overlay
 
@@ -198,7 +198,7 @@ cp -r ../packages/arm64/* ${chroot_dir}/tmp
 chroot ${chroot_dir} /bin/bash -c "apt install -y libglib2.0-dev libunwind-dev libdw-dev liblzma-doc"
 chroot ${chroot_dir} /bin/bash -c "dpkg -i /tmp/*.deb"
 chroot ${chroot_dir} /bin/bash -c "apt-mark hold ffmpeg && apt -y --fix-broken install"
-rm -f ${chroot_dir}/tmp/*
+rm -f ${chroot_dir}/tmp/*.deb
 
 # Customize header content
 cp ${overlay_dir}/etc/update-motd.d/{00-header,30-sysinfo} ${chroot_dir}/etc/update-motd.d

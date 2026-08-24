@@ -12,6 +12,7 @@
 #include <linux/miscdevice.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
+#include <linux/dw_hdcp_notify.h>
 #include <linux/uaccess.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
@@ -25,6 +26,8 @@
 #include <uapi/misc/dw_hdcp2.h>
 
 #define HDCP_MAX_PORT			6
+
+static BLOCKING_NOTIFIER_HEAD(dw_hdcp_notifier_list);
 
 /**
  * struct hl_device - hdcp host library device structure
@@ -71,10 +74,13 @@ struct dw_hdcp_grf_reg {
 struct dw_hdcp_port_cfg {
 	struct dw_hdcp_grf_reg connect_reg;
 	int port_id;
+	int port_type;
 };
 
 struct dw_hdcp_cfg {
 	int port_num;
+	int protocol_type;
+	bool grf_ctrl;
 	struct dw_hdcp_grf_reg boot_reg;
 	struct dw_hdcp_port_cfg port_cfg[HDCP_MAX_PORT];
 };
@@ -139,12 +145,18 @@ static int dw_hdcp_set_reset(struct dw_hdcp *hdcp, void __user *arg)
 	return 0;
 }
 
+static int dw_hdcp_notify_event(unsigned long event, void *data)
+{
+	return blocking_notifier_call_chain(&dw_hdcp_notifier_list, event, data);
+}
+
 static int dw_hdcp_get_status(struct dw_hdcp *hdcp, void __user *arg)
 {
 	const struct dw_hdcp_cfg *cfg = hdcp->cfgs;
 	const struct dw_hdcp_port_cfg *port_cfg;
 	struct hl_drv_ioc_status status;
-	int i;
+	struct hdcp_event hdcp_event;
+	int i, ret;
 	u32 val = 0;
 	u32 connected_status = 0;
 	u32 booted_status = 0;
@@ -155,20 +167,61 @@ static int dw_hdcp_get_status(struct dw_hdcp *hdcp, void __user *arg)
 	if (!hdcp->is_suspend) {
 		for (i = 0; i < cfg->port_num; i++) {
 			port_cfg = &cfg->port_cfg[i];
-			regmap_read(hdcp->vo_grf, port_cfg->connect_reg.offset, &val);
-			if (val & BIT(port_cfg->connect_reg.shift))
-				connected_status |= 1 << port_cfg->port_id;
+			if (!cfg->grf_ctrl) {
+				ret = dw_hdcp_notify_event(DW_HDCP_GET_HDMI_CONNECT_STATUS,
+							   (void *)&hdcp_event);
+				if (ret != NOTIFY_OK) {
+					dev_err(hdcp->dev, "get connect status notify failed\n");
+					return -EINVAL;
+				}
+
+				if (hdcp_event.connect_status)
+					connected_status |= 1 << port_cfg->port_id;
+			} else {
+				regmap_read(hdcp->vo_grf, port_cfg->connect_reg.offset, &val);
+				if (val & BIT(port_cfg->connect_reg.shift))
+					connected_status |= 1 << port_cfg->port_id;
+			}
 		}
 
-		regmap_read(hdcp->vo_grf, cfg->boot_reg.offset, &val);
-		if (val & BIT(cfg->boot_reg.shift))
+		if (!cfg->grf_ctrl) {
 			booted_status = 1;
+		} else {
+			regmap_read(hdcp->vo_grf, cfg->boot_reg.offset, &val);
+			if (val & BIT(cfg->boot_reg.shift))
+				booted_status = 1;
+		}
 	}
 
 	status.connected_status = connected_status;
 	status.booted_status = booted_status;
 
 	if (copy_to_user(arg, &status, sizeof(status)))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int dw_hdcp_get_intf_info(struct dw_hdcp *hdcp, void __user *arg)
+{
+	const struct dw_hdcp_cfg *cfg = hdcp->cfgs;
+	const struct dw_hdcp_port_cfg *port_cfg;
+	struct hl_drv_ioc_intf_info info = {};
+	int i;
+
+	if (!arg)
+		return -EFAULT;
+
+	info.dev_addr = hdcp->hl_dev.hpi_resource->start;
+	info.protocol_type = cfg->protocol_type;
+	info.port_num = cfg->port_num;
+	for (i = 0; i < cfg->port_num; i++) {
+		port_cfg = &cfg->port_cfg[i];
+		info.port_id[i] = port_cfg->port_id;
+		info.port_type[i] = port_cfg->port_type;
+	}
+
+	if (copy_to_user(arg, &info, sizeof(info)))
 		return -EFAULT;
 
 	return 0;
@@ -321,10 +374,7 @@ static long dw_hdcp_hpi_write(struct hl_device *hl_dev, void __user *arg)
 		return -EINVAL;
 
 	iowrite32(reg.value, hl_dev->hpi + reg.offset);
-#ifdef TROOT_GRIFFIN
-	if ((reg.offset == 0x38) && ((reg.value & 0x000000ff) == 0x08))
-		hl_dev->code_loaded = false;
-#endif
+
 	return 0;
 }
 
@@ -423,6 +473,145 @@ static void dw_hdcp_free_hl_dev_slot(struct hl_device *hl_dev)
 	hl_dev->initialized  = false;
 }
 
+int dw_hdcp_register_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&dw_hdcp_notifier_list, nb);
+}
+EXPORT_SYMBOL_GPL(dw_hdcp_register_notifier);
+
+int dw_hdcp_unregister_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(&dw_hdcp_notifier_list, nb);
+}
+EXPORT_SYMBOL_GPL(dw_hdcp_unregister_notifier);
+
+static int dw_hdcp_set_hdmi_hdcp_bypass(struct dw_hdcp *hdcp, void __user *arg)
+{
+	int ret;
+	struct hdcp_event hdcp_event;
+	const struct dw_hdcp_cfg *cfg = hdcp->cfgs;
+	int i;
+
+	if (!arg)
+		return -EFAULT;
+
+	if (cfg->protocol_type != HL_HDCP_PROTOCOL_HDMI) {
+		dev_err(hdcp->dev, "incorrect protocol type:%d\n", cfg->protocol_type);
+		return -EFAULT;
+	}
+
+	/* rk3528/rk356x hdmi controller does not require switching hdcp bypass */
+	if (!cfg->grf_ctrl)
+		return 0;
+
+	if (copy_from_user(&hdcp_event, arg, sizeof(hdcp_event)))
+		return -EFAULT;
+
+	for (i = 0; i < cfg->port_num; i++) {
+		if (hdcp_event.port == cfg->port_cfg[i].port_id)
+			break;
+	}
+
+	if (i >= cfg->port_num) {
+		dev_err(hdcp->dev, "incorrect hdcp port:%d\n", hdcp_event.port);
+		return -ERANGE;
+	}
+
+	ret = dw_hdcp_notify_event(DW_HDCP_SET_HDMI_BYPASS_EVENT, (void *)&hdcp_event);
+	if (ret != NOTIFY_OK) {
+		dev_err(hdcp->dev, "set hdmi hdcp bypass notify failed\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int dw_hdcp_get_hdmi_hdcp_bypass(struct dw_hdcp *hdcp, void __user *arg)
+{
+	int ret;
+	struct hdcp_event hdcp_event;
+	const struct dw_hdcp_cfg *cfg = hdcp->cfgs;
+	int i;
+
+	if (!arg)
+		return -EFAULT;
+
+	if (cfg->protocol_type != HL_HDCP_PROTOCOL_HDMI) {
+		dev_err(hdcp->dev, "incorrect protocol type:%d\n", cfg->protocol_type);
+		return -EFAULT;
+	}
+
+	if (copy_from_user(&hdcp_event, arg, sizeof(hdcp_event)))
+		return -EFAULT;
+
+	/* rk3528/rk356x hdmi controller does not require switching hdcp bypass */
+	if (!cfg->grf_ctrl) {
+		hdcp_event.bypass = true;
+		if (copy_to_user(arg, &hdcp_event, sizeof(hdcp_event)))
+			return -EFAULT;
+
+		return 0;
+	}
+
+	for (i = 0; i < cfg->port_num; i++) {
+		if (hdcp_event.port == cfg->port_cfg[i].port_id)
+			break;
+	}
+
+	if (i >= cfg->port_num) {
+		dev_err(hdcp->dev, "incorrect hdcp port:%d\n", hdcp_event.port);
+		return -ERANGE;
+	}
+
+	ret = dw_hdcp_notify_event(DW_HDCP_GET_HDMI_BYPASS_EVENT, (void *)&hdcp_event);
+	if (ret != NOTIFY_OK) {
+		dev_err(hdcp->dev, "get hdmi hdcp bypass notify failed\n");
+		return -EINVAL;
+	}
+
+	if (copy_to_user(arg, &hdcp_event, sizeof(hdcp_event)))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int dw_hdcp_set_hdmi_hdcp14(struct dw_hdcp *hdcp, void __user *arg)
+{
+	int ret;
+	struct hdcp_event hdcp_event;
+	const struct dw_hdcp_cfg *cfg = hdcp->cfgs;
+	int i;
+
+	if (!arg)
+		return -EINVAL;
+
+	if (cfg->protocol_type != HL_HDCP_PROTOCOL_HDMI) {
+		dev_err(hdcp->dev, "incorrect protocol type:%d\n", cfg->protocol_type);
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&hdcp_event, arg, sizeof(hdcp_event)))
+		return -EFAULT;
+
+	for (i = 0; i < cfg->port_num; i++) {
+		if (hdcp_event.port == cfg->port_cfg[i].port_id)
+			break;
+	}
+
+	if (i >= cfg->port_num) {
+		dev_err(hdcp->dev, "incorrect hdcp port:%d\n", hdcp_event.port);
+		return -ERANGE;
+	}
+
+	ret = dw_hdcp_notify_event(DW_HDCP_SET_HDMI_HDCP14_EVENT, (void *)&hdcp_event);
+	if (ret != NOTIFY_OK) {
+		dev_err(hdcp->dev, "set hdmi hdcp14 notify failed\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static long dw_hdcp_hld_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	struct hl_device *hl_dev;
@@ -461,6 +650,15 @@ static long dw_hdcp_hld_ioctl(struct file *f, unsigned int cmd, unsigned long ar
 		return dw_hdcp_get_status(hdcp, data);
 	case RK_DRV_IOC_RESET:
 		return dw_hdcp_set_reset(hdcp, data);
+	case RK_DRV_IOC_GET_INFO:
+		return dw_hdcp_get_intf_info(hdcp, data);
+	case RK_DRV_IOC_SET_HDCP_BYPASS:
+		return dw_hdcp_set_hdmi_hdcp_bypass(hdcp, data);
+	case RK_DRV_IOC_GET_HDCP_BYPASS:
+		return dw_hdcp_get_hdmi_hdcp_bypass(hdcp, data);
+	case RK_DRV_IOC_SET_HDCP14:
+		return dw_hdcp_set_hdmi_hdcp14(hdcp, data);
+
 	default:
 		return -EINVAL;
 	}
@@ -561,10 +759,13 @@ static int dw_hdcp_probe(struct platform_device *pdev)
 
 	hdcp->cfgs = &cfgs[hdcp->id];
 
-	hdcp->vo_grf = syscon_regmap_lookup_by_phandle(dev->of_node, "rockchip,vo-grf");
-	if (IS_ERR(hdcp->vo_grf)) {
-		dev_err(hdcp->dev, "Get vo-grf failed\n");
-		return -ENODEV;
+	/* rk356x/rk3528 cannot control hdcp2 through grf register */
+	if (hdcp->cfgs->grf_ctrl) {
+		hdcp->vo_grf = syscon_regmap_lookup_by_phandle(dev->of_node, "rockchip,vo-grf");
+		if (IS_ERR(hdcp->vo_grf)) {
+			dev_err(hdcp->dev, "Get vo-grf failed\n");
+			return -ENODEV;
+		}
 	}
 
 	hdcp->rsts_bulk = devm_reset_control_array_get_exclusive(dev);
@@ -636,6 +837,60 @@ static const struct dev_pm_ops dw_hdcp_pm_ops = {
 };
 
 /*
+ * rk3528 hdcp connect as follow:
+ * HDMITX --> HDCP0 PORT0
+ */
+static const struct dw_hdcp_cfg rk3528_hdcp_cfgs[] = {
+	{
+		.port_num = 1,
+		.protocol_type = HL_HDCP_PROTOCOL_HDMI,
+		.port_cfg = {
+			{
+				.port_id = 0,
+				.port_type = HL_HDCP_TX,
+			},
+		},
+	},
+};
+
+/*
+ * rk3538 hdcp connect as follow:
+ * HDMITX --> HDCP0 PORT1
+ */
+static const struct dw_hdcp_cfg rk3538_hdcp_cfgs[] = {
+	{
+		.port_num = 1,
+		.boot_reg = {0x11c, 20},
+		.protocol_type = HL_HDCP_PROTOCOL_HDMI,
+		.grf_ctrl = true,
+		.port_cfg = {
+			{
+				.connect_reg = {0x11c, 16},
+				.port_id = 1,
+				.port_type = HL_HDCP_TX,
+			},
+		},
+	},
+};
+
+/*
+ * rk356x hdcp connect as follow:
+ * HDMITX --> HDCP0 PORT0
+ */
+static const struct dw_hdcp_cfg rk356x_hdcp_cfgs[] = {
+	{
+		.port_num = 1,
+		.protocol_type = HL_HDCP_PROTOCOL_HDMI,
+		.port_cfg = {
+			{
+				.port_id = 0,
+				.port_type = HL_HDCP_TX,
+			},
+		},
+	},
+};
+
+/*
  * rk3576 hdcp connect as follow:
  * HDMITX --> HDCP0 PORT1
  * DPTX --> HDCP1 PORT0
@@ -644,20 +899,26 @@ static const struct dw_hdcp_cfg rk3576_hdcp_cfgs[] = {
 	{
 		.port_num = 1,
 		.boot_reg = {0xd4, 20},
+		.protocol_type = HL_HDCP_PROTOCOL_HDMI,
+		.grf_ctrl = true,
 		.port_cfg = {
 			{
 				.connect_reg = {0xd4, 16},
 				.port_id = 1,
+				.port_type = HL_HDCP_TX,
 			},
 		},
 	},
 	{
 		.port_num = 1,
+		.protocol_type = HL_HDCP_PROTOCOL_DP,
+		.grf_ctrl = true,
 		.boot_reg = {0xc8, 26},
 		.port_cfg = {
 			{
 				.connect_reg = {0xc0, 6},
 				.port_id = 0,
+				.port_type = HL_HDCP_TX,
 			},
 		},
 	},
@@ -674,39 +935,60 @@ static const struct dw_hdcp_cfg rk3576_hdcp_cfgs[] = {
 static const struct dw_hdcp_cfg rk3588_hdcp_cfgs[] = {
 	{
 		.port_num = 2,
+		.protocol_type = HL_HDCP_PROTOCOL_DP,
+		.grf_ctrl = true,
 		.boot_reg = {0x2c, 8},
 		.port_cfg = {
 			{
 				.connect_reg = {0x20, 8},
 				.port_id = 0,
+				.port_type = HL_HDCP_TX,
 			},
 			{
 				.connect_reg = {0x20, 24},
 				.port_id = 1,
+				.port_type = HL_HDCP_TX,
 			},
 		},
 	},
 	{
 		.port_num = 3,
+		.protocol_type = HL_HDCP_PROTOCOL_HDMI,
+		.grf_ctrl = true,
 		.boot_reg = {0x3c, 16},
 		.port_cfg = {
 			{
 				.connect_reg = {0x40, 8},
 				.port_id = 0,
+				.port_type = HL_HDCP_RX,
 			},
 			{
 				.connect_reg = {0x3c, 24},
 				.port_id = 1,
+				.port_type = HL_HDCP_TX,
 			},
 			{
 				.connect_reg = {0x40, 4},
 				.port_id = 2,
+				.port_type = HL_HDCP_TX,
 			},
 		},
 	},
 };
 
 static const struct of_device_id dw_hdcp_of_match[] = {
+	{
+		.compatible = "rockchip,rk3528-hdcp",
+		.data = &rk3528_hdcp_cfgs,
+	},
+	{
+		.compatible = "rockchip,rk3538-hdcp",
+		.data = &rk3538_hdcp_cfgs,
+	},
+	{
+		.compatible = "rockchip,rk356x-hdcp",
+		.data = &rk356x_hdcp_cfgs,
+	},
 	{
 		.compatible = "rockchip,rk3576-hdcp",
 		.data = &rk3576_hdcp_cfgs,

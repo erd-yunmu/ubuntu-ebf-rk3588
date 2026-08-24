@@ -304,6 +304,8 @@ static int rkisp_pipeline_open(struct rkisp_pipeline *p,
 		dev->is_rdbk_auto = rkisp_rdbk_auto;
 		if (dev->is_aiisp_en && !hw->is_single)
 			dev->is_rdbk_auto = true;
+		if (hw->isp_ver == ISP_V35 && dev->is_aiisp_l2_buf)
+			dev->is_rdbk_auto = true;
 		if (rkisp_vicap_buf[dev->dev_id] > RKISP_VICAP_BUF_CNT_MAX)
 			rkisp_vicap_buf[dev->dev_id] = RKISP_VICAP_BUF_CNT_MAX;
 		dev->vicap_buf_cnt = rkisp_vicap_buf[dev->dev_id];
@@ -935,11 +937,13 @@ static int rkisp_plat_probe(struct platform_device *pdev)
 
 	if (isp_dev->hw_dev->unite)
 		mult = ISP_UNITE_MAX;
-	isp_dev->sw_base_addr = devm_kzalloc(dev, RKISP_ISP_SW_MAX_SIZE * mult, GFP_KERNEL);
+	isp_dev->sw_base_size = RKISP_ISP_SW_MAX_SIZE * mult;
+	isp_dev->sw_base_addr = devm_kzalloc(dev, isp_dev->sw_base_size, GFP_KERNEL);
 	if (!isp_dev->sw_base_addr)
 		return -ENOMEM;
 	if (isp_dev->hw_dev->isp_ver == ISP_V35) {
-		isp_dev->sw_vpsl_base_addr = devm_kzalloc(dev, VPSL_SW_MAX_SIZE * mult, GFP_KERNEL);
+		isp_dev->sw_vpsl_base_size = VPSL_SW_MAX_SIZE * mult;
+		isp_dev->sw_vpsl_base_addr = devm_kzalloc(dev, isp_dev->sw_vpsl_base_size, GFP_KERNEL);
 		if (!isp_dev->sw_vpsl_base_addr)
 			return -ENOMEM;
 	}
@@ -1247,6 +1251,8 @@ static int rkisp_resume(struct device *dev)
 			if (isp_dev->dev_id && !(IS_HDR_RDBK(isp_tmp->rd_mode)))
 				hw->is_idle = false;
 		}
+		if (hw->is_single && isp_dev->params_vdev.ops->vpsl_update_regs)
+			isp_dev->params_vdev.ops->vpsl_update_regs(&isp_dev->params_vdev);
 		rkisp_rdbk_trigger_event(isp_dev, T_CMD_QUEUE, NULL);
 	}
 	if (rkisp_link_sensor(isp_dev->isp_inp)) {

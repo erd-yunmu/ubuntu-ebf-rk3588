@@ -88,7 +88,7 @@ static int zero_message_process(struct ahash_request *req)
 static void rk_ahash_crypto_complete(struct crypto_async_request *base, int err)
 {
 	if (base->complete)
-		base->complete(base, err);
+		base->complete(COMPLETE_PARAM(base), err);
 }
 
 static void rk_ahash_reg_init(struct rk_crypto_dev *rk_dev)
@@ -354,7 +354,7 @@ static int rk_cra_hash_init(struct crypto_tfm *tfm)
 	ctx->fallback_tfm = crypto_alloc_ahash(alg_name, 0,
 					       CRYPTO_ALG_NEED_FALLBACK);
 	if (IS_ERR(ctx->fallback_tfm)) {
-		dev_err(rk_dev->dev, "Could not load fallback driver.\n");
+		CRYPTO_MSG("Could not load fallback driver.\n");
 		return PTR_ERR(ctx->fallback_tfm);
 	}
 	crypto_ahash_set_reqsize(__crypto_ahash_cast(tfm),

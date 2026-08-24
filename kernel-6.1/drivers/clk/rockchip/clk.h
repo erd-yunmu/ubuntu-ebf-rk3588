@@ -413,6 +413,57 @@ struct clk;
 #define RK3528_GLB_SRST_FST		0xc08
 #define RK3528_GLB_SRST_SND		0xc0c
 
+#define RK3538_GPU_CRU_BASE		0x10000
+#define RK3538_DDR_CRU_BASE		0x20000
+#define RK3538_SUBDDR_CRU_BASE		0x28000
+#define RK3538_VPU_CRU_BASE		0x30000
+#define RK3538_BUS_CRU_BASE		0x40000
+#define RK3538_RKVDEC_CRU_BASE		0x50000
+#define RK3538_VO_CRU_BASE		0x60000
+#define RK3538_PMU_CRU_BASE		0x70000
+#define RK3538_PHPL_CRU_BASE		0x80000
+#define RK3538_PHPR_CRU_BASE		0x90000
+
+#define RK3538_PLL_CON(x)		(RK2928_PLL_CON(x) + RK3538_PMU_CRU_BASE)
+#define RK3538_SUBDDR_PLL_CON(x)	((x) * 0x4 + RK3538_SUBDDR_CRU_BASE)
+#define RK3538_PMUCRU_MODE_CON00	(0x280 + RK3538_PMU_CRU_BASE)
+#define RK3538_CLKSEL_CON(x)		((x) * 0x4 + 0x300)
+#define RK3538_CLKGATE_CON(x)		((x) * 0x4 + 0x800)
+#define RK3538_SOFTRST_CON(x)		((x) * 0x4 + 0xa00)
+#define RK3538_GPUCRU_CLKSEL_CON(x)	((x) * 0x4 + 0x300 + RK3538_GPU_CRU_BASE)
+#define RK3538_GPUCRU_CLKGATE_CON(x)	((x) * 0x4 + 0x800 + RK3538_GPU_CRU_BASE)
+#define RK3538_GPUCRU_SOFTRST_CON(x)	((x) * 0x4 + 0xa00 + RK3538_GPU_CRU_BASE)
+#define RK3538_DDRCRU_CLKSEL_CON(x)	((x) * 0x4 + 0x300 + RK3538_DDR_CRU_BASE)
+#define RK3538_DDRCRU_CLKGATE_CON(x)	((x) * 0x4 + 0x800 + RK3538_DDR_CRU_BASE)
+#define RK3538_DDRCRU_SOFTRST_CON(x)	((x) * 0x4 + 0xa00 + RK3538_DDR_CRU_BASE)
+#define RK3538_SUBDDRCRU_CLKSEL_CON(x)	((x) * 0x4 + 0x300 + RK3538_SUBDDR_CRU_BASE)
+#define RK3538_SUBDDRCRU_CLKGATE_CON(x)	((x) * 0x4 + 0x800 + RK3538_SUBDDR_CRU_BASE)
+#define RK3538_SUBDDRCRU_SOFTRST_CON(x)	((x) * 0x4 + 0xa00 + RK3538_SUBDDR_CRU_BASE)
+#define RK3538_VPUCRU_CLKSEL_CON(x)	((x) * 0x4 + 0x300 + RK3538_VPU_CRU_BASE)
+#define RK3538_VPUCRU_CLKGATE_CON(x)	((x) * 0x4 + 0x800 + RK3538_VPU_CRU_BASE)
+#define RK3538_VPUCRU_SOFTRST_CON(x)	((x) * 0x4 + 0xa00 + RK3538_VPU_CRU_BASE)
+#define RK3538_BUSCRU_CLKSEL_CON(x)	((x) * 0x4 + 0x300 + RK3538_BUS_CRU_BASE)
+#define RK3538_BUSCRU_CLKGATE_CON(x)	((x) * 0x4 + 0x800 + RK3538_BUS_CRU_BASE)
+#define RK3538_BUSCRU_SOFTRST_CON(x)	((x) * 0x4 + 0xa00 + RK3538_BUS_CRU_BASE)
+#define RK3538_RKVDECCRU_CLKSEL_CON(x)	((x) * 0x4 + 0x300 + RK3538_RKVDEC_CRU_BASE)
+#define RK3538_RKVDECCRU_CLKGATE_CON(x)	((x) * 0x4 + 0x800 + RK3538_RKVDEC_CRU_BASE)
+#define RK3538_RKVDECCRU_SOFTRST_CON(x)	((x) * 0x4 + 0xa00 + RK3538_RKVDEC_CRU_BASE)
+#define RK3538_VOCRU_CLKSEL_CON(x)	((x) * 0x4 + 0x300 + RK3538_VO_CRU_BASE)
+#define RK3538_VOCRU_CLKGATE_CON(x)	((x) * 0x4 + 0x800 + RK3538_VO_CRU_BASE)
+#define RK3538_VOCRU_SOFTRST_CON(x)	((x) * 0x4 + 0xa00 + RK3538_VO_CRU_BASE)
+#define RK3538_PMUCRU_CLKSEL_CON(x)	((x) * 0x4 + 0x300 + RK3538_PMU_CRU_BASE)
+#define RK3538_PMUCRU_CLKGATE_CON(x)	((x) * 0x4 + 0x800 + RK3538_PMU_CRU_BASE)
+#define RK3538_PMUCRU_SOFTRST_CON(x)	((x) * 0x4 + 0xa00 + RK3538_PMU_CRU_BASE)
+#define RK3538_PHPLCRU_CLKSEL_CON(x)	((x) * 0x4 + 0x300 + RK3538_PHPL_CRU_BASE)
+#define RK3538_PHPLCRU_CLKGATE_CON(x)	((x) * 0x4 + 0x800 + RK3538_PHPL_CRU_BASE)
+#define RK3538_PHPLCRU_SOFTRST_CON(x)	((x) * 0x4 + 0xa00 + RK3538_PHPL_CRU_BASE)
+#define RK3538_PHPRCRU_CLKSEL_CON(x)	((x) * 0x4 + 0x300 + RK3538_PHPR_CRU_BASE)
+#define RK3538_PHPRCRU_CLKGATE_CON(x)	((x) * 0x4 + 0x800 + RK3538_PHPR_CRU_BASE)
+#define RK3538_PHPRCRU_SOFTRST_CON(x)	((x) * 0x4 + 0xa00 + RK3538_PHPR_CRU_BASE)
+#define RK3538_GLB_CNT_TH		0xc00
+#define RK3538_GLB_SRST_FST		0xc08
+#define RK3538_GLB_SRST_SND		0xc0c
+
 #define RK3562_PMU0_CRU_BASE		0x10000
 #define RK3562_PMU1_CRU_BASE		0x18000
 #define RK3562_DDR_CRU_BASE		0x20000
@@ -1484,35 +1535,26 @@ struct clk *rockchip_clk_register_halfdiv(const char *name,
 					  spinlock_t *lock);
 
 #ifdef CONFIG_RESET_CONTROLLER
-void rockchip_register_softrst(struct device_node *np,
-			       unsigned int num_regs,
-			       void __iomem *base, u8 flags);
+void rockchip_register_softrst_lut(struct device_node *np,
+				   const int *lookup_table,
+				   unsigned int num_regs,
+				   void __iomem *base, u8 flags);
 #else
-static inline void rockchip_register_softrst(struct device_node *np,
-			       unsigned int num_regs,
-			       void __iomem *base, u8 flags)
+static inline void rockchip_register_softrst_lut(struct device_node *np,
+				   const int *lookup_table,
+				   unsigned int num_regs,
+				   void __iomem *base, u8 flags)
 {
 }
 #endif
 extern void (*rk_dump_cru)(void);
 
-#if IS_MODULE(CONFIG_COMMON_CLK_ROCKCHIP)
 int rockchip_clk_protect(struct rockchip_clk_provider *ctx,
 			 unsigned int *clocks, unsigned int nclocks);
 void rockchip_clk_unprotect(void);
+#if IS_MODULE(CONFIG_COMMON_CLK_ROCKCHIP)
 void rockchip_clk_disable_unused(void);
 #else
-static inline int rockchip_clk_protect(struct rockchip_clk_provider *ctx,
-				       unsigned int *clocks,
-				       unsigned int nclocks)
-{
-	return -EOPNOTSUPP;
-}
-
-static inline void rockchip_clk_unprotect(void)
-{
-}
-
 static inline void rockchip_clk_disable_unused(void)
 {
 }
@@ -1523,5 +1565,14 @@ extern void rkclk_cpuclk_div_setting(int div);
 #else
 static inline void rkclk_cpuclk_div_setting(int div) {}
 #endif
+
+static inline void rockchip_register_softrst(struct device_node *np,
+					     unsigned int num_regs,
+					     void __iomem *base, u8 flags)
+{
+	return rockchip_register_softrst_lut(np, NULL, num_regs, base, flags);
+}
+
+void rk3538_rst_init(struct device_node *np, void __iomem *reg_base);
 
 #endif

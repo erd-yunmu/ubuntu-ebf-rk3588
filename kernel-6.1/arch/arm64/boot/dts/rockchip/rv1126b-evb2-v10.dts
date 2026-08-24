@@ -14,6 +14,18 @@
 	compatible = "rockchip,rv1126b-evb2-v10", "rockchip,rv1126b";
 };
 
+&dsi {
+	status = "disabled";
+};
+
+&dsi_in_vop {
+	status = "disabled";
+};
+
+&gmac {
+	status = "disabled";
+};
+
 &imx415 {
 	reset-gpios = <&gpio4 RK_PA7 GPIO_ACTIVE_HIGH>;
 };
@@ -21,12 +33,29 @@
 &rockchip_suspend {
 	status = "okay";
 
+	rockchip,sleep-mode-config = <
+		(0
+		| RKPM_SLP_ARMOFF_LOGOFF
+		| RKPM_SLP_PMU_PMUALIVE_32K
+		| RKPM_SLP_PMU_DIS_OSC
+		| RKPM_SLP_32K_EXT
+		| RKPM_SLP_LP_AOA
+		)
+	>;
+
 	rockchip,sleep-pin-config = <
 		(0
 		| RKPM_SLEEP_PIN0_EN
 		)
 		(0
 		| RKPM_SLEEP_PIN0_ACT_LOW
+		)
+	>;
+
+	rockchip,wakeup-config = <
+		(0
+		| RKPM_GPIO0_WKUP_EN
+		| RKPM_AAD_WKUP_EN
 		)
 	>;
 

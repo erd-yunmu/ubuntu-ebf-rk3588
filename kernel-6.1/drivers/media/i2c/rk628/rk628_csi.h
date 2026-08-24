@@ -39,6 +39,8 @@
 #define CSITX_SYS_CTRL2			(CSITX_BASE + 0x0018)
 #define VOP_WHOLE_FRM_EN		BIT(5)
 #define VSYNC_ENABLE			BIT(0)
+#define ADV_READ_PLD_EN(x)		UPDATE(x, 8, 8)
+#define ADV_READ_PLD_NUM(x)		UPDATE(x, 24, 16)
 #define CSITX_SYS_CTRL3_IMD		(CSITX_BASE + 0x001c)
 #define CONT_MODE_CLK_CLR_MASK		BIT(8)
 #define CONT_MODE_CLK_CLR(x)		UPDATE(x, 8, 8)
@@ -114,5 +116,19 @@
 #define CSI1_MAX_REGISTER		CSITX1_DPHY_CTRL
 
 #define CSI_SKIP_FRAME_NORMAL		1
+
+enum csi_pixfmt {
+	CSI_RAW8 = 0,
+	CSI_RAW10,
+	CSI_PIXEL10,
+	CSI_PIXEL128,
+	CSI_RAW12,
+	CSI_PIXEL12,
+};
+
+enum csi_datatype {
+	YUV422_8BIT = 0x1e,
+	YUV422_10BIT = 0x1f,
+};
 
 #endif

@@ -16,7 +16,7 @@
 #include <dt-bindings/usb/pd.h>
 #include "rk3576.dtsi"
 #include "rk3576-android.dtsi"
-#include "rk3576-eink.dtsi"
+#include "rk3576-ebook.dtsi"
 
 / {
 	model = "Rockchip RK3576 EBOOK V10 Board";
@@ -192,8 +192,15 @@
 		regulator-max-microvolt = <3300000>;
 	};
 
+	vkms {
+		compatible = "rockchip,vkms";
+		rockchip,vkms-crtc-num = <1>;
+		rockchip,vkms-conn-disconnected = <0>;
+	};
+
 	wireless_bluetooth: wireless-bluetooth {
 		compatible = "bluetooth-platdata";
+		bt_port = "/dev/ttyS4";
 		clocks = <&hym8563>;
 		clock-names = "ext_clock";
 		uart_rts_gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_LOW>;
@@ -233,6 +240,14 @@
 
 &cpu_b0 {
 	cpu-supply = <&vdd_cpu_big_s0>;
+};
+
+&display_subsystem {
+	status = "okay";
+};
+
+&vop {
+	status = "disabled";
 };
 
 &dp {

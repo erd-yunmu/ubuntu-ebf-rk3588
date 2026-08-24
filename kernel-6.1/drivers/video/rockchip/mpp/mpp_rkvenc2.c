@@ -342,6 +342,8 @@ struct rkvenc_dev {
 	struct rockchip_opp_info opp_info;
 	struct monitor_dev_info *mdev_info;
 #endif
+	/* for wdg timeout hw issue */
+	u32 next_wdg_off;
 };
 
 struct rkvenc_ccu {
@@ -1474,13 +1476,10 @@ static void rkvenc2_calc_timeout_thd(struct mpp_dev *mpp)
 	}
 
 	/*
-	 * When vepu_type is RKVENC_VEPU_510, multiplied by 256 core clock cycles,
-	 * else use x1024 core clk cycles
+	 * The frame timeout threshold is *1024 core clock cycles,
+	 * but the sub module timeout threshold is 1/4 frame timeout.
 	 */
-	if (hw->vepu_type == RKVENC_VEPU_510)
-		timeout_thd |= timeout_ms * (clk_get_rate(enc->core_clk_info.clk) / 256000);
-	else
-		timeout_thd |= timeout_ms * (clk_get_rate(enc->core_clk_info.clk) / 1024000);
+	timeout_thd |= timeout_ms * (clk_get_rate(enc->core_clk_info.clk) / 256000);
 
 	mpp_write(mpp, RKVENC_WDG, timeout_thd);
 }
@@ -1572,6 +1571,16 @@ static int rkvenc_run(struct mpp_dev *mpp, struct mpp_task *mpp_task)
 			mpp_clk_safe_enable(enc->core_clk_info.clk);
 		} else {
 			mpp_write(mpp, 0x300, enc_pic | BIT(30));
+		}
+		/*
+		 * Fix bug:
+		 * after page fault happens,
+		 * wdg timeout will rise immediately when next task starts,
+		 * so we need to disable wdg_en bit to avoid wdg timeout happens to the next task.
+		 */
+		if (enc->next_wdg_off) {
+			mpp_write(mpp, 0x20, mpp_read(mpp, 0x20) & ~BIT(8));
+			enc->next_wdg_off = 0;
 		}
 	}
 
@@ -1801,6 +1810,7 @@ static int rkvenc_isr(struct mpp_dev *mpp)
 	struct rkvenc_task *task;
 	struct mpp_task *mpp_task;
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
+	struct rkvenc_hw_info *hw = enc->hw_info;
 	struct mpp_taskqueue *queue = mpp->queue;
 	unsigned long core_idle;
 
@@ -1830,6 +1840,11 @@ static int rkvenc_isr(struct mpp_dev *mpp)
 		/* dump register */
 		if (mpp_debug_unlikely(DEBUG_DUMP_ERR_REG))
 			mpp_task_dump_hw_reg(mpp);
+
+		/* mark next task wdg timeout disabled if wdg timeout irq is triggered */
+		if (hw->vepu_type == RKVENC_VEPU_510 &&
+		    task->irq_status & INT_STA_WDG_STA)
+			enc->next_wdg_off = 1;
 	}
 
 	mpp_task_finish(mpp_task->session, mpp_task);

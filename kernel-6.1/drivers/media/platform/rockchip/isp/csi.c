@@ -432,7 +432,7 @@ int rkisp_expander_config(struct rkisp_device *dev,
 		cfg = &hdr_cfg;
 	}
 
-	if (cfg->hdr_mode != HDR_COMPR)
+	if (cfg->hdr_mode != HDR_CIS_MERGE)
 		return 0;
 
 	/* input data (12bit or 16bit) and output data max 20bit */
@@ -566,14 +566,15 @@ int rkisp_csi_config_patch(struct rkisp_device *dev, bool is_pre_cfg)
 			}
 
 			/* normal read back mode default */
-			if (dev->hdr.op_mode == HDR_NORMAL || dev->hdr.op_mode == HDR_COMPR)
+			if (dev->hdr.op_mode == HDR_NORMAL || dev->hdr.op_mode == HDR_CIS_MERGE)
 				dev->hdr.op_mode = HDR_RDBK_FRAME1;
 
 			if (dev->isp_inp == INP_CIF && dev->isp_ver > ISP_V21) {
 				/* read back mode default if more sensor link to isp */
 				if (!dev->hw_dev->is_single && !dev->is_m_online)
 					dev->is_rdbk_auto = true;
-				if (dev->is_m_online && dev->unite_div == ISP_UNITE_DIV2)
+				if (dev->is_m_online &&
+				    dev->unite.h_div == 2 && dev->unite.v_div == 1)
 					mode.rdbk_mode = RKISP_VICAP_ONLINE_UNITE;
 				else if (dev->is_m_online)
 					mode.rdbk_mode = RKISP_VICAP_ONLINE_MULTI;
@@ -644,6 +645,8 @@ int rkisp_csi_config_patch(struct rkisp_device *dev, bool is_pre_cfg)
 		} else {
 			rkisp_unite_write(dev, CSI2RX_CTRL0,
 					  SW_IBUF_OP_MODE(dev->hdr.op_mode), false);
+			rkisp_unite_write(dev, CSI2RX_DATA_IDS_1,
+					  dev->isp_sdev.in_fmt.mipi_dt, false);
 		}
 		/* hdr merge */
 		switch (dev->hdr.op_mode) {
@@ -686,6 +689,8 @@ int rkisp_csi_config_patch(struct rkisp_device *dev, bool is_pre_cfg)
 	}
 	if (dev->isp_ver >= ISP_V30)
 		val |= ISP3X_SW_ACK_FRM_PRO_DIS;
+	if (dev->isp_ver >= ISP_V33)
+		val |= ISP33_SW_DITHER_EN;
 	if (val)
 		rkisp_unite_set_bits(dev, CTRL_SWS_CFG, 0, val, false);
 	/* line counter from isp out, default from mp out */

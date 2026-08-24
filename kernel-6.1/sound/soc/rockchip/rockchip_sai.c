@@ -30,6 +30,7 @@
 #define CLK_SHIFT_RATE_HZ_MAX	5
 #define FW_RATIO_MAX		8
 #define FW_RATIO_MIN		1
+#define MAXBURST		16
 #define MAXBURST_PER_FIFO	8
 #define FIFO_PER_LANE		32
 
@@ -73,6 +74,7 @@ struct rk_sai_dev {
 	int  clk_ppm;
 	bool has_capture;
 	bool has_playback;
+	bool is_fpc_mode;
 	bool is_master_mode;
 	bool is_tdm;
 	bool is_clk_auto;
@@ -594,21 +596,114 @@ static int rockchip_fifo_cfg(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+/*
+ * SAI DMA_NUM
+ * Dependency: Enabled by XFER.fpc. Used for pointer integrity update of FPC.
+ *
+ * DMA_ACK_NUM: Number of ACKs required to form a complete frame.
+ * DMA_ACK_TIMES: Updates pointers for NFRAMES.
+ *
+ * Calculation formulas:
+ *   DMA_ACK_NUM = FRAME_WORD / DMA_ACK_WORD  (DMA_ACK_NUM >= 1)
+ *   DMA_TIMES   = (DMA_ACK_WORD * DMA_ACK_NUM) / FRAME_WORD  (DMA_TIMES >= 1)
+ *
+ * CASE SAI-2CH 32BITS: FRAME_WORD=2, DMA_ACK_WORD=8
+ *   DMA_ACK_NUM = (2 / 8) = 0 => 1  (minimum enforced to 1)
+ *   DMA_TIMES   = (8 * 1) / 2 = 4
+ *
+ * CASE SAI-16CH 32BITS: FRAME_WORD=16, DMA_ACK_WORD=8
+ *   DMA_ACK_NUM = 16 / 8 = 2
+ *   DMA_TIMES   = (8 * 2) / 16 = 1
+ */
+static int rockchip_sai_dma_cfg(struct snd_pcm_substream *substream,
+				struct snd_pcm_hw_params *params,
+				struct snd_soc_dai *dai,
+				int lanes)
+{
+	struct rk_sai_dev *sai = snd_soc_dai_get_drvdata(dai);
+	struct snd_dmaengine_dai_dma_data *dma_data;
+	unsigned int maxburst, frame_word, dma_ack_word, ack, times;
+
+	maxburst = min_t(u32, MAXBURST_PER_FIFO * lanes, MAXBURST);
+	dma_data = snd_soc_dai_get_dma_data(dai, substream);
+	frame_word = snd_pcm_format_size(params_format(params),
+					 params_channels(params)) / 4;
+
+	if (!frame_word)
+		frame_word = 1;
+
+	if (maxburst >= frame_word) {
+		dma_ack_word = (maxburst / frame_word) * frame_word;
+		ack = 1;
+		times = dma_ack_word / frame_word;
+	} else {
+		for (dma_ack_word = maxburst; dma_ack_word > 1; dma_ack_word--)
+			if ((frame_word % dma_ack_word) == 0)
+				break;
+		ack = frame_word / dma_ack_word;
+		times = 1;
+	}
+
+	dma_data->maxburst = dma_ack_word;
+
+	if (!sai->is_fpc_mode || sai->version < SAI_VER_2411)
+		return 0;
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		regmap_update_bits(sai->regmap, SAI_DMA_NUM,
+				   SAI_DMA_TX_ACK_NUM_MASK | SAI_DMA_TX_TIMES_MASK,
+				   SAI_DMA_TX_ACK_NUM(ack) | SAI_DMA_TX_TIMES(times));
+	else
+		regmap_update_bits(sai->regmap, SAI_DMA_NUM,
+				   SAI_DMA_RX_ACK_NUM_MASK | SAI_DMA_RX_TIMES_MASK,
+				   SAI_DMA_RX_ACK_NUM(ack) | SAI_DMA_RX_TIMES(times));
+	return 0;
+}
+
+/*
+ * FPC mode should be disabled when channels-per-lane exceeds half of per-FIFO.
+ * e.g. support 16 x 4 channels on FIFO-32 x 4 @ 4 lanes.
+ */
+static int rockchip_sai_fpc_ctrl(struct snd_pcm_substream *substream,
+				 struct snd_pcm_hw_params *params,
+				 struct snd_soc_dai *dai,
+				 int lanes)
+{
+	struct rk_sai_dev *sai = snd_soc_dai_get_drvdata(dai);
+	int en, frame_word;
+
+	if (!sai->is_fpc_mode || sai->version < SAI_VER_2411)
+		return 0;
+
+	frame_word = snd_pcm_format_size(params_format(params),
+					 params_channels(params)) / 4;
+	frame_word = frame_word / lanes;
+	en = (frame_word > (FIFO_PER_LANE >> 1)) ? 0 : 1;
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		regmap_update_bits(sai->regmap, SAI_TXCR,
+				   SAI_XCR_FPC_MASK,
+				   SAI_XCR_FPC(en));
+	} else {
+		regmap_update_bits(sai->regmap, SAI_RXCR,
+				   SAI_XCR_FPC_MASK,
+				   SAI_XCR_FPC(en));
+	}
+
+	return 0;
+}
+
 static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 				  struct snd_pcm_hw_params *params,
 				  struct snd_soc_dai *dai)
 {
 	struct rk_sai_dev *sai = snd_soc_dai_get_drvdata(dai);
-	struct snd_dmaengine_dai_dma_data *dma_data;
 	unsigned int mclk_rate, mclk_req_rate, bclk_rate, div_bclk;
 	unsigned int ch_per_lane, lanes, slot_width, mask_slots;
 	unsigned int val, fscr, reg, fifo;
 
 	if (!rockchip_sai_stream_valid(substream, dai))
 		return 0;
-
-	dma_data = snd_soc_dai_get_dma_data(dai, substream);
-	dma_data->maxburst = MAXBURST_PER_FIFO * params_channels(params) / 2;
 
 	lanes = rockchip_sai_lanes_auto(params, dai);
 
@@ -655,6 +750,9 @@ static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 
 	slot_width = SAI_XCR_SBW_V(val);
 	ch_per_lane = (params_channels(params) + mask_slots) / lanes;
+
+	rockchip_sai_fpc_ctrl(substream, params, dai, lanes);
+	rockchip_sai_dma_cfg(substream, params, dai, lanes);
 
 	rockchip_fifo_cfg(substream, dai);
 
@@ -1081,8 +1179,10 @@ static int rockchip_sai_set_tdm_slot(struct snd_soc_dai *dai,
 {
 	struct rk_sai_dev *sai = snd_soc_dai_get_drvdata(dai);
 
-	tx_mask ^= (BIT(slots) - 1);
-	rx_mask ^= (BIT(slots) - 1);
+	if (tx_mask)
+		tx_mask ^= (BIT(slots) - 1);
+	if (rx_mask)
+		rx_mask ^= (BIT(slots) - 1);
 
 	pm_runtime_get_sync(dai->dev);
 	regmap_update_bits(sai->regmap, SAI_TXCR, SAI_XCR_SBW_MASK,
@@ -1150,6 +1250,7 @@ static bool rockchip_sai_wr_reg(struct device *dev, unsigned int reg)
 	case SAI_TXFL_TIMEOUT:
 	case SAI_RXFL_TIMEOUT:
 	case SAI_DEBUG:
+	case SAI_DMA_NUM:
 		return true;
 	default:
 		return false;
@@ -1198,6 +1299,7 @@ static bool rockchip_sai_rd_reg(struct device *dev, unsigned int reg)
 	case SAI_RXFL_TIMEOUT:
 	case SAI_DEBUG:
 	case SAI_TXDATA0 ... SAI_RXDATA3:
+	case SAI_DMA_NUM:
 		return true;
 	default:
 		return false;
@@ -1342,11 +1444,11 @@ static int rockchip_sai_init_dai(struct rk_sai_dev *sai, struct resource *res,
 
 	if (sai->version >= SAI_VER_2411) {
 		regmap_update_bits(sai->regmap, SAI_TXCR,
-				   SAI_XCR_FPC_MASK | SAI_XCR_SFC_MASK,
-				   SAI_XCR_FPC_EN | SAI_XCR_SFC_ONE);
+				   SAI_XCR_SFC_MASK,
+				   SAI_XCR_SFC_ONE);
 		regmap_update_bits(sai->regmap, SAI_RXCR,
-				   SAI_XCR_FPC_MASK | SAI_XCR_SFC_MASK,
-				   SAI_XCR_FPC_EN | SAI_XCR_SFC_ONE);
+				   SAI_XCR_SFC_MASK,
+				   SAI_XCR_SFC_ONE);
 		/* The counter is driven by HCLK */
 		regmap_write(sai->regmap, SAI_TXFL_TIMEOUT, 0x1000000);
 		regmap_write(sai->regmap, SAI_RXFL_TIMEOUT, 0x1000000);
@@ -2081,6 +2183,8 @@ static int rockchip_sai_probe(struct platform_device *pdev)
 			return ret;
 		}
 	}
+
+	sai->is_fpc_mode = device_property_read_bool(&pdev->dev, "rockchip,fpc-mode");
 
 	sai->is_lane_interleaved =
 		device_property_read_bool(&pdev->dev, "rockchip,lane-interleaved");

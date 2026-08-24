@@ -364,6 +364,13 @@ config REGULATOR_DB8500_PRCMU
 	  This driver supports the voltage domain regulators controlled by the
 	  DB8500 PRCMU
 
+config REGULATOR_DW9807
+	tristate "Dongwood DW9807 regulator"
+	depends on I2C
+	help
+	  This driver supports DW9807 current regulator chips.
+	  If building into module, its name is dw9807.ko.
+
 config REGULATOR_FAN53555
 	tristate "Fairchild FAN53555 Regulator"
 	depends on I2C
@@ -884,6 +891,12 @@ config REGULATOR_MTK_DVFSRC
 	  of Mediatek. It allows for voting on regulator state
 	  between multiple users.
 
+config REGULATOR_ONXQ000
+	tristate "OMNIVISION ONXQ000 regulator support"
+	depends on I2C
+	help
+	  Support ONXQ000 power switch chip
+
 config REGULATOR_PALMAS
 	tristate "TI Palmas PMIC Regulators"
 	depends on MFD_PALMAS
@@ -1042,6 +1055,16 @@ config REGULATOR_RASPBERRYPI_TOUCHSCREEN_ATTINY
 	  This driver supports ATTINY regulator on the Raspberry Pi 7-inch
 	  touchscreen unit. The regulator is used to enable power to the
 	  TC358762, display and to control backlight.
+
+config REGULATOR_RASPBERRYPI_TOUCHSCREEN_V2
+	tristate "Raspberry Pi 7-inch touchscreen panel V2 regulator"
+	depends on BACKLIGHT_CLASS_DEVICE
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  This driver supports regulator on the V2 Raspberry Pi
+	  touchscreen unit. The regulator is used to enable power to the
+	  display and to control backlight.
 
 config REGULATOR_RC5T583
 	tristate "RICOH RC5T583 Power regulators"

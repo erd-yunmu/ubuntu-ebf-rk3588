@@ -40,7 +40,7 @@
 #include <linux/of_gpio.h>
 #include <linux/mmc/slot-gpio.h>
 #include <linux/soc/rockchip/rk_sdmmc.h>
-#include <linux/soc/rockchip/rockchip_decompress.h>
+#include <linux/soc/rockchip/rockchip_thunderboot.h>
 
 #include "dw_mmc.h"
 
@@ -1538,6 +1538,10 @@ static void dw_mci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 
 	switch (ios->power_mode) {
 	case MMC_POWER_UP:
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT_MMC
+		/* Clear FIFO to avoid errors when reading small data during initialization. */
+		dw_mci_ctrl_reset(slot->host, SDMMC_CTRL_FIFO_RESET);
+#endif
 		if (dw_mci_get_cd(mmc) && !IS_ERR_OR_NULL(slot->host->pinctrl)) {
 			if (!pinctrl_select_state(slot->host->pinctrl, slot->host->idle_state)) {
 				if (device_property_read_u32(slot->host->dev, "power-off-delay-ms",
@@ -1729,7 +1733,7 @@ static void dw_mci_prepare_sdio_irq(struct dw_mci_slot *slot, bool prepare)
 	 */
 
 	clk_en_a_old = mci_readl(host, CLKENA);
-	if (prepare) {
+	if (prepare || host->no_low_pwr) {
 		set_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags);
 		clk_en_a = clk_en_a_old & ~clken_low_pwr;
 	} else {
@@ -1972,7 +1976,6 @@ static void dw_mci_request_end(struct dw_mci *host, struct mmc_request *mrq)
 	if (host->need_xfer_timer)
 		del_timer(&host->xfer_timer);
 
-	host->slot->mrq = NULL;
 	host->mrq = NULL;
 	if (!list_empty(&host->queue)) {
 		slot = list_entry(host->queue.next,
@@ -1984,6 +1987,7 @@ static void dw_mci_request_end(struct dw_mci *host, struct mmc_request *mrq)
 		dw_mci_start_request(host, slot);
 	} else {
 		dev_vdbg(host->dev, "list empty\n");
+		host->slot->mrq = NULL;
 
 		if (host->state == STATE_SENDING_CMD11)
 			host->state = STATE_WAITING_CMD11_DONE;
@@ -2703,6 +2707,91 @@ static void dw_mci_pull_data64(struct dw_mci *host, void *buf, int cnt)
 	}
 }
 
+static void dw_mci_push_data64_32(struct dw_mci *host, void *buf, int cnt)
+{
+	struct mmc_data *data = host->data;
+	int init_cnt = cnt;
+
+	/* try and push anything in the part_buf */
+	if (unlikely(host->part_buf_count)) {
+		int len = dw_mci_push_part_bytes(host, buf, cnt);
+
+		buf += len;
+		cnt -= len;
+
+		if (host->part_buf_count == 8) {
+			mci_fifo_l_writeq(host->fifo_reg, host->part_buf);
+			host->part_buf_count = 0;
+		}
+	}
+#ifndef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
+	if (unlikely((unsigned long)buf & 0x7)) {
+		while (cnt >= 8) {
+			u64 aligned_buf[16];
+			int len = min(cnt & -8, (int)sizeof(aligned_buf));
+			int items = len >> 3;
+			int i;
+			/* memcpy from input buffer into aligned buffer */
+			memcpy(aligned_buf, buf, len);
+			buf += len;
+			cnt -= len;
+			/* push data from aligned buffer into fifo */
+			for (i = 0; i < items; ++i)
+				mci_fifo_l_writeq(host->fifo_reg, aligned_buf[i]);
+		}
+	} else
+#endif
+	{
+		u64 *pdata = buf;
+
+		for (; cnt >= 8; cnt -= 8)
+			mci_fifo_l_writeq(host->fifo_reg, *pdata++);
+		buf = pdata;
+	}
+	/* put anything remaining in the part_buf */
+	if (cnt) {
+		dw_mci_set_part_bytes(host, buf, cnt);
+		/* Push data if we have reached the expected data length */
+		if ((data->bytes_xfered + init_cnt) ==
+		    (data->blksz * data->blocks))
+			mci_fifo_l_writeq(host->fifo_reg, host->part_buf);
+	}
+}
+
+static void dw_mci_pull_data64_32(struct dw_mci *host, void *buf, int cnt)
+{
+#ifndef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
+	if (unlikely((unsigned long)buf & 0x7)) {
+		while (cnt >= 8) {
+			/* pull data from fifo into aligned buffer */
+			u64 aligned_buf[16];
+			int len = min(cnt & -8, (int)sizeof(aligned_buf));
+			int items = len >> 3;
+			int i;
+
+			for (i = 0; i < items; ++i)
+				aligned_buf[i] = mci_fifo_l_readq(host->fifo_reg);
+
+			/* memcpy from aligned buffer into output buffer */
+			memcpy(buf, aligned_buf, len);
+			buf += len;
+			cnt -= len;
+		}
+	} else
+#endif
+	{
+		u64 *pdata = buf;
+
+		for (; cnt >= 8; cnt -= 8)
+			*pdata++ = mci_fifo_l_readq(host->fifo_reg);
+		buf = pdata;
+	}
+	if (cnt) {
+		host->part_buf = mci_fifo_l_readq(host->fifo_reg);
+		dw_mci_pull_final_bytes(host, buf, cnt);
+	}
+}
+
 static void dw_mci_pull_data(struct dw_mci *host, void *buf, int cnt)
 {
 	int len;
@@ -3087,6 +3176,9 @@ static int dw_mci_init_slot(struct dw_mci *host)
 	if (ret)
 		goto err_host_allocated;
 
+	if (host->no_low_pwr)
+		set_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags);
+
 	/* Useful defaults if platform data is unset. */
 	if (host->use_dma == TRANS_MODE_IDMAC) {
 		/* Reserve last desc for dirty data */
@@ -3411,6 +3503,8 @@ static struct dw_mci_board *dw_mci_parse_dt(struct dw_mci *host)
 	if (device_property_present(dev, "fifo-watermark-aligned"))
 		host->wm_aligned = true;
 
+	host->no_low_pwr = device_property_present(dev, "no-low-pwr");
+
 	if (!device_property_read_u32(dev, "clock-frequency", &clock_frequency))
 		pdata->bus_hz = clock_frequency;
 
@@ -3497,20 +3591,9 @@ int dw_mci_probe(struct dw_mci *host)
 
 #ifdef CONFIG_ROCKCHIP_THUNDER_BOOT_MMC
 	if (device_property_read_bool(host->dev, "no-sd") &&
-	    device_property_read_bool(host->dev, "no-sdio")) {
-		if (readl_poll_timeout(host->regs + SDMMC_STATUS,
-				fifo_size,
-				!(fifo_size & (BIT(10) | GENMASK(7, 4))),
-				0, 500 * USEC_PER_MSEC))
-			dev_err(host->dev, "Controller is occupied!\n");
-
-		if (readl_poll_timeout(host->regs + SDMMC_IDSTS,
-				fifo_size, !(fifo_size & GENMASK(16, 13)),
-				0, 500 * USEC_PER_MSEC))
-			dev_err(host->dev, "DMA is still running!\n");
-
-		BUG_ON(mci_readl(host, RINTSTS) & DW_MCI_ERROR_FLAGS);
-	}
+	    device_property_read_bool(host->dev, "no-sdio"))
+		if (rk_tb_wait_ramdisk_compress_done(500) == 0)
+			dev_err(host->dev, "Wait ramdisk_c complete timeout!\n");
 #endif
 
 	host->ciu_clk = devm_clk_get(host->dev, "ciu");
@@ -3583,8 +3666,13 @@ int dw_mci_probe(struct dw_mci *host)
 		width = 16;
 		host->data_shift = 1;
 	} else if (i == 2) {
-		host->push_data = dw_mci_push_data64;
-		host->pull_data = dw_mci_pull_data64;
+		if ((host->quirks & DW_MMC_QUIRK_FIFO64_32)) {
+			host->push_data = dw_mci_push_data64_32;
+			host->pull_data = dw_mci_pull_data64_32;
+		} else {
+			host->push_data = dw_mci_push_data64;
+			host->pull_data = dw_mci_pull_data64;
+		}
 		width = 64;
 		host->data_shift = 3;
 	} else {

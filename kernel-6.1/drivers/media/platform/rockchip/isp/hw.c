@@ -442,7 +442,7 @@ void rkisp_hw_reg_restore(struct rkisp_hw_dev *dev)
 			reg = reg_buf + ISP3X_SWS_CFG;
 			*reg &= ~ISP3X_3A_DDR_WRITE_EN;
 			reg = reg_buf + ISP39_W3A_CTRL0;
-			*reg &= ~ISP39_W3A_FORCE_UPD;
+			*reg &= ~(ISP39_W3A_FORCE_UPD | ISP35_W3A_FORCE_UPD_F);
 			reg = reg_buf + ISP35_AIAWB_CTRL0;
 			*reg &= ~ISP35_AIAWB_SELF_UPD;
 			reg = reg_buf + ISP33_BAY3D_CTRL0;
@@ -596,6 +596,13 @@ void rkisp_hw_reg_restore(struct rkisp_hw_dev *dev)
 				*reg |= ISP35_AIAWB_SELF_UPD;
 				writel(*reg, base + ISP35_AIAWB_CTRL0);
 			}
+			reg = reg_buf + ISP35_AI_CTRL;
+			if (*reg & ISP35_AIISP_EN) {
+				*reg |= ISP35_AIPRE_ITS_FORCE_UPD;
+				writel(*reg, base + ISP35_AI_CTRL);
+				*reg &= ~ISP35_AIPRE_ITS_FORCE_UPD;
+				writel(*reg, base + ISP35_AI_CTRL);
+			}
 		}
 	}
 
@@ -631,6 +638,9 @@ void rkisp_hw_reg_restore(struct rkisp_hw_dev *dev)
 			if (dev->isp_ver == ISP_V35) {
 				reg = reg_buf + ISP39_W3A_CTRL0;
 				if (*reg & ISP39_W3A_EN) {
+					reg1 = reg_buf + ISP3X_ISP_CTRL1;
+					if (*reg1 & ISP35_BAYER_UPD_FE_EN)
+						*reg |= ISP35_W3A_FORCE_UPD_F;
 					*reg |= ISP39_W3A_FORCE_UPD;
 					writel(*reg, dev->base_addr + ISP39_W3A_CTRL0);
 				}
@@ -641,6 +651,11 @@ void rkisp_hw_reg_restore(struct rkisp_hw_dev *dev)
 		*reg |= CIF_ISP_CTRL_ISP_ENABLE |
 			CIF_ISP_CTRL_ISP_CFG_UPD |
 			CIF_ISP_CTRL_ISP_INFORM_ENABLE;
+		if (dev->isp_ver == ISP_V35) {
+			reg1 = reg_buf + ISP3X_ISP_CTRL1;
+			if (*reg1 & ISP35_BAYER_UPD_FE_EN)
+				*reg |= ISP35_ISP_CFG_UPD_FE;
+		}
 		writel(*reg, dev->base_addr + ISP_CTRL);
 		if (dev->unite == ISP_UNITE_TWO)
 			writel(*reg, dev->base_next_addr + ISP_CTRL);
@@ -1014,9 +1029,25 @@ static const struct of_device_id rkisp_hw_of_match[] = {
 	{},
 };
 
-static inline bool is_iommu_enable(struct device *dev)
+static int rkisp_iommu_fault_handle(struct iommu_domain *iommu, struct device *iommu_dev,
+				    unsigned long iova, int status, void *arg)
 {
+	struct rkisp_hw_dev *hw_dev = arg;
+
+	dev_err(iommu_dev, "fault addr:0x%08lx status:%x arg:%p\n", iova, status, arg);
+	if (!hw_dev) {
+		dev_err(iommu_dev, "pagefault without device to handle\n");
+		return 0;
+	}
+	rockchip_iommu_mask_irq(hw_dev->dev);
+	return 0;
+}
+
+static inline bool is_iommu_enable(struct rkisp_hw_dev *hw_dev)
+{
+	struct device *dev = hw_dev->dev;
 	struct device_node *iommu;
+	struct iommu_domain *domain;
 
 	iommu = of_parse_phandle(dev->of_node, "iommus", 0);
 	if (!iommu) {
@@ -1029,6 +1060,9 @@ static inline bool is_iommu_enable(struct device *dev)
 	}
 	of_node_put(iommu);
 
+	domain = iommu_get_domain_for_dev(dev);
+	if (domain)
+		iommu_set_fault_handler(domain, rkisp_iommu_fault_handle, hw_dev);
 	return true;
 }
 
@@ -1469,7 +1503,7 @@ static int rkisp_hw_probe(struct platform_device *pdev)
 	hw_dev->is_dma_sg_ops = true;
 	hw_dev->is_buf_init = false;
 	hw_dev->is_shutdown = false;
-	hw_dev->is_mmu = is_iommu_enable(dev);
+	hw_dev->is_mmu = is_iommu_enable(hw_dev);
 	ret = of_reserved_mem_device_init(dev);
 	if (ret) {
 		is_mem_reserved = false;
@@ -1585,7 +1619,6 @@ static int __maybe_unused rkisp_runtime_resume(struct device *dev)
 	struct rkisp_hw_dev *hw_dev = dev_get_drvdata(dev);
 	void __iomem *base = hw_dev->base_addr;
 	struct rkisp_device *isp;
-	int mult = hw_dev->unite ? 2 : 1;
 	int ret, i, j;
 	void *buf;
 
@@ -1607,7 +1640,7 @@ static int __maybe_unused rkisp_runtime_resume(struct device *dev)
 			if (!isp || !isp->sw_base_addr)
 				continue;
 			buf = isp->sw_base_addr;
-			memset(buf, 0, RKISP_ISP_SW_MAX_SIZE * mult);
+			memset(buf, 0, isp->sw_base_size);
 			memcpy_fromio(buf, base, RKISP_ISP_SW_REG_SIZE);
 			for (j = 1; j < ISP_UNITE_MAX && hw_dev->unite; j++) {
 				buf += RKISP_ISP_SW_MAX_SIZE;
@@ -1618,7 +1651,7 @@ static int __maybe_unused rkisp_runtime_resume(struct device *dev)
 				u32 *flag;
 
 				buf = isp->sw_vpsl_base_addr;
-				memset(buf, 0, VPSL_SW_MAX_SIZE * mult);
+				memset(buf, 0, isp->sw_vpsl_base_size);
 				flag = buf + VPSL_SW_REG_SIZE + VPSL_PYR_CTRL;
 				*flag = SW_REG_CACHE;
 				flag = buf + VPSL_PYR_CHN + VPSL_PYR_CTRL;

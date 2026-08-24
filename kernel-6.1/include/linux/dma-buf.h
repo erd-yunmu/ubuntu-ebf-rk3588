@@ -342,20 +342,6 @@ struct dma_buf_ops {
 
 	int (*vmap)(struct dma_buf *dmabuf, struct iosys_map *map);
 	void (*vunmap)(struct dma_buf *dmabuf, struct iosys_map *map);
-
-	/**
-	 * @get_flags:
-	 *
-	 * This is called by dma_buf_get_flags and is used to get the buffer's
-	 * flags.
-	 * This callback is optional.
-	 *
-	 * Returns:
-	 *
-	 * 0 on success or a negative error code on failure. On success flags
-	 * will be populated with the buffer's flags.
-	 */
-	int (*get_flags)(struct dma_buf *dmabuf, unsigned long *flags);
 };
 
 #ifdef CONFIG_DMABUF_CACHE
@@ -694,7 +680,6 @@ dma_buf_attachment_is_dynamic(struct dma_buf_attachment *attach)
 	return !!attach->importer_ops;
 }
 
-int is_dma_buf_file(struct file *file);
 int dma_buf_get_each(int (*callback)(const struct dma_buf *dmabuf,
 		     void *private), void *private);
 struct dma_buf_attachment *dma_buf_attach(struct dma_buf *dmabuf,
@@ -741,7 +726,6 @@ int dma_buf_mmap(struct dma_buf *, struct vm_area_struct *,
 int dma_buf_vmap(struct dma_buf *dmabuf, struct iosys_map *map);
 void dma_buf_vunmap(struct dma_buf *dmabuf, struct iosys_map *map);
 long dma_buf_set_name(struct dma_buf *dmabuf, const char *name);
-int dma_buf_get_flags(struct dma_buf *dmabuf, unsigned long *flags);
 #ifdef CONFIG_DMABUF_CACHE
 /**
  * dma_buf_set_destructor - set the dma-buf's destructor

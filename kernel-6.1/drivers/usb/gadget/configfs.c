@@ -894,6 +894,8 @@ static ssize_t os_desc_qw_sign_store(struct config_item *item, const char *page,
 	struct gadget_info *gi = os_desc_item_to_gadget_info(item);
 	int res, l;
 
+	if (!len)
+		return len;
 	l = min((int)len, OS_STRING_QW_SIGN_LEN >> 1);
 	if (page[l - 1] == '\n')
 		--l;
@@ -1389,6 +1391,8 @@ static int configfs_composite_bind(struct usb_gadget *gadget,
 		cdev->use_os_string = true;
 		cdev->b_vendor_code = gi->b_vendor_code;
 		memcpy(cdev->qw_sign, gi->qw_sign, OS_STRING_QW_SIGN_LEN);
+	} else {
+		cdev->use_os_string = false;
 	}
 
 	if (gadget_is_otg(gadget) && !otg_desc[0]) {
@@ -1790,8 +1794,7 @@ static int android_device_create(struct gadget_info *gi)
 
 		err = device_create_file(gi->dev, attr);
 		if (err) {
-			device_destroy(gi->dev->class,
-				       gi->dev->devt);
+			device_unregister(gi->dev);
 			return err;
 		}
 	}
@@ -1807,7 +1810,7 @@ static void android_device_destroy(struct gadget_info *gi)
 	attrs = android_usb_attributes;
 	while ((attr = *attrs++))
 		device_remove_file(gi->dev, attr);
-	device_destroy(gi->dev->class, gi->dev->devt);
+	device_unregister(gi->dev);
 }
 #else
 static inline int android_device_create(struct gadget_info *gi)

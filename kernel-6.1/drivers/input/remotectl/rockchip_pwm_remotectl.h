@@ -105,6 +105,7 @@ enum pwm_div {
 #define	PWM_REG_LPR_V4				0x30
 #define	PWM_REG_INTSTS_V4			0x70
 #define	PWM_REG_INT_EN_V4			0x74
+#define PWM_REG_FEATURE				0x7c
 #define	PWM_REG_MATCH_ARBITER_V4		0x100
 #define	PWM_REG_MATCH_CTRL_V4			0x104
 #define	PWM_REG_MATCH_LPRE_V4			0x108
@@ -122,10 +123,16 @@ enum pwm_div {
 #define	CHANNLE_INDEX_SHIFT		4
 #define	CHANNLE_INDEX_MASK		(0xf << CHANNLE_INDEX_SHIFT)
 
+#define MINOR_VERSION_SHIFT		16
+#define MINOR_VERSION_MASK		(0xff << MINOR_VERSION_SHIFT)
+
 /* PWM_CTRL */
 #define	PWM_MODE(v)			HIWORD_UPDATE(v, 0, 1)
 #define	CAPTURE_MODE			2
 #define	CLK_SCALE(v)			HIWORD_UPDATE(v, 4, 12)
+#define	CLK_SRC_SEL(v)			HIWORD_UPDATE(v, 13, 14)
+#define	CLK_SRC_PWM			0
+#define	CLK_SRC_RC			2
 
 /* INTSTS */
 #define	CAP_LPR_INTSTS_SHIFT		0

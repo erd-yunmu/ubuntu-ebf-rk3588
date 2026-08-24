@@ -113,14 +113,6 @@
 		vin-supply = <&vcc1v8_pmu>;
 	};
 
-	vcc_mipi: vcc-mipi{
-		compatible = "regulator-fixed";
-		regulator-name = "vcc_mipi";
-		regulator-always-on;
-		regulator-boot-on;
-		vin-supply = <&vcc1v8_pmu>;
-	};
-
 	vcc_1v8: vcc-1v8 {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_1v8";
@@ -141,11 +133,12 @@
 		vin-supply = <&vccsys_stb>;
 	};
 
-	vcc_lcd: vcc-lcd {
+	vcc_mipi: vcc-mipi {
 		compatible = "regulator-fixed";
 		gpio = <&gpio7 RK_PA7 GPIO_ACTIVE_HIGH>;
-		regulator-name = "vcc_lcd";
+		regulator-name = "vcc_mipi";
 		enable-active-high;
+		regulator-boot-on;
 	};
 
 	vcc_sd: vcc-sd {
@@ -164,6 +157,7 @@
 		regulator-name = "vccio_sd";
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <3300000>;
+		regulator-init-microvolt = <3300000>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&sdmmc_volt>;
 		gpios = <&gpio0 RK_PA6 GPIO_ACTIVE_HIGH>;
@@ -179,6 +173,7 @@
 		regulator-init-microvolt = <905000>;
 		regulator-min-microvolt = <810000>;
 		regulator-max-microvolt = <1006000>;
+		regulator-settling-time-up-us = <250>;
 		regulator-always-on;
 		regulator-boot-on;
 		pwm-supply = <&vccsys_stb>;
@@ -190,8 +185,9 @@
 		pwms = <&pwm0_8ch_0 0 25000 1>;
 		regulator-name = "vdd_cpu";
 		regulator-init-microvolt = <950000>;
-		regulator-min-microvolt = <750000>;
-		regulator-max-microvolt = <1100000>;
+		regulator-min-microvolt = <800000>;
+		regulator-max-microvolt = <1150000>;
+		regulator-settling-time-up-us = <250>;
 		regulator-always-on;
 		regulator-boot-on;
 		pwm-supply = <&vccsys_stb>;
@@ -203,8 +199,9 @@
 		pwms = <&pwm0_8ch_1 0 25000 1>;
 		regulator-name = "vdd_npu";
 		regulator-init-microvolt = <950000>;
-		regulator-min-microvolt = <750000>;
+		regulator-min-microvolt = <800000>;
 		regulator-max-microvolt = <1100000>;
+		regulator-settling-time-up-us = <250>;
 		regulator-always-on;
 		regulator-boot-on;
 		pwm-supply = <&vccsys_stb>;
@@ -230,14 +227,28 @@
 		WIFI,host_wake_irq = <&gpio0 RK_PC0 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
+
+	rk96x_wake_aov_irq: rk96x-wake-aov-irq {
+		compatible = "rockchip,rk96x-wake-aov-irq";
+		rk96x-wake-irq-gpios = <&gpio0 RK_PC0 GPIO_ACTIVE_HIGH>;
+		wakeup-source;
+		status = "okay";
+	};
 };
 
 &acdcdig_dsm {
+	pinctrl-names = "default";
+	pinctrl-0 = <&dsm_aud_rn_pins
+		     &dsm_aud_rp_pins>;
 	pa-ctl-gpios = <&gpio0 RK_PC1 GPIO_ACTIVE_HIGH>;
 	status = "okay";
 };
 
 &acodec_sound {
+	status = "okay";
+};
+
+&audio_codec_pmu {
 	status = "okay";
 };
 
@@ -266,7 +277,7 @@
 };
 
 &dsi_panel {
-	power-supply = <&vcc_lcd>;
+	power-supply = <&vcc_mipi>;
 };
 
 &fspi0 {
@@ -297,7 +308,6 @@
 		reg = <0x14>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&touch_gpio>;
-		vdd_ana-supply = <&vcc_lcd>;
 		goodix,rst-gpio = <&gpio5 RK_PD6 GPIO_ACTIVE_HIGH>;
 		goodix,irq-gpio = <&gpio3 RK_PB7 IRQ_TYPE_LEVEL_LOW>;
 	};
@@ -305,7 +315,6 @@
 	hynitron: hynitron@5a {
 		compatible = "hyn,3240";
 		reg = <0x5a>;
-		power-supply = <&vcc_lcd>;
 
 		pinctrl-names = "ts_active","ts_suspend";
 		pinctrl-0 = <&ts_int_active &ts_reset_active>;
@@ -326,11 +335,15 @@
 	rmii_phy: ethernet-phy@2 {
 		compatible = "ethernet-phy-id0680.8101", "ethernet-phy-ieee802.3-c22";
 		reg = <2>;
-		clocks = <&cru CLK_MACPHY>;
+		rockchip,macphy = <&macphy>;
+		clocks = <&cru CLK_MACPHY>, <&cru PCLK_MACPHY>;
+		clock-names = "clk", "pclk";
 		clock-frequency = <24000000>;
 		resets = <&cru SRST_RESETN_MACPHY>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&fephym2_pins>;
+		nvmem-cells = <&macphy_txamp>, <&macphy_adc_offset>;
+		nvmem-cell-names = "txamp", "adc_offset";
 		phy-is-integrated;
 	};
 };
@@ -391,7 +404,7 @@
 
 	wireless-wlan {
 		wifi_wake_host: wifi-wake-host {
-			rockchip,pins = <0 RK_PB1 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <0 RK_PC0 RK_FUNC_GPIO &pcfg_pull_down>;
 		};
 	};
 };
@@ -438,7 +451,6 @@
 };
 
 &sai2 {
-	rockchip,sai-rx-route = <1 0 2 3>;
 	status = "okay";
 	/delete-property/ pinctrl-names;
 	/delete-property/ pinctrl-0;
@@ -472,6 +484,7 @@
 	pinctrl-0 = <&sdmmc1_clk_pins &sdmmc1_cmd_pins &sdmmc1_bus4_pins>;
 	keep-power-in-suspend;
 	non-removable;
+	no-low-pwr;
 	//mmc-pwrseq = <&sdio_pwrseq>;
 	//sd-uhs-sdr104;
 	status = "okay";

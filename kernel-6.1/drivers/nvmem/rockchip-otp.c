@@ -9,6 +9,7 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/device.h>
+#include <linux/hwspinlock.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
@@ -19,6 +20,7 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include "rockchip-otp.h"
 
 /* OTP Register Offsets */
 #define OTPC_SBPI_CTRL			0x0020
@@ -78,6 +80,22 @@
 
 #define OTPC_TIMEOUT			10000
 #define OTPC_TIMEOUT_PROG		100000
+
+#define RK3538_OTPC_USER_ENABLE		0x00AC
+#define RK3538_OTPC_USER_CTRL		0x00E4
+#define RK3538_OTPC_USER_QP		0x0144
+#define RK3538_OTPC_INT_STATUS		0x016C
+#define RK3538_OTPC_LOCK_CTRL		0x01C4
+#define RK3538_OTPC_USER_ADDR		0x01D8
+#define RK3538_OTPC_SBPI_CTRL		0x01F8
+#define RK3538_OTPC_SBPI_CMD_VALID_PRE	0x02C0
+#define RK3538_OTPC_USER_Q		0x02D8
+#define RK3538_OTP_ECC_RO_SIZE		0x90
+#define RK3538_OTP_NOECC_RO_OFFSET	RK3538_OTP_ECC_RO_SIZE
+#define RK3538_OTP_NOECC_RO_SIZE	0x10
+#define RK3538_OTP_ECC_RW_OFFSET	(RK3538_OTP_NOECC_RO_OFFSET + RK3538_OTP_NOECC_RO_SIZE)
+#define RK3538_OTP_SIZE			0xc0
+
 #define RK3568_NBYTES			2
 
 #define RK3576_NO_SECURE_OFFSET		0x1C0
@@ -152,6 +170,11 @@
 /* each bit mask 32 bits in OTP NVM */
 #define ROCKCHIP_OTP_WP_MASK_NBITS	64
 
+/* Timeout (ms) for the trylock of hardware spinlocks */
+#define ROCKCHIP_OTP_HWLOCK_TIMEOUT    5000
+
+static DEFINE_MUTEX(rockchip_otp_mutex);
+
 static unsigned int rockchip_otp_wr_magic;
 module_param(rockchip_otp_wr_magic, uint, 0644);
 MODULE_PARM_DESC(rockchip_otp_wr_magic, "magic for enable otp write func.");
@@ -166,7 +189,7 @@ struct rockchip_otp {
 	struct reset_control *rst;
 	struct nvmem_config *config;
 	const struct rockchip_data *data;
-	struct mutex mutex;
+	struct hwspinlock *hwlock;
 	DECLARE_BITMAP(wp_mask, ROCKCHIP_OTP_WP_MASK_NBITS);
 };
 
@@ -428,6 +451,152 @@ read_end:
 	kfree(buf);
 	px30s_otp_standby(otp);
 disable_clks:
+	clk_bulk_disable_unprepare(otp->num_clks, otp->clks);
+
+	return ret;
+}
+
+static int rk3538_otp_wait_status(struct rockchip_otp *otp, u32 flag)
+{
+	u32 status = 0;
+	int ret;
+
+	ret = readl_poll_timeout_atomic(otp->base + RK3538_OTPC_INT_STATUS, status,
+					(status & flag), 1, OTPC_TIMEOUT);
+	if (ret)
+		return ret;
+
+	/* clean int status */
+	writel(flag, otp->base + RK3538_OTPC_INT_STATUS);
+
+	return 0;
+}
+
+static int rk3538_otp_ecc_enable(struct rockchip_otp *otp, bool enable)
+{
+	int ret = 0;
+
+	writel(SBPI_DAP_ADDR_MASK | (SBPI_DAP_ADDR << SBPI_DAP_ADDR_SHIFT),
+	       otp->base + RK3538_OTPC_SBPI_CTRL);
+
+	writel(SBPI_CMD_VALID_MASK | 0x1, otp->base + RK3538_OTPC_SBPI_CMD_VALID_PRE);
+	writel(SBPI_DAP_CMD_WRF | SBPI_DAP_REG_ECC,
+	       otp->base + OTPC_SBPI_CMD0_OFFSET);
+	if (enable)
+		writel(SBPI_ECC_ENABLE, otp->base + OTPC_SBPI_CMD1_OFFSET);
+	else
+		writel(SBPI_ECC_DISABLE, otp->base + OTPC_SBPI_CMD1_OFFSET);
+
+	writel(SBPI_ENABLE_MASK | SBPI_ENABLE, otp->base + RK3538_OTPC_SBPI_CTRL);
+
+	ret = rk3538_otp_wait_status(otp, OTPC_SBPI_DONE);
+	if (ret < 0)
+		dev_err(otp->dev, "timeout during ecc_enable\n");
+
+	return ret;
+}
+
+static int rk3538_otp_read_common(void *context, unsigned int offset, void *val,
+				  size_t bytes, bool ecc_enable)
+{
+	struct rockchip_otp *otp = context;
+	unsigned int addr_start, addr_end, addr_offset, addr_len;
+	unsigned int otp_qp;
+	u32 out_value;
+	u8 *buf;
+	int ret = 0, i = 0;
+
+	addr_start = rounddown(offset, RK3568_NBYTES) / RK3568_NBYTES;
+	addr_end = roundup(offset + bytes, RK3568_NBYTES) / RK3568_NBYTES;
+	addr_offset = offset % RK3568_NBYTES;
+	addr_len = addr_end - addr_start;
+
+	buf = kzalloc(array3_size(addr_len, RK3568_NBYTES, sizeof(*buf)),
+		      GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	writel(OTPC_LOCK | OTPC_LOCK_MASK, otp->base + RK3538_OTPC_LOCK_CTRL);
+	ret = rk3538_otp_ecc_enable(otp, ecc_enable);
+	if (ret < 0) {
+		dev_err(otp->dev, "rockchip_otp_ecc_enable err\n");
+		goto unlock;
+	}
+
+	writel(OTPC_USE_USER | OTPC_USE_USER_MASK, otp->base + RK3538_OTPC_USER_CTRL);
+	udelay(5);
+	while (addr_len--) {
+		writel(addr_start++ | OTPC_USER_ADDR_MASK,
+		       otp->base + RK3538_OTPC_USER_ADDR);
+		writel(OTPC_USER_FSM_ENABLE | OTPC_USER_FSM_ENABLE_MASK,
+		       otp->base + RK3538_OTPC_USER_ENABLE);
+		ret = rk3538_otp_wait_status(otp, OTPC_USER_DONE);
+		if (ret < 0) {
+			dev_err(otp->dev, "timeout during read setup\n");
+			goto read_end;
+		}
+		if (ecc_enable) {
+			otp_qp = readl(otp->base + RK3538_OTPC_USER_QP);
+			if (((otp_qp & 0xc0) == 0xc0) || (otp_qp & 0x20)) {
+				ret = -EIO;
+				dev_err(otp->dev, "ecc check error during read setup\n");
+				goto read_end;
+			}
+		}
+		out_value = readl(otp->base + RK3538_OTPC_USER_Q);
+		memcpy(&buf[i], &out_value, RK3568_NBYTES);
+		i += RK3568_NBYTES;
+	}
+
+	memcpy(val, buf + addr_offset, bytes);
+read_end:
+	writel(0x0 | OTPC_USE_USER_MASK, otp->base + RK3538_OTPC_USER_CTRL);
+unlock:
+	writel(OTPC_LOCK_MASK, otp->base + RK3538_OTPC_LOCK_CTRL);
+	kfree(buf);
+
+	return ret;
+}
+
+static int rk3538_otp_read(void *context, unsigned int offset, void *val,
+			   size_t bytes)
+{
+	struct rockchip_otp *otp = context;
+	u8 *buf = val;
+	size_t rbytes;
+	int ret = 0;
+
+	if (offset >= otp->data->size)
+		return -ENOMEM;
+	if (offset + bytes > otp->data->size)
+		bytes = otp->data->size - offset;
+
+	ret = clk_bulk_prepare_enable(otp->num_clks, otp->clks);
+	if (ret < 0) {
+		dev_err(otp->dev, "failed to prepare/enable clks\n");
+		return ret;
+	}
+
+	while (bytes) {
+		if (offset < RK3538_OTP_NOECC_RO_OFFSET) {
+			rbytes = min_t(size_t, bytes, RK3538_OTP_NOECC_RO_OFFSET - offset);
+			ret = rk3538_otp_read_common(context, offset, buf, rbytes, true);
+		} else if (offset < RK3538_OTP_ECC_RW_OFFSET) {
+			rbytes = min_t(size_t, bytes, RK3538_OTP_ECC_RW_OFFSET - offset);
+			ret = rk3538_otp_read_common(context, offset, buf, rbytes, false);
+		} else {
+			rbytes = bytes;
+			ret = rk3538_otp_read_common(context, offset, buf, rbytes, true);
+		}
+
+		if (ret)
+			break;
+
+		offset += rbytes;
+		buf += rbytes;
+		bytes -= rbytes;
+	}
+
 	clk_bulk_disable_unprepare(otp->num_clks, otp->clks);
 
 	return ret;
@@ -706,16 +875,53 @@ static int rv1126_otp_oem_write(void *context, unsigned int offset, void *val,
 	return ret;
 }
 
-static int rockchip_otp_read(void *context, unsigned int offset, void *val,
-			     size_t bytes)
+static int rockchip_otp_lock(struct rockchip_otp *otp)
+{
+	mutex_lock(&rockchip_otp_mutex);
+
+	if (otp->hwlock) {
+		if (hwspin_lock_timeout_raw(otp->hwlock, ROCKCHIP_OTP_HWLOCK_TIMEOUT)) {
+			dev_err(otp->dev, "timeout get the hwspinlock\n");
+			mutex_unlock(&rockchip_otp_mutex);
+			return -ETIMEDOUT;
+		}
+	}
+
+	return 0;
+}
+
+static void rockchip_otp_unlock(struct rockchip_otp *otp)
+{
+	if (otp->hwlock)
+		hwspin_unlock_raw(otp->hwlock);
+
+	mutex_unlock(&rockchip_otp_mutex);
+}
+
+void rockchip_otp_mutex_lock(void)
+{
+	mutex_lock(&rockchip_otp_mutex);
+}
+EXPORT_SYMBOL_GPL(rockchip_otp_mutex_lock);
+
+void rockchip_otp_mutex_unlock(void)
+{
+	mutex_unlock(&rockchip_otp_mutex);
+}
+EXPORT_SYMBOL_GPL(rockchip_otp_mutex_unlock);
+
+static int rockchip_otp_read(void *context, unsigned int offset,
+			     void *val, size_t bytes)
 {
 	struct rockchip_otp *otp = context;
 	int ret = -EINVAL;
 
-	mutex_lock(&otp->mutex);
+	ret = rockchip_otp_lock(otp);
+	if (ret)
+		return ret;
 	if (otp->data && otp->data->reg_read)
 		ret = otp->data->reg_read(context, offset, val, bytes);
-	mutex_unlock(&otp->mutex);
+	rockchip_otp_unlock(otp);
 
 	return ret;
 }
@@ -726,13 +932,15 @@ static int rockchip_otp_write(void *context, unsigned int offset, void *val,
 	struct rockchip_otp *otp = context;
 	int ret = -EINVAL;
 
-	mutex_lock(&otp->mutex);
+	ret = rockchip_otp_lock(otp);
+	if (ret)
+		return ret;
 	if (rockchip_otp_wr_magic == ROCKCHIP_OTP_WR_MAGIC &&
 	    otp->data && otp->data->reg_write) {
 		ret = otp->data->reg_write(context, offset, val, bytes);
 		rockchip_otp_wr_magic = 0;
 	}
-	mutex_unlock(&otp->mutex);
+	rockchip_otp_unlock(otp);
 
 	return ret;
 }
@@ -781,6 +989,17 @@ static const struct rockchip_data rk3528_data = {
 	.clocks = rk3528_otp_clocks,
 	.num_clks = ARRAY_SIZE(rk3528_otp_clocks),
 	.reg_read = rk3568_otp_read,
+};
+
+static const char * const rk3538_otp_clocks[] = {
+	"usr", "sbpi", "apb", "mask", "arb"
+};
+
+static const struct rockchip_data rk3538_data = {
+	.size = RK3538_OTP_SIZE,
+	.clocks = rk3538_otp_clocks,
+	.num_clks = ARRAY_SIZE(rk3538_otp_clocks),
+	.reg_read = rk3538_otp_read,
 };
 
 static const char * const rk3568_otp_clocks[] = {
@@ -885,6 +1104,12 @@ static const struct of_device_id rockchip_otp_match[] = {
 		.data = (void *)&rk3528_data,
 	},
 #endif
+#ifdef CONFIG_CPU_RK3538
+	{
+		.compatible = "rockchip,rk3538-otp",
+		.data = (void *)&rk3538_data,
+	},
+#endif
 #ifdef CONFIG_CPU_RK3562
 	{
 		.compatible = "rockchip,rk3562-otp",
@@ -952,12 +1177,15 @@ static int rockchip_otp_probe(struct platform_device *pdev)
 	if (!otp)
 		return -ENOMEM;
 
-	mutex_init(&otp->mutex);
 	otp->data = data;
 	otp->dev = dev;
 	otp->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(otp->base))
 		return PTR_ERR(otp->base);
+
+	ret = of_hwspin_lock_get_id(dev->of_node, 0);
+	if (ret >= 0)
+		otp->hwlock = devm_hwspin_lock_request_specific(dev, ret);
 
 	otp->num_clks = data->num_clks;
 	otp->clks = devm_kcalloc(dev, otp->num_clks,

@@ -4,7 +4,7 @@
  *
  * Copyright (C) 2011 Google, Inc.
  * Copyright (C) 2019, 2020 Linaro Ltd.
- * Copyright (c) 2021, 2022 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2021, 2022 Rockchip Electronics Co., Ltd.
  *
  * Portions based off of Andrew Davis' SRAM heap:
  * Copyright (C) 2019 Texas Instruments Incorporated - http://www.ti.com/
@@ -25,6 +25,7 @@
 #include <linux/rockchip/rockchip_sip.h>
 
 #include "page_pool.h"
+#include "deferred-free-helper.h"
 
 static struct dma_heap *sys_heap;
 static struct dma_heap *sys_dma32_heap;
@@ -43,6 +44,7 @@ struct system_heap_buffer {
 	struct sg_table sg_table;
 	int vmap_cnt;
 	void *vaddr;
+	struct deferred_freelist_item deferred_free;
 	struct dmabuf_page_pool **pools;
 	bool uncached;
 };
@@ -69,8 +71,8 @@ static gfp_t order_flags[] = {HIGH_ORDER_GFP, HIGH_ORDER_GFP, LOW_ORDER_GFP};
  */
 static unsigned int orders[] = {8, 4, 0};
 #define NUM_ORDERS ARRAY_SIZE(orders)
-struct dmabuf_page_pool *pools[NUM_ORDERS];
-struct dmabuf_page_pool *dma32_pools[NUM_ORDERS];
+static struct dmabuf_page_pool *pools[NUM_ORDERS];
+static struct dmabuf_page_pool *dma32_pools[NUM_ORDERS];
 
 static struct sg_table *dup_sg_table(struct sg_table *table)
 {
@@ -375,35 +377,31 @@ static void *system_heap_do_vmap(struct system_heap_buffer *buffer)
 	return vaddr;
 }
 
-static int system_heap_vmap(struct dma_buf *dmabuf, struct iosys_map *map)
+static void *system_heap_vmap(struct dma_buf *dmabuf)
 {
 	struct system_heap_buffer *buffer = dmabuf->priv;
 	void *vaddr;
-	int ret = 0;
 
 	mutex_lock(&buffer->lock);
 	if (buffer->vmap_cnt) {
 		buffer->vmap_cnt++;
-		iosys_map_set_vaddr(map, buffer->vaddr);
+		vaddr = buffer->vaddr;
 		goto out;
 	}
 
 	vaddr = system_heap_do_vmap(buffer);
-	if (IS_ERR(vaddr)) {
-		ret = PTR_ERR(vaddr);
+	if (IS_ERR(vaddr))
 		goto out;
-	}
 
 	buffer->vaddr = vaddr;
 	buffer->vmap_cnt++;
-	iosys_map_set_vaddr(map, buffer->vaddr);
 out:
 	mutex_unlock(&buffer->lock);
 
-	return ret;
+	return vaddr;
 }
 
-static void system_heap_vunmap(struct dma_buf *dmabuf, struct iosys_map *map)
+static void system_heap_vunmap(struct dma_buf *dmabuf, void *vaddr)
 {
 	struct system_heap_buffer *buffer = dmabuf->priv;
 
@@ -413,7 +411,6 @@ static void system_heap_vunmap(struct dma_buf *dmabuf, struct iosys_map *map)
 		buffer->vaddr = NULL;
 	}
 	mutex_unlock(&buffer->lock);
-	iosys_map_clear(map);
 }
 
 static int system_heap_zero_buffer(struct system_heap_buffer *buffer)
@@ -426,36 +423,52 @@ static int system_heap_zero_buffer(struct system_heap_buffer *buffer)
 
 	for_each_sgtable_page(sgt, &piter, 0) {
 		p = sg_page_iter_page(&piter);
-		vaddr = kmap_local_page(p);
+		vaddr = kmap_atomic(p);
 		memset(vaddr, 0, PAGE_SIZE);
-		kunmap_local(vaddr);
+		kunmap_atomic(vaddr);
 	}
 
 	return ret;
 }
 
-static void system_heap_dma_buf_release(struct dma_buf *dmabuf)
+static void system_heap_buf_free(struct deferred_freelist_item *item,
+				 enum df_reason reason)
 {
-	struct system_heap_buffer *buffer = dmabuf->priv;
+	struct system_heap_buffer *buffer;
 	struct sg_table *table;
 	struct scatterlist *sg;
 	int i, j;
 
+	buffer = container_of(item, struct system_heap_buffer, deferred_free);
 	/* Zero the buffer pages before adding back to the pool */
-	system_heap_zero_buffer(buffer);
+	if (reason == DF_NORMAL)
+		if (system_heap_zero_buffer(buffer))
+			reason = DF_UNDER_PRESSURE; // On failure, just free
 
 	table = &buffer->sg_table;
 	for_each_sgtable_sg(table, sg, i) {
 		struct page *page = sg_page(sg);
 
-		for (j = 0; j < NUM_ORDERS; j++) {
-			if (compound_order(page) == orders[j])
-				break;
+		if (reason == DF_UNDER_PRESSURE) {
+			__free_pages(page, compound_order(page));
+		} else {
+			for (j = 0; j < NUM_ORDERS; j++) {
+				if (compound_order(page) == orders[j])
+					break;
+			}
+			dmabuf_page_pool_free(buffer->pools[j], page);
 		}
-		dmabuf_page_pool_free(buffer->pools[j], page);
 	}
 	sg_free_table(table);
 	kfree(buffer);
+}
+
+static void system_heap_dma_buf_release(struct dma_buf *dmabuf)
+{
+	struct system_heap_buffer *buffer = dmabuf->priv;
+	int npages = PAGE_ALIGN(buffer->len) / PAGE_SIZE;
+
+	deferred_free(&buffer->deferred_free, system_heap_buf_free, npages);
 }
 
 static const struct dma_buf_ops system_heap_buf_ops = {
@@ -644,14 +657,17 @@ static struct dma_buf *system_heap_allocate(struct dma_heap *heap,
 
 static long system_get_pool_size(struct dma_heap *heap)
 {
-	unsigned long num_bytes = 0;
+	int i;
+	long num_pages = 0;
 	struct dmabuf_page_pool **pool;
 
 	pool = strstr(dma_heap_get_name(heap), "dma32") ? dma32_pools : pools;
-	for (int i = 0; i < NUM_ORDERS; i++, pool++)
-		num_bytes += dmabuf_page_pool_get_size(*pool);
+	for (i = 0; i < NUM_ORDERS; i++, pool++) {
+		num_pages += ((*pool)->count[POOL_LOWPAGE] +
+			      (*pool)->count[POOL_HIGHPAGE]) << (*pool)->order;
+	}
 
-	return num_bytes;
+	return num_pages << PAGE_SHIFT;
 }
 
 static const struct dma_heap_ops system_heap_ops = {
@@ -752,7 +768,8 @@ static int system_heap_create(void)
 	}
 
 	for (i = 0; i < NUM_ORDERS; i++) {
-		dma32_pools[i] = dmabuf_page_pool_create(order_flags[i] | GFP_DMA32, orders[i]);
+		dma32_pools[i] = dmabuf_page_pool_create((order_flags[i] & ~__GFP_HIGHMEM) |
+							 GFP_DMA32, orders[i]);
 
 		if (!dma32_pools[i]) {
 			int j;
@@ -823,4 +840,3 @@ err_dma32_pool:
 }
 module_init(system_heap_create);
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(DMA_BUF);

@@ -3926,7 +3926,7 @@ static const struct ox03c10_mode supported_modes[] = {
 		.exp_mode = EXP_HDR3_DCG_VS,
 		.bpp = 12,
 		.link_freq_idx = 0,
-		.hdr_mode = HDR_COMPR,
+		.hdr_mode = HDR_CIS_MERGE,
 		.hdr_compr = &ox03c10_hdr_compr_12,
 		.hdr_operating_mode = OX03C10_HDR3_DCG_VS_12BIT,
 		.reg_list = ox03c10_1920x1080_30fps_HDR3_DCG_VS_PWL12_mipi600,
@@ -3950,7 +3950,7 @@ static const struct ox03c10_mode supported_modes[] = {
 		.exp_mode = EXP_HDR3_DCG_SPD,
 		.bpp = 12,
 		.link_freq_idx = 0,
-		.hdr_mode = HDR_COMPR,
+		.hdr_mode = HDR_CIS_MERGE,
 		.hdr_compr = &ox03c10_hdr_compr_12,
 		.hdr_operating_mode = OX03C10_HDR3_DCG_SPD_12BIT,
 		.reg_list = ox03c10_1920x1080_30fps_HDR3_DCG_SPD_PWL12_mipi600,
@@ -3974,7 +3974,7 @@ static const struct ox03c10_mode supported_modes[] = {
 		.exp_mode = EXP_HDR3_DCG_VS,
 		.bpp = 16,
 		.link_freq_idx = 1,
-		.hdr_mode = HDR_COMPR,
+		.hdr_mode = HDR_CIS_MERGE,
 		.hdr_compr = &ox03c10_hdr_compr_16,
 		.hdr_operating_mode = OX03C10_HDR3_DCG_VS_LFM_16BIT,
 		.reg_list = ox03c10_1920x1080_30fps_HDR3_DCG_VS_LFM_PWL16_mipi996,
@@ -4186,7 +4186,10 @@ static const struct dev_pm_ops ox03c10_pm_ops = {
 static int ox03c10_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
 	struct ox03c10 *ox03c10 = v4l2_get_subdevdata(sd);
-#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+	struct v4l2_mbus_framefmt *try_fmt =
+				v4l2_subdev_state_get_format(fh->state, 0);
+#elif KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 	struct v4l2_mbus_framefmt *try_fmt =
 				v4l2_subdev_get_try_format(sd, fh->state, 0);
 #else
@@ -4647,6 +4650,7 @@ static long ox03c10_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	struct rkmodule_wb_gain_group *wb_gain_group = NULL;
 	struct rkmodule_blc_group *blc_group = NULL;
 	struct rkmodule_channel_info *ch_info = NULL;
+	struct rkmodule_hdr_compr *compr_param = NULL;
 	u32 *exp_mode = NULL;
 	u32 i, h, w;
 	long ret = 0;
@@ -4661,12 +4665,12 @@ static long ox03c10_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		hdr = (struct rkmodule_hdr_cfg *)arg;
 		hdr->esp.mode = HDR_NORMAL_VC;
 		hdr->hdr_mode = ox03c10->cur_mode->hdr_mode;
-		if (hdr->hdr_mode == HDR_COMPR)
+		if (hdr->hdr_mode == HDR_CIS_MERGE)
 			hdr->compr = *ox03c10->cur_mode->hdr_compr;
 		break;
 	case RKMODULE_SET_HDR_CFG:
 		hdr = (struct rkmodule_hdr_cfg *)arg;
-		if (ox03c10->cur_mode->hdr_mode == HDR_COMPR)
+		if (ox03c10->cur_mode->hdr_mode == HDR_CIS_MERGE)
 			hdr->hdr_mode = ox03c10->cur_mode->hdr_mode;
 		w = ox03c10->cur_mode->width;
 		h = ox03c10->cur_mode->height;
@@ -4720,6 +4724,11 @@ static long ox03c10_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	case RKMODULE_SET_EXP_MODE:
 		ret = ox03c10_select_exp_mode(ox03c10, *(u32 *)arg);
 		break;
+	case RKMODULE_GET_HDR_COMPR_PARAM:
+		compr_param = (struct rkmodule_hdr_compr *)arg;
+		if (ox03c10->cur_mode->hdr_mode == HDR_CIS_MERGE)
+			*compr_param = *ox03c10->cur_mode->hdr_compr;
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -4741,6 +4750,7 @@ static long ox03c10_compat_ioctl32(struct v4l2_subdev *sd, unsigned int cmd,
 	struct rkmodule_wb_gain_group *wb_gain_group = NULL;
 	struct rkmodule_blc_group *blc_group = NULL;
 	struct rkmodule_channel_info *ch_info = NULL;
+	struct rkmodule_hdr_compr *compr_param = NULL;
 	u32 exp_mode = 0;
 	long ret = 0;
 
@@ -4906,6 +4916,22 @@ static long ox03c10_compat_ioctl32(struct v4l2_subdev *sd, unsigned int cmd,
 		if (copy_from_user(&exp_mode, up, sizeof(u32)))
 			return -EFAULT;
 		ret = ox03c10_ioctl(sd, cmd, &exp_mode);
+		break;
+	case RKMODULE_GET_HDR_COMPR_PARAM:
+		compr_param = kzalloc(sizeof(*compr_param), GFP_KERNEL);
+		if (!compr_param) {
+			ret = -ENOMEM;
+			return ret;
+		}
+
+		ret = ox03c10_ioctl(sd, cmd, compr_param);
+		if (!ret) {
+			if (copy_to_user(up, compr_param, sizeof(*compr_param))) {
+				kfree(compr_param);
+				return -EFAULT;
+			}
+		}
+		kfree(compr_param);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -5154,8 +5180,14 @@ unlock_and_return:
 	return ret;
 }
 
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
 static int ox03c10_g_frame_interval(struct v4l2_subdev *sd,
 			struct v4l2_subdev_frame_interval *fi)
+#else
+static int ox03c10_g_frame_interval(struct v4l2_subdev *sd,
+			struct v4l2_subdev_state *sd_state,
+			struct v4l2_subdev_frame_interval *fi)
+#endif
 {
 	struct ox03c10 *ox03c10 = v4l2_get_subdevdata(sd);
 	const struct ox03c10_mode *mode = ox03c10->cur_mode;
@@ -5287,7 +5319,9 @@ static int ox03c10_set_fmt(struct v4l2_subdev *sd,
 	fmt->format.field = V4L2_FIELD_NONE;
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
-	#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+	#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+		*v4l2_subdev_state_get_format(sd_state, fmt->pad) = fmt->format;
+	#elif KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 		*v4l2_subdev_get_try_format(sd, sd_state, fmt->pad) = fmt->format;
 	#else
 		*v4l2_subdev_get_try_format(sd, cfg, fmt->pad) = fmt->format;
@@ -5343,7 +5377,9 @@ static int ox03c10_get_fmt(struct v4l2_subdev *sd,
 	mutex_lock(&ox03c10->mutex);
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
-	#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+	#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+		fmt->format = *v4l2_subdev_state_get_format(sd_state, fmt->pad);
+	#elif KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 		fmt->format = *v4l2_subdev_get_try_format(sd, sd_state, fmt->pad);
 	#else
 		fmt->format = *v4l2_subdev_get_try_format(sd, cfg, fmt->pad);
@@ -5456,7 +5492,9 @@ static const struct v4l2_subdev_core_ops ox03c10_core_ops = {
 
 static const struct v4l2_subdev_video_ops ox03c10_video_ops = {
 	.s_stream = ox03c10_s_stream,
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
 	.g_frame_interval = ox03c10_g_frame_interval,
+#endif
 #if KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE
 	.g_mbus_config = ox03c10_g_mbus_config,
 #endif
@@ -5471,6 +5509,9 @@ static const struct v4l2_subdev_pad_ops ox03c10_pad_ops = {
 	.get_selection = ox03c10_get_selection,
 #if KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE
 	.get_mbus_config = ox03c10_g_mbus_config,
+#endif
+#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+	.get_frame_interval = ox03c10_g_frame_interval,
 #endif
 };
 
@@ -5821,8 +5862,12 @@ static int ox03c10_mipi_data_lanes_parse(struct ox03c10 *ox03c10)
 	return 0;
 }
 
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
 static int ox03c10_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
+#else
+static int ox03c10_probe(struct i2c_client *client)
+#endif
 {
 	struct device *dev = &client->dev;
 	struct device_node *node = dev->of_node;

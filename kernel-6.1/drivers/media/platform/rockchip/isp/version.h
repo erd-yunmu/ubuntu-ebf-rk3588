@@ -601,6 +601,68 @@
  * 33.fix bls2/bls3
  * 34.reduce rockit buf vmap
  * 35.fix mipi overflow for isp21
+ *
+ * v3.1.0 (AIQ v6.31.0)
+ * 1.add ioctl RKISP_VPSS_GET_ISP_WORKING
+ * 2.support wrap stream latter for isp35
+ * 3.fix sequence error correction
+ * 4.boottime for isp35
+ * 5.fix enh for isp35
+ * 6.support attach thunderboot buffer when iommu enable
+ * 7.extended pixel for differ isp
+ * 8.fix lsc no update for isp30
+ * 9.fix resource release if user crashes
+ * 10.support unite mode for isp35
+ * 11.support aiisp yuv mode
+ * 12.aiisp switch for isp35
+ * 13.aiisp switch for offline mode
+ * 14.mp output buf notice to aiisp
+ * 15.fix unite div calculation
+ * 16.add iommu fault handler
+ * 17.aiisp switch for isp35 multi sensor
+ * 18.optimize memory for isp35 aiisp
+ * 19.support aibnr l2 for isp35
+ * 20.fix b3dldc for isp35
+ * 21.fix fast with vpss for isp35
+ * 22.clear aiisp l2 stop status
+ *
+ * v3.2.0 (AIQ v6.32.0)
+ * 1.fix 3a error for multi sensor only vpss output
+ * 2.fix isp fast stop no clean state
+ * 3.fix 3dlut error for isp39
+ * 4.dynamic cropping for isp30 offline
+ * 5.support raw14 format
+ * 6.fix aibnr error for multi sensor
+ * 7.fix rdbk_mode for pipeline link setup
+ * 8.update for bilinear scale disable
+ * 9.Check whether the size of the shared memory structure in the MCU and the kernel is properly equal
+ * 10.fix output on-off with crop
+ * 11.dither enable default
+ * 12.fix ae win1 for isp35
+ * 13.max hardware size change to 25M for isp30 isp39
+ * 14.support aibnr single buf
+ * 15.fix resume error if aibnr enable for isp35
+ * 16.aibnr l2 new flow for isp35
+ *
+ * v3.3.0 (AIQ v6.33.0)
+ * 1.support unite online for isp35
+ * 2.fix mesh buf state if abandon
+ * 3.fix dhaz for isp30 multi sensor
+ * 4.fix no stats output for isp35
+ * 5.remove dmatx lock by hw dev_lock
+ * 6.fix dmarx format for raw14/raw16
+ * 7.vicap/isp modify HDR_COMPR to HDR_CIS_MERGE
+ * 8.fix stream stop no to disable
+ * 9.fix bay3d length resume error
+ * 10.support multi online to vpss for isp35
+ * 11.fix enh for isp35
+ * 12.fix aiisp resume error for isp35
+ * 13.fix aiisp no off when stop
+ * 14.support yuv-in path
+ * 15.unite for info2ddr
+ * 16.fix isp_rockit max info
+ * 17.support 8k for isp35
+ * 18.fix hdr and normal multi sensor for isp30
  */
 
 #define RKISP_DRIVER_VERSION RKISP_API_VERSION

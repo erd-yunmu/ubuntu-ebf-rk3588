@@ -22,7 +22,6 @@
 
 #define DRIVER_NAME			"rk-dma"
 #define DMA_MAX_SIZE			(0x1000000)
-#define LLI_BLOCK_SIZE			(SZ_4K)
 #define RK_DMA_VER(major, minor)	(((major) << 16) | ((minor) << 0))
 
 #define RK_MAX_BURST_LEN		16
@@ -53,6 +52,8 @@
 #define RK_DMA_CMN_DYNCTL		RK_DMA_CMN_REG(0x0014) /* Address Offset: 0x0014 */
 #define RK_DMA_CMN_IS0			RK_DMA_CMN_REG(0x0018) /* Address Offset: 0x0018 */
 #define RK_DMA_CMN_IS1			RK_DMA_CMN_REG(0x001c) /* Address Offset: 0x001C */
+#define RK_DMA_CMN_IE0			RK_DMA_CMN_REG(0x0020) /* Address Offset: 0x0020 */
+#define RK_DMA_CMN_IE1			RK_DMA_CMN_REG(0x0024) /* Address Offset: 0x0024 */
 #define RK_DMA_CMN_CAP0			RK_DMA_CMN_REG(0x0030) /* Address Offset: 0x0030 */
 #define RK_DMA_CMN_CAP1			RK_DMA_CMN_REG(0x0034) /* Address Offset: 0x0034 */
 #define RK_DMA_CMN_PCH_EN		RK_DMA_CMN_REG(0x0040) /* Address Offset: 0x0040 */
@@ -378,7 +379,7 @@ enum rk_dma_burst_width {
 	DMA_BURST_WIDTH_16_BYTES,
 };
 
-struct rk_desc_hw {
+struct rk_lli {
 	u32 trf_ctl0;
 	u32 trf_ctl1;
 	u32 sar;
@@ -402,10 +403,14 @@ struct rk_desc_hw {
 	u32 rsv1;
 } __aligned(32);
 
+struct rk_desc_hw {
+	struct rk_lli *lli;
+	dma_addr_t lli_hw;
+};
+
 struct rk_dma_desc_sw {
 	struct virt_dma_desc	vd;
 	struct rk_desc_hw	*desc_hw;
-	dma_addr_t		desc_hw_lli;
 	size_t			desc_num;
 	size_t			size;
 	enum dma_transfer_direction dir;
@@ -477,7 +482,7 @@ static void rk_dma_set_desc(struct rk_dma_chan *c, struct rk_dma_desc_sw *ds)
 	else
 		writel(LCH_IE_DMA_DONE_IE_EN, RK_DMA_LCH_IE);
 
-	writel(ds->desc_hw_lli, RK_DMA_LCH_CMDBA);
+	writel(ds->desc_hw[0].lli_hw, RK_DMA_LCH_CMDBA);
 	writel(LCH_TRF_CMD_DST_MT(DMA_MT_TRANSFER_LINK_LIST) |
 	       LCH_TRF_CMD_SRC_MT(DMA_MT_TRANSFER_LINK_LIST) |
 	       LCH_TRF_CMD_TT_FC(ds->dir) | LCH_TRF_CMD_DMA_START,
@@ -485,7 +490,7 @@ static void rk_dma_set_desc(struct rk_dma_chan *c, struct rk_dma_desc_sw *ds)
 
 	dev_dbg(c->vc.chan.device->dev,
 		"%s: id: %d, desc_sw: %px, desc_hw_lli: %pad\n",
-		__func__, l->id, ds, &ds->desc_hw_lli);
+		__func__, l->id, ds, &ds->desc_hw[0].lli_hw);
 }
 
 static u32 rk_dma_get_chan_stat(struct rk_dma_lch *l)
@@ -522,6 +527,11 @@ static int rk_dma_init(struct rk_dma_dev *d)
 	writel(0xffffffff, RK_DMA_CMN_DYNCTL);
 	writel(0xffffffff, RK_DMA_CMN_IS0);
 	writel(0xffffffff, RK_DMA_CMN_IS1);
+
+	if (ver >= RK_DMA_VER(1, 2)) {
+		writel(0xffffffff, RK_DMA_CMN_IE0);
+		writel(0xffffffff, RK_DMA_CMN_IE1);
+	}
 
 	for (i = 0; i < pch; i++)
 		writel(CMN_PCH_EN(i), RK_DMA_CMN_PCH_EN);
@@ -678,9 +688,9 @@ static int rk_dma_lch_get_bytes_xfered(struct rk_dma_lch *l)
 
 	/* cmd_entry holds the current LLI being processed */
 	if (ds->dir == DMA_MEM_TO_DEV)
-		bytes = ds->desc_hw[0].sar - ds->desc_hw[1].sar;
+		bytes = ds->desc_hw[0].lli->sar - ds->desc_hw[1].lli->sar;
 	else
-		bytes = ds->desc_hw[0].dar - ds->desc_hw[1].dar;
+		bytes = ds->desc_hw[0].lli->dar - ds->desc_hw[1].lli->dar;
 
 	/*
 	 * The transferred bytes are calculated by subtracting first_lli.base from
@@ -767,30 +777,63 @@ static void rk_dma_fill_desc(struct rk_dma_desc_sw *ds, dma_addr_t dst,
 {
 	/* assign llp_nxt for cmd_entry */
 	if (num == 0) {
-		ds->desc_hw[0].llp_nxt = ds->desc_hw_lli + sizeof(struct rk_desc_hw);
-		ds->desc_hw[0].trf_cfg = ccfg;
+		ds->desc_hw[0].lli->llp_nxt = ds->desc_hw[1].lli_hw;
+		ds->desc_hw[0].lli->trf_cfg = ccfg;
 
 		return;
 	}
 
 	if ((num + 1) < ds->desc_num)
-		ds->desc_hw[num].llp_nxt = ds->desc_hw_lli + (num + 1) * sizeof(struct rk_desc_hw);
+		ds->desc_hw[num].lli->llp_nxt = ds->desc_hw[num + 1].lli_hw;
 
-	ds->desc_hw[num].sar = src;
-	ds->desc_hw[num].dar = dst;
-	ds->desc_hw[num].block_ts = BLOCK_TS(len);
-	ds->desc_hw[num].trf_ctl0 = cc0;
-	ds->desc_hw[num].trf_ctl1 = cc1;
+	ds->desc_hw[num].lli->sar = src;
+	ds->desc_hw[num].lli->dar = dst;
+	ds->desc_hw[num].lli->block_ts = BLOCK_TS(len);
+	ds->desc_hw[num].lli->trf_ctl0 = cc0;
+	ds->desc_hw[num].lli->trf_ctl1 = cc1;
 }
 
-static void *rk_dma_pool_alloc(struct rk_dma_dev *d, struct rk_dma_desc_sw *ds)
+static void rk_dma_pool_free(struct rk_dma_dev *d, struct rk_dma_desc_sw *ds)
 {
-	size_t size = ds->desc_num * sizeof(struct rk_desc_hw);
+	int i;
 
-	if (d->gpool)
-		return gen_pool_dma_zalloc(d->gpool, size, &ds->desc_hw_lli);
+	for (i = 0; i < ds->desc_num; i++) {
+		if (!ds->desc_hw[i].lli)
+			continue;
 
-	return dma_pool_zalloc(d->pool, GFP_NOWAIT, &ds->desc_hw_lli);
+		if (d->gpool)
+			gen_pool_free(d->gpool, (unsigned long)ds->desc_hw[i].lli,
+				      sizeof(struct rk_lli));
+		else
+			dma_pool_free(d->pool, ds->desc_hw[i].lli, ds->desc_hw[i].lli_hw);
+
+		ds->desc_hw[i].lli = NULL;
+		ds->desc_hw[i].lli_hw = 0;
+	}
+}
+
+static int rk_dma_pool_alloc(struct rk_dma_dev *d, struct rk_dma_desc_sw *ds)
+{
+	struct rk_lli *lli;
+	dma_addr_t lli_hw;
+	int i;
+
+	for (i = 0; i < ds->desc_num; i++) {
+		if (d->gpool)
+			lli = gen_pool_dma_zalloc(d->gpool, sizeof(*lli), &lli_hw);
+		else
+			lli = dma_pool_zalloc(d->pool, GFP_NOWAIT, &lli_hw);
+
+		if (!lli) {
+			rk_dma_pool_free(d, ds);
+			return -ENOMEM;
+		}
+
+		ds->desc_hw[i].lli = lli;
+		ds->desc_hw[i].lli_hw = lli_hw;
+	}
+
+	return 0;
 }
 
 static struct rk_dma_desc_sw *rk_alloc_desc_resource(int num, struct dma_chan *chan)
@@ -798,30 +841,34 @@ static struct rk_dma_desc_sw *rk_alloc_desc_resource(int num, struct dma_chan *c
 	struct rk_dma_chan *c = to_rk_chan(chan);
 	struct rk_dma_desc_sw *ds;
 	struct rk_dma_dev *d = to_rk_dma(chan->device);
-	int lli_limit = LLI_BLOCK_SIZE / sizeof(struct rk_desc_hw);
+	int ret;
 
-	if (num > lli_limit) {
-		dev_err(chan->device->dev, "vch-%px: sg num %d exceed max %d\n",
-			&c->vc, num, lli_limit);
-		return NULL;
-	}
-
-	ds = kzalloc(sizeof(*ds), GFP_ATOMIC);
+	ds = kzalloc(sizeof(*ds), GFP_NOWAIT);
 	if (!ds)
 		return NULL;
 
+	ds->desc_hw = kcalloc(num, sizeof(*ds->desc_hw), GFP_NOWAIT);
+	if (!ds->desc_hw)
+		goto err_free_ds;
+
 	ds->desc_num = num;
-	ds->desc_hw = rk_dma_pool_alloc(d, ds);
-	if (!ds->desc_hw) {
+	ret = rk_dma_pool_alloc(d, ds);
+	if (ret) {
 		dev_err(chan->device->dev, "vch-%px: dma alloc fail\n", &c->vc);
-		kfree(ds);
-		return NULL;
+		goto err_free_hw;
 	}
 
 	dev_dbg(chan->device->dev, "vch-%px, desc_sw: %px, desc_hw_lli: %pad\n",
-		&c->vc, ds, &ds->desc_hw_lli);
+		&c->vc, ds, &ds->desc_hw[0].lli_hw);
 
 	return ds;
+
+err_free_hw:
+	kfree(ds->desc_hw);
+err_free_ds:
+	kfree(ds);
+
+	return NULL;
 }
 
 static enum rk_dma_burst_width rk_dma_burst_width(enum dma_slave_buswidth width)
@@ -958,8 +1005,8 @@ static struct dma_async_tx_descriptor *rk_dma_prep_memcpy(
 		len -= copy;
 	} while (len);
 
-	ds->desc_hw[num - 1].llp_nxt = 0;
-	ds->desc_hw[num - 1].trf_ctl0 |= TRF_CTL0_LLI_LAST;
+	ds->desc_hw[num - 1].lli->llp_nxt = 0;
+	ds->desc_hw[num - 1].lli->trf_ctl0 |= TRF_CTL0_LLI_LAST;
 
 	c->cyclic = 0;
 
@@ -1021,8 +1068,8 @@ rk_dma_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl, unsigned in
 		} while (avail);
 	}
 
-	ds->desc_hw[num - 1].llp_nxt = 0;	/* end of link */
-	ds->desc_hw[num - 1].trf_ctl0 |= TRF_CTL0_LLI_LAST;
+	ds->desc_hw[num - 1].lli->llp_nxt = 0;	/* end of link */
+	ds->desc_hw[num - 1].lli->trf_ctl0 |= TRF_CTL0_LLI_LAST;
 	ds->size = total;
 	ds->dir = dir;
 	return vchan_tx_prep(&c->vc, &ds->vd, flags);
@@ -1069,10 +1116,101 @@ rk_dma_prep_dma_cyclic(struct dma_chan *chan, dma_addr_t dma_addr, size_t buf_le
 		buf += period_len;
 	}
 
-	ds->desc_hw[num - 1].llp_nxt = ds->desc_hw_lli + sizeof(struct rk_desc_hw);
-	ds->desc_hw[num - 1].trf_ctl0 |= TRF_CTL0_CNT_CLR;
+	ds->desc_hw[num - 1].lli->llp_nxt = ds->desc_hw[1].lli_hw;
+	ds->desc_hw[num - 1].lli->trf_ctl0 |= TRF_CTL0_CNT_CLR;
 	ds->size = buf_len;
 	ds->dir = dir;
+	return vchan_tx_prep(&c->vc, &ds->vd, flags);
+}
+
+static struct dma_async_tx_descriptor *
+rk_dma_prep_interleaved_dma(struct dma_chan *chan, struct dma_interleaved_template *xt,
+			   unsigned long flags)
+{
+	struct rk_dma_chan *c = to_rk_chan(chan);
+	struct rk_dma_desc_sw *ds;
+	size_t size, src_icg, dst_icg, period_bytes, full_period_bytes, full_buffer_bytes;
+	size_t nump = 0, numf = 0;
+	int num_periods, num = 0;
+	dma_addr_t src = 0, dst = 0, dma_addr = 0;
+
+	if (!xt->numf || !xt->sgl[0].size || xt->frame_size != 1)
+		return NULL;
+
+#ifdef CONFIG_NO_GKI
+	nump = xt->nump;
+#else
+	nump = xt->sgl[1].size;
+#endif
+	numf = xt->numf;
+	size = xt->sgl[0].size;
+	period_bytes = size * nump;
+
+	if (flags & DMA_PREP_REPEAT && (!nump || (numf % nump)))
+		return NULL;
+
+	if (period_bytes > DMA_MAX_SIZE) {
+		dev_err(chan->device->dev, "maximum period size exceeded\n");
+		return NULL;
+	}
+
+	src_icg = dmaengine_get_src_icg(xt, &xt->sgl[0]);
+	dst_icg = dmaengine_get_dst_icg(xt, &xt->sgl[0]);
+
+	if (flags & DMA_PREP_REPEAT) {
+		num_periods = numf / nump;
+		c->cyclic = 1;
+	} else {
+		num_periods = 1;
+		c->cyclic = 0;
+	}
+
+	if (rk_pre_config(chan, xt->dir))
+		return NULL;
+
+	ds = rk_alloc_desc_resource(num_periods + 1, chan);
+	if (!ds)
+		return NULL;
+
+	c->ctl0 &= ~TRF_CTL0_MSIZE_MASK;
+	c->ctl0 |= TRF_CTL0_MSIZE(size);
+	c->ccfg |= TRF_CFG_STRIDE_EN | TRF_CFG_STRIDE_MODE_TRANS;
+	if (xt->dir == DMA_MEM_TO_DEV) {
+		ds->desc_hw[0].lli->stride_inc = STRIDE_INC(src_icg);
+		dma_addr = xt->src_start;
+		full_period_bytes = (size + src_icg) * nump;
+		full_buffer_bytes = (size + src_icg) * numf;
+	} else {
+		ds->desc_hw[0].lli->stride_inc = STRIDE_INC(dst_icg);
+		dma_addr = xt->dst_start;
+		full_period_bytes = (size + dst_icg) * nump;
+		full_buffer_bytes = (size + dst_icg) * numf;
+	}
+
+	/* the first one used as cmd entry */
+	rk_dma_fill_desc(ds, dst, src, 0, 0, c->ctl0, c->ctl1, c->ccfg);
+	num = 1;
+
+	while (num < (num_periods + 1)) {
+		if (xt->dir == DMA_MEM_TO_DEV) {
+			src = dma_addr;
+			dst = c->dev_addr;
+		} else if (xt->dir == DMA_DEV_TO_MEM) {
+			src = c->dev_addr;
+			dst = dma_addr;
+		}
+		rk_dma_fill_desc(ds, dst, src, period_bytes, num++, c->ctl0, c->ctl1, c->ccfg);
+		dma_addr += full_period_bytes;
+	}
+
+	ds->desc_hw[num - 1].lli->llp_nxt = ds->desc_hw[1].lli_hw;
+	ds->desc_hw[num - 1].lli->trf_ctl0 |= TRF_CTL0_CNT_CLR;
+	ds->size = full_buffer_bytes;
+	ds->dir = xt->dir;
+
+	dev_dbg(chan->device->dev, "size: %zu, src_icg: %zu, dst_icg: %zu, nump: %zu, numf: %zu\n",
+		size, src_icg, dst_icg, nump, numf);
+
 	return vchan_tx_prep(&c->vc, &ds->vd, flags);
 }
 
@@ -1143,16 +1281,6 @@ static int rk_dma_transfer_resume(struct dma_chan *chan)
 	return 0;
 }
 
-static void rk_dma_pool_free(struct rk_dma_dev *d, struct rk_dma_desc_sw *ds)
-{
-	size_t size = ds->desc_num * sizeof(struct rk_desc_hw);
-
-	if (d->gpool)
-		return gen_pool_free(d->gpool, (unsigned long)ds->desc_hw, size);
-
-	return dma_pool_free(d->pool, ds->desc_hw, ds->desc_hw_lli);
-}
-
 static void rk_dma_free_desc(struct virt_dma_desc *vd)
 {
 	struct rk_dma_dev *d = to_rk_dma(vd->tx.chan->device);
@@ -1161,6 +1289,8 @@ static void rk_dma_free_desc(struct virt_dma_desc *vd)
 	dev_dbg(d->slave.dev, "desc_sw: %px free\n", ds);
 
 	rk_dma_pool_free(d, ds);
+	kfree(ds->desc_hw);
+	ds->desc_hw = NULL;
 	kfree(ds);
 }
 
@@ -1204,7 +1334,7 @@ static int rk_dma_pool_create(struct rk_dma_dev *d, struct device *dev)
 	}
 
 	/* A DMA memory pool for LLIs, align on 64-bytes boundary */
-	d->pool = dmam_pool_create(DRIVER_NAME, dev, LLI_BLOCK_SIZE, SZ_64, 0);
+	d->pool = dmam_pool_create(DRIVER_NAME, dev, sizeof(struct rk_lli), SZ_64, 0);
 	if (!d->pool)
 		return -ENOMEM;
 
@@ -1246,12 +1376,16 @@ static int rk_dma_probe(struct platform_device *pdev)
 	dma_cap_set(DMA_MEMCPY, d->slave.cap_mask);
 	dma_cap_set(DMA_CYCLIC, d->slave.cap_mask);
 	dma_cap_set(DMA_PRIVATE, d->slave.cap_mask);
+	dma_cap_set(DMA_INTERLEAVE, d->slave.cap_mask);
+	dma_cap_set(DMA_REPEAT, d->slave.cap_mask);
+	dma_cap_set(DMA_LOAD_EOT, d->slave.cap_mask);
 	d->slave.dev = &pdev->dev;
 	d->slave.device_free_chan_resources = rk_dma_free_chan_resources;
 	d->slave.device_tx_status = rk_dma_tx_status;
 	d->slave.device_prep_dma_memcpy = rk_dma_prep_memcpy;
 	d->slave.device_prep_slave_sg = rk_dma_prep_slave_sg;
 	d->slave.device_prep_dma_cyclic = rk_dma_prep_dma_cyclic;
+	d->slave.device_prep_interleaved_dma = rk_dma_prep_interleaved_dma;
 	d->slave.device_issue_pending = rk_dma_issue_pending;
 	d->slave.device_config = rk_dma_config;
 	d->slave.device_terminate_all = rk_dma_terminate_all;
@@ -1374,7 +1508,7 @@ static struct platform_driver rk_pdma_driver = {
 	.remove		= rk_dma_remove,
 };
 
-#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+#if !defined(MODULE) && defined(CONFIG_ROCKCHIP_THUNDER_BOOT)
 static int __init rk_pdma_driver_init(void)
 {
 	return platform_driver_register(&rk_pdma_driver);

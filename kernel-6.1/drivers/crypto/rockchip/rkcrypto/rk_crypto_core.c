@@ -356,7 +356,7 @@ static void rk_complete_op(struct rk_crypto_dev *rk_dev, int err)
 {
 	struct rk_alg_ctx *alg_ctx = rk_alg_ctx_cast(rk_dev->async_req);
 
-	disable_irq(rk_dev->irq);
+	disable_irq_nosync(rk_dev->irq);
 	del_timer(&rk_dev->timer);
 
 	rk_dev->stat.complete_cnt++;
@@ -858,6 +858,14 @@ static int rk_crypto_probe(struct platform_device *pdev)
 		goto err_crypto;
 	}
 
+	rk_dev->block_virt = dmam_alloc_coherent(dev, AES_BLOCK_SIZE,
+						 &rk_dev->block_dma, GFP_KERNEL);
+	if (!rk_dev->block_virt) {
+		err = -ENOMEM;
+		dev_err(dev, "dmam_alloc_coherent for block buffer failed.\n");
+		goto err_crypto;
+	}
+
 	rk_dev->vir_max = RK_BUFFER_SIZE;
 
 	rk_dev->addr_aad = (void *)__get_free_page(GFP_KERNEL);
@@ -903,10 +911,23 @@ err_register_alg:
 	tasklet_kill(&rk_dev->queue_task);
 	tasklet_kill(&rk_dev->done_task);
 err_crypto:
+	if (!rk_dev)
+		return err;
+
+	if (rk_dev->addr_aad) {
+		free_page((unsigned long)rk_dev->addr_aad);
+		rk_dev->addr_aad = NULL;
+	}
+
+	if (rk_dev->addr_vir) {
+		free_pages((unsigned long)rk_dev->addr_vir, RK_BUFFER_ORDER);
+		rk_dev->addr_vir = NULL;
+	}
+
 	return err;
 }
 
-static int rk_crypto_remove(struct platform_device *pdev)
+static void rk_crypto_remove(struct platform_device *pdev)
 {
 	struct rk_crypto_dev *rk_dev = platform_get_drvdata(pdev);
 
@@ -927,13 +948,25 @@ static int rk_crypto_remove(struct platform_device *pdev)
 		free_page((unsigned long)rk_dev->addr_aad);
 
 	rk_dev->soc_data->hw_deinit(&pdev->dev, rk_dev->hw_info);
+}
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
+static int rk_crypto_remove_wrap(struct platform_device *pdev)
+{
+	rk_crypto_remove(pdev);
 
 	return 0;
 }
+#else
+static void rk_crypto_remove_wrap(struct platform_device *pdev)
+{
+	rk_crypto_remove(pdev);
+}
+#endif
 
 static struct platform_driver crypto_driver = {
 	.probe		= rk_crypto_probe,
-	.remove		= rk_crypto_remove,
+	.remove		= rk_crypto_remove_wrap,
 	.driver		= {
 		.name	= "rk-crypto",
 		.of_match_table	= crypto_of_id_table,

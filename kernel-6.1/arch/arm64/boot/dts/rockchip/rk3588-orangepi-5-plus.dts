@@ -430,7 +430,7 @@
 };
 
 &display_subsystem {
-    clocks = <&hdptxphy_hdmi0>, <&hdptxphy_hdmi1>;
+    clocks = <&hdptxphy0>, <&hdptxphy1>;
     clock-names = "hdmi0_phy_pll", "hdmi1_phy_pll";
 };
 
@@ -481,19 +481,19 @@
     pinctrl-0 = <&hdmim1_rx_cec &hdmim1_rx_hpdin &hdmim1_rx_scl &hdmim1_rx_sda &hdmirx_det>;
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
     status = "okay";
 };
 
-&hdptxphy_hdmi1 {
+&hdptxphy1 {
     status = "okay";
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
 	status = "okay";
 };
 
-&hdptxphy_hdmi1 {
+&hdptxphy1 {
 	status = "okay";
 };
 

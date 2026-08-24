@@ -130,13 +130,17 @@ enum {
 	ISP_UNITE_RIGHT,
 	ISP_UNITE_LEFT_B,
 	ISP_UNITE_RIGHT_B,
-	ISP_UNITE_MAX,
+
+	ISP_UNITE_MAX = RKISP_UNITE_WIN_MAX,
 };
 
 enum {
 	ISP_UNITE_DIV1 = 1,
 	ISP_UNITE_DIV2 = 2,
+	ISP_UNITE_DIV3 = 3,
 	ISP_UNITE_DIV4 = 4,
+	ISP_UNITE_DIV6 = 6,
+	ISP_UNITE_DIV9 = 9,
 };
 
 /*
@@ -215,6 +219,8 @@ struct rkisp_device {
 	char name[128];
 	void *sw_base_addr;
 	void *sw_vpsl_base_addr;
+	u32 sw_base_size;
+	u32 sw_vpsl_base_size;
 	struct rkisp_hw_dev *hw_dev;
 	struct v4l2_device v4l2_dev;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -297,6 +303,8 @@ struct rkisp_device {
 	struct rkisp_aiisp_cfg aiisp_cfg;
 	struct rkisp_fpn_cfg fpn_cfg;
 
+	struct rkisp_unite_info unite;
+
 	bool is_cmsk_upd;
 	bool is_hw_link;
 	bool is_bigmode;
@@ -311,15 +319,27 @@ struct rkisp_device {
 	bool is_suspend_one_frame;
 	bool is_aiisp_en;
 	bool is_aiisp_upd;
+	bool is_aiisp_stopping;
+	bool is_aiisp_stop;
 	bool is_aiisp_sync;
+	bool is_aiisp_yuv;
+	bool is_aiisp_first_frame;
+	bool is_aiisp_l2;
+	bool is_aiisp_l2_st;
+	bool is_aiisp_l2_buf;
 	bool is_frm_rd;
 	bool is_multi_one_sync;
 	bool is_wait_aiq;
+	bool is_wait_aiq_isp_end;
 	bool is_first_frame;
+	bool is_rdbk_no_trigger;
 
 	struct rkisp_vicap_input vicap_in;
 	struct rkisp_vicap_sof vicap_sof;
 	u32 hdr_wrap_line;
+
+	u32 aiisp_stop_seq;
+	u32 aiisp_fe_seq;
 
 	u8 multi_mode;
 	u8 multi_index;

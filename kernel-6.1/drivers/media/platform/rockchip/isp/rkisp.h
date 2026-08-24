@@ -52,7 +52,7 @@
 #define CIF_ISP_INPUT_W_MAX_V21		4096
 #define CIF_ISP_INPUT_H_MAX_V21		3072
 #define CIF_ISP_INPUT_W_MAX_V30		4672
-#define CIF_ISP_INPUT_H_MAX_V30		3504
+#define CIF_ISP_INPUT_H_MAX_V30		5544
 #define CIF_ISP_INPUT_W_MAX_V30_UNITE	8192
 #define CIF_ISP_INPUT_H_MAX_V30_UNITE	6144
 #define CIF_ISP_INPUT_W_MAX_V32		3072
@@ -64,7 +64,7 @@
 #define CIF_ISP_INPUT_W_MAX_V32_L_UNITE	8192
 #define CIF_ISP_INPUT_H_MAX_V32_L_UNITE	6144
 #define CIF_ISP_INPUT_W_MAX_V39		4672
-#define CIF_ISP_INPUT_H_MAX_V39		3504
+#define CIF_ISP_INPUT_H_MAX_V39		5544
 #define CIF_ISP_INPUT_W_MAX_V39_UNITE	8192
 #define CIF_ISP_INPUT_H_MAX_V39_UNITE	6144
 #define CIF_ISP_INPUT_W_MAX_V33		2880
@@ -73,8 +73,8 @@
 #define CIF_ISP_INPUT_H_MAX_V33_UNITE	2160
 #define CIF_ISP_INPUT_W_MAX_V35		4096
 #define CIF_ISP_INPUT_H_MAX_V35		3072
-#define CIF_ISP_INPUT_W_MAX_V35_UNITE	7168
-#define CIF_ISP_INPUT_H_MAX_V35_UNITE	5120
+#define CIF_ISP_INPUT_W_MAX_V35_UNITE	8192
+#define CIF_ISP_INPUT_H_MAX_V35_UNITE	6144
 #define CIF_ISP_INPUT_W_MIN		272
 #define CIF_ISP_INPUT_H_MIN		264
 #define CIF_ISP_OUTPUT_W_MAX		CIF_ISP_INPUT_W_MAX
@@ -147,6 +147,7 @@ struct rkisp_isp_subdev {
 	enum v4l2_quantization quantization;
 	enum v4l2_colorspace colorspace;
 	struct frame_debug_info dbg;
+	struct frame_debug_info dbg_be;
 };
 
 struct rkisp_emd_data {

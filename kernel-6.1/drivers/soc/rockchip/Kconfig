@@ -36,6 +36,36 @@ config ROCKCHIP_AMP
 	  Say y here to enable Rockchip AMP support.
 	  This option protects resources used by AMP.
 
+config ROCKCHIP_AMP_RPMSG_FILE
+	tristate "Rockchip RPMsg File"
+	depends on ARCH_ROCKCHIP && RPMSG
+	help
+	  Say y here to enable Rockchip RPMsg File.
+
+config ROCKCHIP_AMP_RPMSG_HEARTBEAT
+	tristate "Rockchip RPMsg Heartbeat"
+	depends on ARCH_ROCKCHIP && RPMSG
+	help
+	  Say y here to enable Rockchip RPMsg Heartbeat.
+
+config ROCKCHIP_AMP_RPMSG_MCULOG
+	tristate "Rockchip RPMsg MCU Log"
+	depends on ARCH_ROCKCHIP && RPMSG
+	help
+	  Say y here to enable Rockchip RPMsg MCU Log.
+
+config ROCKCHIP_AMP_RPMSG_SHAREDMEM
+	tristate "Rockchip AMP RPMsg Shared Memory"
+	depends on ARCH_ROCKCHIP && RPMSG
+	help
+	  Say y here to enable Rockchip AMP RPMsg Shared Memory.
+
+config ROCKCHIP_AMP_RPMSG_TIMESYNC
+	tristate "Rockchip AMP RPMSG Time Sync"
+	depends on ARCH_ROCKCHIP && RPMSG
+	help
+	  Say y here to enable Rockchip AMP RPMsg Time Sync.
+
 config ROCKCHIP_ARM64_ALIGN_FAULT_FIX
 	bool "Rockchip align fault fix support"
 	depends on ARM64 && NO_GKI
@@ -119,11 +149,28 @@ config ROCKCHIP_IPA
 
 	  If unsure, say N.
 
+config ROCKCHIP_LEDC
+	tristate "Rockchip LEDC driver"
+	depends on OF
+	depends on HAS_IOMEM
+	depends on ARCH_ROCKCHIP
+	help
+	  This driver provides support for the Rockchip LEDC driver.
+
 config ROCKCHIP_OPP
 	tristate "Rockchip OPP select support"
 	depends on PM_DEVFREQ
 	help
 	  Say y here to enable rockchip OPP support.
+
+config ROCKCHIP_OPTIMIZE_HRTIMER_LATENCY
+	bool "Optimize HRTimer Latency"
+	depends on PREEMPT_RT && ARCH_ROCKCHIP
+	default y if PREEMPT_RT
+	help
+	  Advance the hrtimer expiration point of nanosleep, pre-process
+	  scheduling and interrupt handlers in advance, and thereby reduce
+	  nanosleep latency.
 
 config ROCKCHIP_OPTIMIZE_RT_PRIO
 	bool "Rockchip optimize prio for kernel RT thread and kworker"
@@ -301,6 +348,12 @@ config ROCKCHIP_THUNDER_BOOT
 	  Say y here to enable Rockchip thunder boot support.
 	  This option make the kernel boot faster.
 
+config ROCKCHIP_THUNDER_BOOT_CRYPTO
+	bool "Rockchip Thunder Boot support hardware crypto"
+	depends on ROCKCHIP_THUNDER_BOOT
+	help
+	  Say y if boot need hardware crypto.
+
 config ROCKCHIP_THUNDER_BOOT_DEFER_FREE_MEMBLOCK
 	bool "Defer free large memblock to Buddy allocator"
 	depends on ROCKCHIP_THUNDER_BOOT
@@ -374,6 +427,7 @@ config RK_ZONEINFO_PROCFS
 	help
 	  Dump all zone information.
 
+source "drivers/soc/rockchip/aoa_middleware/Kconfig"
 source "drivers/soc/rockchip/minidump/Kconfig"
 
 endmenu

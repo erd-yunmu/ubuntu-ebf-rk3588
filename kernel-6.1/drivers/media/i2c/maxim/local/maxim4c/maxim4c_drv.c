@@ -92,6 +92,15 @@
  *        fix lockdep debug warning.
  *     2. fix compile warning when MAXIM4C_LOCAL_DES_ON_OFF_EN enable.
  *
+ * V3.10.00
+ *     1. local pwdn on/off enable replace MAXIM4C_LOCAL_DES_ON_OFF_EN with local_power_off_enable
+ *
+ * V3.11.00
+ *     1. compatible with kernel-6.12
+ *
+ * V3.12.00
+ *     1. if local_power_off_enable == 0, add power control when suspend and resume.
+ *
  */
 #include <linux/clk.h>
 #include <linux/i2c.h>
@@ -119,7 +128,7 @@
 
 #include "maxim4c_api.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(3, 0x09, 0x01)
+#define DRIVER_VERSION			KERNEL_VERSION(3, 0x12, 0x00)
 
 #define MAXIM4C_NAME			"maxim4c"
 
@@ -465,7 +474,7 @@ static int maxim4c_device_power_on(maxim4c_t *maxim4c)
 	ret = regulator_bulk_enable(MAXIM4C_NUM_SUPPLIES, maxim4c->supplies);
 	if (ret < 0) {
 		dev_err(dev, "Failed to enable regulators\n");
-		return -EINVAL;
+		return ret;
 	}
 
 	ret = regulator_enable(maxim4c->pwdn_regulator);
@@ -477,62 +486,71 @@ static int maxim4c_device_power_on(maxim4c_t *maxim4c)
 	return 0;
 }
 
-static void maxim4c_device_power_off(maxim4c_t *maxim4c)
+static int maxim4c_device_power_off(maxim4c_t *maxim4c)
 {
 	struct device *dev = &maxim4c->client->dev;
 	int ret = 0;
 
 	ret = regulator_disable(maxim4c->pwdn_regulator);
-	if (ret < 0)
-		dev_warn(dev, "Unable to turn pwdn regulator off\n");
+	if (ret < 0) {
+		dev_err(dev, "Unable to turn pwdn regulator off\n");
+		return ret;
+	}
 
 	ret = regulator_bulk_disable(MAXIM4C_NUM_SUPPLIES, maxim4c->supplies);
 	if (ret < 0) {
-		dev_warn(dev, "Failed to disable regulators\n");
+		dev_err(dev, "Failed to disable regulators\n");
+		return ret;
 	}
+
+	return 0;
 }
 
 static int maxim4c_runtime_resume(struct device *dev)
 {
-#if MAXIM4C_LOCAL_DES_ON_OFF_EN
 	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	maxim4c_t *maxim4c = v4l2_get_subdevdata(sd);
-	int ret = 0;
 
-	ret |= maxim4c_device_power_on(maxim4c);
+	if (maxim4c->local_power_off_enable == 0)
+		return 0;
 
-	return ret;
-#else
-	return 0;
-#endif /* MAXIM4C_LOCAL_DES_ON_OFF_EN */
+	dev_info(dev, "maxim4c runtime resume\n");
+
+	return maxim4c_device_power_on(maxim4c);
 }
 
 static int maxim4c_runtime_suspend(struct device *dev)
 {
-#if MAXIM4C_LOCAL_DES_ON_OFF_EN
 	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	maxim4c_t *maxim4c = v4l2_get_subdevdata(sd);
-	int ret = 0;
 
-	maxim4c_device_power_off(maxim4c);
+	if (maxim4c->local_power_off_enable == 0)
+		return 0;
 
-	return ret;
-#else
-	return 0;
-#endif /* MAXIM4C_LOCAL_DES_ON_OFF_EN */
+	dev_info(dev, "maxim4c runtime suspend\n");
+
+	return maxim4c_device_power_off(maxim4c);
 }
 
 static int __maybe_unused maxim4c_resume(struct device *dev)
 {
-#if (MAXIM4C_LOCAL_DES_ON_OFF_EN == 0)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	maxim4c_t *maxim4c = v4l2_get_subdevdata(sd);
 	int ret = 0;
 
+	if (maxim4c->local_power_off_enable != 0)
+		return 0;
+
 	dev_info(dev, "maxim4c resume\n");
+
+	ret = maxim4c_device_power_on(maxim4c);
+	if (ret) {
+		dev_err(dev, "device power on error\n");
+		return ret;
+	}
 
 #if MAXIM4C_TEST_PATTERN
 	ret = maxim4c_pattern_hw_init(maxim4c);
@@ -547,13 +565,28 @@ static int __maybe_unused maxim4c_resume(struct device *dev)
 		return ret;
 	}
 #endif /* MAXIM4C_TEST_PATTERN */
-#endif /* MAXIM4C_LOCAL_DES_ON_OFF_EN */
 
 	return 0;
 }
 
 static int __maybe_unused maxim4c_suspend(struct device *dev)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	maxim4c_t *maxim4c = v4l2_get_subdevdata(sd);
+	int ret = 0;
+
+	if (maxim4c->local_power_off_enable != 0)
+		return 0;
+
+	dev_info(dev, "maxim4c suspend\n");
+
+	ret = maxim4c_device_power_off(maxim4c);
+	if (ret) {
+		dev_err(dev, "device power off error\n");
+		return ret;
+	}
+
 	return 0;
 }
 
@@ -623,6 +656,12 @@ static int maxim4c_module_parse_dt(maxim4c_t *maxim4c)
 
 		of_node_put(node);
 		return -ENODEV;
+	}
+
+	ret = of_property_read_u32(node, "local-power-off-enable", &value);
+	if (ret == 0) {
+		dev_info(dev, "local-power-off-enable property: %d\n", value);
+		maxim4c->local_power_off_enable = value;
 	}
 
 	ret = of_property_read_u32(node, "remote-routing-to-isp", &value);
@@ -759,8 +798,12 @@ static int maxim4c_configure_regulators(maxim4c_t *maxim4c)
 				       maxim4c->supplies);
 }
 
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
 static int maxim4c_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
+#else
+static int maxim4c_probe(struct i2c_client *client)
+#endif
 {
 	struct device *dev = &client->dev;
 	struct device_node *node = dev->of_node;
@@ -856,13 +899,13 @@ static int maxim4c_probe(struct i2c_client *client,
 #if MAXIM4C_TEST_PATTERN
 	ret = maxim4c_pattern_data_init(maxim4c);
 	if (ret)
-		goto err_power_off;
+		goto err_subdev_deinit;
 
-#if (MAXIM4C_LOCAL_DES_ON_OFF_EN == 0)
-	ret = maxim4c_pattern_hw_init(maxim4c);
-	if (ret)
-		goto err_power_off;
-#endif /* MAXIM4C_LOCAL_DES_ON_OFF_EN */
+	if (maxim4c->local_power_off_enable == 0) {
+		ret = maxim4c_pattern_hw_init(maxim4c);
+		if (ret)
+			goto err_subdev_deinit;
+	}
 
 	pm_runtime_set_autosuspend_delay(dev, 1000);
 	pm_runtime_use_autosuspend(dev);
@@ -879,11 +922,11 @@ static int maxim4c_probe(struct i2c_client *client,
 	if (ret)
 		goto err_subdev_deinit;
 
-#if (MAXIM4C_LOCAL_DES_ON_OFF_EN == 0)
-	ret = maxim4c_module_hw_init(maxim4c);
-	if (ret)
-		goto err_dbgfs_deinit;
-#endif /* MAXIM4C_LOCAL_DES_ON_OFF_EN */
+	if (maxim4c->local_power_off_enable == 0) {
+		ret = maxim4c_module_hw_init(maxim4c);
+		if (ret)
+			goto err_dbgfs_deinit;
+	}
 
 	ret = maxim4c_i2c_mux_init(maxim4c);
 	if (ret)

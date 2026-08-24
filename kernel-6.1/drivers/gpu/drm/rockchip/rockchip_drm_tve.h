@@ -123,6 +123,7 @@
 
 // RK3528 CVBS GRF
 #define RK3528_VO_GRF_CVBS_CON	0x60010
+#define RK3538_VO_GRF_CVBS_CTRL	0xa4
 	#define m_TVE_DCLK_POL		BIT(5)
 	#define m_TVE_DCLK_EN		BIT(4)
 	#define m_DCLK_UPSAMPLE_2X4X	BIT(3)
@@ -227,7 +228,8 @@ enum {
 	SOC_RK312X,
 	SOC_RK322X,
 	SOC_RK3328,
-	SOC_RK3528
+	SOC_RK3528,
+	SOC_RK3538,
 };
 
 enum {
@@ -278,6 +280,7 @@ struct rockchip_tve {
 	u32 dac1level;
 	u32 preferred_mode;
 	u8 vdac_out_current;
+	u8 default_out_current;
 	struct mutex suspend_lock;	/* mutex for tve resume operation*/
 	struct rockchip_drm_sub_dev sub_dev;
 };

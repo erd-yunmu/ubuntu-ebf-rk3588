@@ -230,6 +230,7 @@
 
 #define RK628_DEFAULT_WIDTH	64
 #define RK628_DEFAULT_HEIGHT	64
+#define CHANNEL_NUM		3
 
 enum {
 	COMBTXPHY_MODULEA_EN = BIT(0),
@@ -310,10 +311,23 @@ struct rk628 {
 	int vic;
 	int tx_mode;
 	int dbg_en;
+	bool is_hdmi2;
+	bool force_eq;
+	bool ced_enable;
+	bool dynamic_eq;
+	u32 feq[CHANNEL_NUM];
+	u32 ced_ch[CHANNEL_NUM];
+	bool force_eq_14;
+	u8 eq_14[CHANNEL_NUM];
+	bool force_eq_20;
+	u8 eq_20[CHANNEL_NUM];
 	struct dentry *debug_dir;
 	struct gpio_desc *hdmirx_det_gpio;
 	bool last_mipi_status;
 	bool is_suspend;
+	bool is_10bit;
+	bool enable_csi1;
+	bool hdr_support;
 };
 
 #define rk628_dbg(rk628, format, ...)	\

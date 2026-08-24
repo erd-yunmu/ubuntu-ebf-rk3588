@@ -7,6 +7,8 @@
 
 #include <linux/bitops.h>
 #include <linux/types.h>
+#include <linux/io.h>
+#include <linux/version.h>
 
 #include "rkce_buf.h"
 #include "rkce_error.h"
@@ -43,6 +45,10 @@
 
 #define RKCE_WRITE_MASK_SHIFT		(16)
 #define RKCE_WRITE_MASK_ALL		((0xffffu << RKCE_WRITE_MASK_SHIFT))
+
+#define RKCE_READ(reg) readl(&(reg))
+
+#define RKCE_WRITE(reg, val) writel((val), &(reg))
 
 enum rkce_expand_bit {
 	RKCE_EXPAND_BIT_4G = 0,
@@ -307,7 +313,7 @@ struct rkce_td_buf {
 	} td_buf;
 };
 
-typedef int (*request_cb_func)(int result, uint32_t td_id, void *td_virt);
+typedef int (*request_cb_func)(void *rkce_hw, int result, uint32_t td_id, void *td_virt);
 
 void rkce_dump_reginfo(void *rkce_hw);
 
@@ -326,6 +332,8 @@ int rkce_soft_reset(void *rkce_hw, uint32_t reset_sel);
 int rkce_push_td(void *rkce_hw, void *td);
 
 int rkce_push_td_sync(void *rkce_hw, void *td, uint32_t timeout_ms);
+
+int rkce_done_xchg(void *rkce_hw, enum rkce_td_type td_type);
 
 uint32_t rkce_get_td_type(void *td_buf);
 

@@ -32,6 +32,8 @@
 #define ROCKCHIP_CPU_RK3308		0x33080000
 #define ROCKCHIP_CPU_RK3518		0x35180000
 #define ROCKCHIP_CPU_RK3528		0x35280000
+#define ROCKCHIP_CPU_RK3538		0x35380000
+#define ROCKCHIP_CPU_RK3539		0x35390000
 #define ROCKCHIP_CPU_RK3566		0x35660000
 #define ROCKCHIP_CPU_RK3567		0x35670000
 #define ROCKCHIP_CPU_RK3568		0x35680000
@@ -221,6 +223,25 @@ static inline bool cpu_is_rk3528(void) { return false; }
 static inline bool cpu_is_rk3518(void) { return false; }
 #endif
 
+#if defined(CONFIG_CPU_RK3538)
+static inline bool cpu_is_rk3538(void)
+{
+	if (rockchip_soc_id)
+		return (rockchip_soc_id & ROCKCHIP_CPU_MASK) == ROCKCHIP_CPU_RK3538;
+	return of_machine_is_compatible("rockchip,rk3538");
+}
+
+static inline bool cpu_is_rk3539(void)
+{
+	if (rockchip_soc_id)
+		return (rockchip_soc_id & ROCKCHIP_CPU_MASK) == ROCKCHIP_CPU_RK3539;
+	return of_machine_is_compatible("rockchip,rk3539");
+}
+#else
+static inline bool cpu_is_rk3538(void) { return false; }
+static inline bool cpu_is_rk3539(void) { return false; }
+#endif
+
 #if defined(CONFIG_CPU_RK3568)
 static inline bool cpu_is_rk3566(void)
 {
@@ -248,15 +269,17 @@ static inline bool cpu_is_rk3567(void) { return false; }
 static inline bool cpu_is_rk3568(void) { return false; }
 #endif
 
+#define ROCKCHIP_SOC_SSN_MASK	0xff
 #define ROCKCHIP_SOC_MASK	(ROCKCHIP_CPU_MASK | 0xff)
 #define ROCKCHIP_SOC_PX30	(ROCKCHIP_CPU_PX30 | 0x00)
 #define ROCKCHIP_SOC_PX30S	(ROCKCHIP_CPU_PX30 | 0x01)
 #define ROCKCHIP_SOC_RV1103     (ROCKCHIP_CPU_RV1103 | 0x00)
 #define ROCKCHIP_SOC_RV1106     (ROCKCHIP_CPU_RV1106 | 0x00)
 #define ROCKCHIP_SOC_RV1109     (ROCKCHIP_CPU_RV1109 | 0x00)
-#define ROCKCHIP_SOC_RV1109B    (ROCKCHIP_CPU_RV1109B | 0x00)
+#define ROCKCHIP_SOC_RV1109B    (ROCKCHIP_CPU_RV1109B | 0x01)
 #define ROCKCHIP_SOC_RV1126     (ROCKCHIP_CPU_RV1126 | 0x00)
-#define ROCKCHIP_SOC_RV1126B    (ROCKCHIP_CPU_RV1126B | 0x00)
+#define ROCKCHIP_SOC_RV1126B    (ROCKCHIP_CPU_RV1126B | 0x01)
+#define ROCKCHIP_SOC_RV1126BP   (ROCKCHIP_CPU_RV1126B | 0x10)
 #define ROCKCHIP_SOC_RK3126     (ROCKCHIP_CPU_RK312X | 0x00)
 #define ROCKCHIP_SOC_RK3126B    (ROCKCHIP_CPU_RK312X | 0x10)
 #define ROCKCHIP_SOC_RK3126C    (ROCKCHIP_CPU_RK312X | 0x20)
@@ -292,6 +315,7 @@ ROCKCHIP_SOC(RV1126, rv1109, RV1109)
 ROCKCHIP_SOC(RV1126, rv1126, RV1126)
 ROCKCHIP_SOC(RV1126B, rv1109b, RV1109B)
 ROCKCHIP_SOC(RV1126B, rv1126b, RV1126B)
+ROCKCHIP_SOC(RV1126B, rv1126bp, RV1126BP)
 ROCKCHIP_SOC(RK312X, rk3126, RK3126)
 ROCKCHIP_SOC(RK312X, rk3126b, RK3126B)
 ROCKCHIP_SOC(RK312X, rk3126c, RK3126C)

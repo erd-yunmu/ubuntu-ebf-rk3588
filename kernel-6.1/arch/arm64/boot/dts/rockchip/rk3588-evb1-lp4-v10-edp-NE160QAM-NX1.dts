@@ -75,7 +75,6 @@
 
 &edp0 {
 	force-hpd;
-	support-psr;
 	status = "okay";
 
 	ports {
@@ -109,7 +108,7 @@
 	status = "okay";
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
 	status = "disabled";
 };
 

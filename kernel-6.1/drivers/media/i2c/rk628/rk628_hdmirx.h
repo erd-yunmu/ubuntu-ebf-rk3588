@@ -8,6 +8,8 @@
 #ifndef __RK628_HDMIRX_H
 #define __RK628_HDMIRX_H
 
+#include <drm/drm_mode.h>
+#include <linux/hdmi.h>
 #include <linux/gpio/consumer.h>
 #include <media/cec.h>
 #include <media/cec-notifier.h>
@@ -280,6 +282,16 @@
 #define HDMI_RX_PDEC_AIF_CTRL		(HDMI_RX_BASE + 0x03c0)
 #define FC_LFE_EXCHG(x)			UPDATE(x, 18, 18)
 #define HDMI_RX_PDEC_AIF_PB0		(HDMI_RX_BASE + 0x03c8)
+#define HDMI_RX_PDEC_GMD_HB0		(HDMI_RX_BASE + 0x03d0)
+#define HDMI_RX_PDEC_GMD_PB0		(HDMI_RX_BASE + 0x03d4)
+#define HDMI_RX_PDEC_DRM_HB		(HDMI_RX_BASE + 0x04c0)
+#define HDMI_RX_PDEC_DRM_PAYLOAD0	(HDMI_RX_BASE + 0x04c4)
+#define HDMI_RX_PDEC_DRM_PAYLOAD1	(HDMI_RX_BASE + 0x04c8)
+#define HDMI_RX_PDEC_DRM_PAYLOAD2	(HDMI_RX_BASE + 0x04cc)
+#define HDMI_RX_PDEC_DRM_PAYLOAD3	(HDMI_RX_BASE + 0x04d0)
+#define HDMI_RX_PDEC_DRM_PAYLOAD4	(HDMI_RX_BASE + 0x04d4)
+#define HDMI_RX_PDEC_DRM_PAYLOAD5	(HDMI_RX_BASE + 0x04d8)
+#define HDMI_RX_PDEC_DRM_PAYLOAD6	(HDMI_RX_BASE + 0x04dc)
 
 #define HDMI_RX_HDMI20_CONTROL		(HDMI_RX_BASE + 0x0800)
 #define PVO1UNMUTE(x)			UPDATE(x, 29, 29)
@@ -448,6 +460,10 @@
 
 #define RK628_CSI_LINK_FREQ_LOW		350000000
 #define RK628_CSI_LINK_FREQ_HIGH	650000000
+#define RK628_CSI_LINK_FREQ_350M	350000000
+#define RK628_CSI_LINK_FREQ_450M	450000000
+#define RK628_CSI_LINK_FREQ_650M	650000000
+#define RK628_CSI_LINK_FREQ_750M	750000000
 #define RK628_CSI_LINK_FREQ_925M	925000000
 #define RK628_CSI_PIXEL_RATE_LOW	400000000
 #define RK628_CSI_PIXEL_RATE_HIGH	600000000
@@ -456,12 +472,13 @@
 
 #define POLL_INTERVAL_MS		1000
 #define RXPHY_CFG_MAX_TIMES		5
+#define RXPHY_CFG_MAX_TIMES_DYNAMIC_EQ	10
 #define CSITX_ERR_RETRY_TIMES		3
 
 #define USE_4_LANES			4
-#define YUV422_8BIT			0x1e
 
-#define SCDC_CED_ERR_CNT		0xfff
+#define SCDC_CED_ERR_CNT		20
+#define SCDC_CED_FULL_CNT		0xfff
 
 enum bus_format {
 	BUS_FMT_RGB = 0,
@@ -475,6 +492,12 @@ enum lock_status {
 	LOCK_OK = 0,
 	LOCK_FAIL = 1,
 	LOCK_RESET = 2,
+};
+
+enum ced_status {
+	CED_OK = 0,
+	CED_ERR = 1,
+	CED_FULL = 2,
 };
 
 struct hdcp_keys {
@@ -532,6 +555,7 @@ bool rk628_audio_ctsnints_enabled(HAUDINFO info);
 void rk628_csi_isr_ctsn(HAUDINFO info, u32 pdec_ints);
 void rk628_csi_isr_fifoints(HAUDINFO info, u32 fifo_ints);
 int rk628_is_avi_ready(struct rk628 *rk628, bool avi_rcv_rdy);
+void rk628_hdmirx_set_preset_eq(struct rk628 *rk628);
 void rk628_hdmirx_verisyno_phy_power_on(struct rk628 *rk628);
 void rk628_hdmirx_verisyno_phy_power_off(struct rk628 *rk628);
 void rk628_hdmirx_phy_prepclk_cfg(struct rk628 *rk628);
@@ -545,9 +569,10 @@ int rk628_hdmirx_get_timings(struct rk628 *rk628,
 u8 rk628_hdmirx_get_range(struct rk628 *rk628);
 u8 rk628_hdmirx_get_color_space(struct rk628 *rk628);
 int rk628_hdmirx_get_hdcp_enc_status(struct rk628 *rk628);
+int rk628_hdmirx_get_hdr_matedata(struct rk628 *rk628,
+				  struct hdr_metadata_infoframe *hdmi_metadata);
 void rk628_hdmirx_controller_reset(struct rk628 *rk628);
-bool rk628_hdmirx_scdc_ced_err(struct rk628 *rk628);
-bool rk628_hdmirx_is_locked(struct rk628 *rk628);
+int  rk628_hdmirx_scdc_ced_err(struct rk628 *rk628);
 bool rk628_hdmirx_is_signal_change_ists(struct rk628 *rk628, u32 md_ints, u32 pdec_ints);
 
 void rk628_hdmirx_cec_irq(struct rk628 *rk628, struct rk628_hdmirx_cec *cec);

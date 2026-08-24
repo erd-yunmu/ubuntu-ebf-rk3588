@@ -38,18 +38,6 @@ struct vop_dump_info {
 	struct drm_rect *src;
 };
 
-static int temp_pow(int sum, int n)
-{
-	int i;
-	int temp = sum;
-
-	if (n < 1)
-		return 1;
-	for (i = 1; i < n ; i++)
-		sum *= temp;
-	return sum;
-}
-
 static int rockchip_drm_dump_plane_buffer(struct vop_dump_info *dump_info, int frame_count)
 {
 	struct iosys_map map[DRM_FORMAT_MAX_PLANES];
@@ -154,10 +142,10 @@ rockchip_drm_dump_buffer_write(struct file *file, const char __user *ubuf,
 {
 	struct seq_file *m = file->private_data;
 	struct drm_crtc *crtc = m->private;
-	char buf[14] = {};
-	int dump_times = 0;
-	int i = 0;
+	char buf[16] = {};
 	struct rockchip_crtc *rockchip_crtc = to_rockchip_crtc(crtc);
+	char *num_str;
+	int val, ret;
 
 	if (len > sizeof(buf) - 1)
 		return -EINVAL;
@@ -172,12 +160,17 @@ rockchip_drm_dump_buffer_write(struct file *file, const char __user *ubuf,
 		DRM_INFO("close keep dumping\n");
 	} else if (strncmp(buf, "dump", 4) == 0) {
 		if (isdigit(buf[4])) {
-			for (i = 4; i < strlen(buf); i++) {
-				dump_times += temp_pow(10, (strlen(buf)
-						       - i - 1))
-						       * (buf[i] - '0');
-		}
-			rockchip_crtc->vop_dump_times = dump_times;
+			num_str = buf + 4;
+			ret = kstrtoint(num_str, 10, &val);
+			if (ret < 0) {
+				DRM_ERROR("Failed to parse dump times: %s\n", num_str);
+				return ret;
+			}
+			if (val <= 0) {
+				DRM_ERROR("Dump times must be positive: %d\n", val);
+				return -EINVAL;
+			}
+			rockchip_crtc->vop_dump_times = val;
 		} else {
 			drm_modeset_lock_all(crtc->dev);
 			rockchip_drm_crtc_dump_plane_buffer(crtc);
@@ -226,6 +219,16 @@ static int rockchip_drm_debugfs_color_bar_show(struct seq_file *s, void *data)
 	seq_puts(s, "      echo 1 > /sys/kernel/debug/dri/0/video_port0/color_bar\n");
 	seq_puts(s, "  Enable vertical color bar:\n");
 	seq_puts(s, "      echo 2 > /sys/kernel/debug/dri/0/video_port0/color_bar\n");
+	seq_puts(s, "  Enable horizontal color gradient:\n");
+	seq_puts(s, "      echo 3 > /sys/kernel/debug/dri/0/video_port0/color_bar\n");
+	seq_puts(s, "  Enable vertical color gradient:\n");
+	seq_puts(s, "      echo 4 > /sys/kernel/debug/dri/0/video_port0/color_bar\n");
+	seq_puts(s, "  Enable mutant color:\n");
+	seq_puts(s, "      echo 5 > /sys/kernel/debug/dri/0/video_port0/color_bar\n");
+	seq_puts(s, "  Enable fix black color:\n");
+	seq_puts(s, "      echo 6 > /sys/kernel/debug/dri/0/video_port0/color_bar\n");
+	seq_puts(s, "  Enable fix white color:\n");
+	seq_puts(s, "      echo 7 > /sys/kernel/debug/dri/0/video_port0/color_bar\n");
 	seq_puts(s, "  Disable color bar:\n");
 	seq_puts(s, "      echo 0 > /sys/kernel/debug/dri/0/video_port0/color_bar\n");
 
@@ -320,7 +323,7 @@ static ssize_t rockchip_drm_debugfs_regs_write(struct file *file, const char __u
 		return -EINVAL;
 
 	kbuf[len] = 0;
-	if (sscanf(kbuf, "%lx %x", &address, &val) == -1)
+	if (sscanf(kbuf, "%lx %x", &address, &val) != 2)
 		return -EFAULT;
 
 	if (priv->crtc_funcs[pipe]->regs_write)
@@ -348,6 +351,52 @@ int rockchip_drm_debugfs_add_regs_write(struct drm_crtc *crtc, struct dentry *ro
 				  &rockchip_drm_debugfs_regs_write_ops);
 	if (!ent)
 		DRM_ERROR("Failed to add regs_write for debugfs\n");
+
+	return 0;
+}
+
+static int rockchip_drm_debugfs_aclk_rate_show(struct seq_file *s, void *data)
+{
+	struct drm_crtc *crtc = s->private;
+	struct rockchip_drm_private *priv = crtc->dev->dev_private;
+	int pipe = drm_crtc_index(crtc);
+	unsigned long rate;
+
+	if (!priv->crtc_funcs[pipe]->crtc_get_aclk_rate) {
+		seq_puts(s, "Not support get aclk rate\n");
+		return 0;
+	}
+
+	rate = priv->crtc_funcs[pipe]->crtc_get_aclk_rate(crtc);
+
+	seq_printf(s, "%lu\n", rate);
+
+	return 0;
+}
+
+static int rockchip_drm_debugfs_aclk_rate_open(struct inode *inode, struct file *file)
+{
+	struct drm_crtc *crtc = inode->i_private;
+
+	return single_open(file, rockchip_drm_debugfs_aclk_rate_show, crtc);
+}
+
+static const struct file_operations rockchip_drm_debugfs_aclk_rate_ops = {
+	.owner = THIS_MODULE,
+	.open = rockchip_drm_debugfs_aclk_rate_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+int rockchip_drm_debugfs_add_aclk_rate(struct drm_crtc *crtc, struct dentry *root)
+{
+	struct dentry *ent;
+
+	ent = debugfs_create_file("calculated_aclk_rate", 0644, root, crtc,
+				  &rockchip_drm_debugfs_aclk_rate_ops);
+	if (!ent)
+		DRM_ERROR("Failed to add aclk_rate for debugfs\n");
 
 	return 0;
 }

@@ -1044,11 +1044,29 @@ static int rockchip_adjust_low_temp_opp_volt(struct monitor_dev_info *info,
 	return 0;
 }
 
+static void
+rockchip_low_temp_adjust_pvtpll_config(struct monitor_dev_info *info,
+				       bool is_low)
+{
+	struct monitor_dev_profile *devp = info->devp;
+	struct arm_smccc_res res;
+
+	if (devp->opp_info && devp->opp_info->pvtpll_low_temp) {
+		res = sip_smc_pvtpll_config(PVTPLL_LOW_TEMP,
+					    devp->opp_info->pvtpll_clk_id,
+					    is_low, 0, 0, 0, 0);
+		if (res.a0)
+			dev_err(info->dev,
+				"%s: error cfg id=%u low temp %d (%d)\n",
+				__func__, devp->opp_info->pvtpll_clk_id,
+				is_low, (int)res.a0);
+	}
+}
+
 static void rockchip_low_temp_adjust(struct monitor_dev_info *info,
 				     bool is_low)
 {
 	struct monitor_dev_profile *devp = info->devp;
-	struct arm_smccc_res res;
 	int ret = 0;
 
 	dev_dbg(info->dev, "low_temp %d\n", is_low);
@@ -1064,16 +1082,7 @@ static void rockchip_low_temp_adjust(struct monitor_dev_info *info,
 	if (devp->check_rate_volt)
 		devp->check_rate_volt(info);
 
-	if (devp->opp_info && devp->opp_info->pvtpll_low_temp) {
-		res = sip_smc_pvtpll_config(PVTPLL_LOW_TEMP,
-					    devp->opp_info->pvtpll_clk_id,
-					    is_low, 0, 0, 0, 0);
-		if (res.a0)
-			dev_err(info->dev,
-				"%s: error cfg id=%u low temp %d (%d)\n",
-				__func__, devp->opp_info->pvtpll_clk_id,
-				is_low, (int)res.a0);
-	}
+	rockchip_low_temp_adjust_pvtpll_config(info, is_low);
 }
 
 static void rockchip_high_temp_adjust(struct monitor_dev_info *info,
@@ -1217,37 +1226,13 @@ rockchip_system_monitor_wide_temp_init(struct monitor_dev_info *info)
 	if (!system_monitor->tz)
 		return;
 
-	/*
-	 * set the init state to low temperature that the voltage will be enough
-	 * when cpu up at low temperature.
-	 */
-	if (!info->is_low_temp) {
-		if (info->opp_table)
-			rockchip_adjust_low_temp_opp_volt(info, true);
-		info->is_low_temp = true;
-	}
-
-	if (!system_monitor->tz) {
-		dev_err(info->dev, "thermal zone is NULL\n");
-		return;
-	}
-
 	ret = thermal_zone_get_temp(system_monitor->tz, &temp);
 	if (ret || temp == THERMAL_TEMP_INVALID) {
 		dev_err(info->dev,
 			"failed to read out thermal zone (%d)\n", ret);
-		return;
-	}
-
-	if (temp > info->high_temp) {
-		if (info->opp_table)
-			rockchip_adjust_low_temp_opp_volt(info, false);
-		info->is_low_temp = false;
-		info->is_high_temp = true;
-	} else if (temp > (info->low_temp + info->temp_hysteresis)) {
-		if (info->opp_table)
-			rockchip_adjust_low_temp_opp_volt(info, false);
-		info->is_low_temp = false;
+		rockchip_low_temp_adjust(info, true);
+	} else if (temp < info->low_temp) {
+		rockchip_low_temp_adjust(info, true);
 	}
 }
 
@@ -1898,7 +1883,7 @@ static struct early_suspend monitor_early_suspend_handler = {
 };
 #endif
 
-static int rockchip_eink_devfs_notifier(struct notifier_block *nb,
+static int rockchip_ebook_devfs_notifier(struct notifier_block *nb,
 					unsigned long action, void *ptr)
 {
 	switch (action) {
@@ -1916,7 +1901,7 @@ static int rockchip_eink_devfs_notifier(struct notifier_block *nb,
 }
 
 static struct notifier_block rockchip_monitor_ebc_nb = {
-	.notifier_call = rockchip_eink_devfs_notifier,
+	.notifier_call = rockchip_ebook_devfs_notifier,
 };
 
 static void system_monitor_early_min_volt_function(struct work_struct *work)
