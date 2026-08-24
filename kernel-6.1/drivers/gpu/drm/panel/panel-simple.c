@@ -27,6 +27,7 @@
 #include <linux/i2c.h>
 #include <linux/media-bus-format.h>
 #include <linux/module.h>
+#include <linux/nvmem-consumer.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
@@ -67,6 +68,25 @@ struct panel_cmd_seq {
 	struct panel_cmd_desc *cmds;
 	unsigned int cmd_cnt;
 };
+
+struct panel_simple_firmware_entry {
+	u32 offset;
+	u32 length;
+};
+
+struct panel_simple_firmware_header {
+	u32 magic;
+	u8 vendor[16];
+	u8 model[32];
+	u8 version[8];
+	struct panel_simple_firmware_entry timing;
+	struct panel_simple_firmware_entry init_seq;
+	struct panel_simple_firmware_entry exit_seq;
+	struct panel_simple_firmware_entry touchscreen;
+	u32 size;
+};
+
+#define PANEL_SIMPLE_FIRMWARE_MAGIC	0xdead5a5a
 
 /**
  * struct panel_desc - Describes a simple panel.
@@ -4712,6 +4732,99 @@ static bool of_child_node_is_present(const struct device_node *node,
 	return !!child;
 }
 
+static bool panel_simple_firmware_entry_is_valid(
+		const struct panel_simple_firmware_entry *entry)
+{
+	return entry->length && entry->offset <= U32_MAX - entry->length;
+}
+
+static int panel_simple_of_get_firmware_desc_data(struct device *dev,
+					  struct panel_desc *desc)
+{
+	struct device_node *np = dev->of_node;
+	struct panel_simple_firmware_header header;
+	struct drm_display_mode *mode;
+	struct nvmem_device *nvmem;
+	struct videomode vm;
+	u8 *init_data;
+	u8 *exit_data;
+	u32 bus_flags = 0;
+	int err;
+
+	nvmem = devm_nvmem_device_get(dev, "eeprom");
+	if (IS_ERR(nvmem))
+		return PTR_ERR(nvmem);
+
+	err = nvmem_device_read(nvmem, 0, sizeof(header), &header);
+	if (err < 0)
+		return err;
+
+	if (header.magic != PANEL_SIMPLE_FIRMWARE_MAGIC || !header.size ||
+	    header.timing.length != sizeof(vm) ||
+	    !panel_simple_firmware_entry_is_valid(&header.timing) ||
+	    !panel_simple_firmware_entry_is_valid(&header.init_seq) ||
+	    !panel_simple_firmware_entry_is_valid(&header.exit_seq)) {
+		dev_err(dev, "invalid EEPROM panel firmware\n");
+		return -ENODATA;
+	}
+
+	err = nvmem_device_read(nvmem, header.timing.offset,
+				header.timing.length, &vm);
+	if (err < 0)
+		return err;
+
+	init_data = devm_kmalloc(dev, header.init_seq.length, GFP_KERNEL);
+	if (!init_data)
+		return -ENOMEM;
+
+	err = nvmem_device_read(nvmem, header.init_seq.offset,
+				header.init_seq.length, init_data);
+	if (err < 0)
+		return err;
+
+	exit_data = devm_kmalloc(dev, header.exit_seq.length, GFP_KERNEL);
+	if (!exit_data)
+		return -ENOMEM;
+
+	err = nvmem_device_read(nvmem, header.exit_seq.offset,
+				header.exit_seq.length, exit_data);
+	if (err < 0)
+		return err;
+
+	mode = devm_kzalloc(dev, sizeof(*mode), GFP_KERNEL);
+	if (!mode)
+		return -ENOMEM;
+
+	drm_display_mode_from_videomode(&vm, mode);
+	drm_bus_flags_from_videomode(&vm, &bus_flags);
+	desc->modes = mode;
+	desc->num_modes = 1;
+	desc->bus_flags = bus_flags;
+
+	of_property_read_u32(np, "prepare-delay-ms", &desc->delay.prepare);
+	of_property_read_u32(np, "enable-delay-ms", &desc->delay.enable);
+	of_property_read_u32(np, "disable-delay-ms", &desc->delay.disable);
+	of_property_read_u32(np, "unprepare-delay-ms", &desc->delay.unprepare);
+	of_property_read_u32(np, "reset-delay-ms", &desc->delay.reset);
+	of_property_read_u32(np, "init-delay-ms", &desc->delay.init);
+
+	desc->init_seq = devm_kzalloc(dev, sizeof(*desc->init_seq), GFP_KERNEL);
+	if (!desc->init_seq)
+		return -ENOMEM;
+
+	err = panel_simple_parse_cmd_seq(dev, init_data, header.init_seq.length,
+					 desc->init_seq);
+	if (err)
+		return err;
+
+	desc->exit_seq = devm_kzalloc(dev, sizeof(*desc->exit_seq), GFP_KERNEL);
+	if (!desc->exit_seq)
+		return -ENOMEM;
+
+	return panel_simple_parse_cmd_seq(dev, exit_data, header.exit_seq.length,
+					  desc->exit_seq);
+}
+
 static int panel_simple_of_get_desc_data(struct device *dev,
 					 struct panel_desc *desc)
 {
@@ -5102,7 +5215,11 @@ static int panel_simple_dsi_of_get_desc_data(struct device *dev,
 	u32 val;
 	int err;
 
-	err = panel_simple_of_get_desc_data(dev, &desc->desc);
+	err = panel_simple_of_get_firmware_desc_data(dev, &desc->desc);
+	if (err == -EPROBE_DEFER)
+		return err;
+	if (err)
+		err = panel_simple_of_get_desc_data(dev, &desc->desc);
 	if (err)
 		return err;
 

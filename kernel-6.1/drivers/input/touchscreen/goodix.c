@@ -21,6 +21,7 @@
 #include <linux/platform_data/x86/soc.h>
 #include <linux/slab.h>
 #include <linux/acpi.h>
+#include <linux/nvmem-consumer.h>
 #include <linux/of.h>
 #include <asm/unaligned.h>
 #include "goodix.h"
@@ -58,6 +59,25 @@ struct goodix_chip_id {
 	const char *id;
 	const struct goodix_chip_data *data;
 };
+
+struct goodix_firmware_entry {
+	u32 offset;
+	u32 length;
+};
+
+struct goodix_firmware_header {
+	u32 magic;
+	u8 vendor[16];
+	u8 model[32];
+	u8 version[8];
+	struct goodix_firmware_entry timing;
+	struct goodix_firmware_entry init_seq;
+	struct goodix_firmware_entry exit_seq;
+	struct goodix_firmware_entry touchscreen;
+	u32 size;
+};
+
+#define GOODIX_FIRMWARE_MAGIC	0xdead5a5a
 
 static int goodix_check_cfg_8(struct goodix_ts_data *ts,
 			      const u8 *cfg, int len);
@@ -1183,6 +1203,46 @@ static int goodix_i2c_test(struct i2c_client *client)
 	return error;
 }
 
+static bool goodix_firmware_entry_is_valid(
+		const struct goodix_firmware_entry *entry)
+{
+	return entry->length == sizeof(struct touchscreen_properties) &&
+	       entry->offset <= U32_MAX - entry->length;
+}
+
+static int goodix_parse_firmware_properties(struct input_dev *input,
+					    struct touchscreen_properties *prop)
+{
+	struct device *dev = input->dev.parent;
+	struct goodix_firmware_header header;
+	struct touchscreen_properties firmware_prop;
+	struct nvmem_device *nvmem;
+	int err;
+
+	nvmem = devm_nvmem_device_get(dev, "eeprom");
+	if (IS_ERR(nvmem))
+		return PTR_ERR(nvmem);
+
+	err = nvmem_device_read(nvmem, 0, sizeof(header), &header);
+	if (err < 0)
+		return err;
+
+	if (header.magic != GOODIX_FIRMWARE_MAGIC || !header.size ||
+	    !goodix_firmware_entry_is_valid(&header.touchscreen))
+		return -ENODATA;
+
+	err = nvmem_device_read(nvmem, header.touchscreen.offset,
+				header.touchscreen.length, &firmware_prop);
+	if (err < 0)
+		return err;
+
+	prop->invert_x = firmware_prop.invert_x;
+	prop->invert_y = firmware_prop.invert_y;
+	prop->swap_x_y = firmware_prop.swap_x_y;
+
+	return 0;
+}
+
 /**
  * goodix_configure_dev - Finish device initialization
  *
@@ -1240,6 +1300,9 @@ retry_read_config:
 
 	/* Try overriding touchscreen parameters via device properties */
 	touchscreen_parse_properties(ts->input_dev, true, &ts->prop);
+	if (!goodix_parse_firmware_properties(ts->input_dev, &ts->prop))
+		dev_info(&ts->client->dev,
+			 "using touchscreen orientation from EEPROM firmware\n");
 
 	if (!ts->prop.max_x || !ts->prop.max_y || !ts->max_touch_num) {
 		if (!ts->reset_controller_at_probe &&

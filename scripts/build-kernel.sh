@@ -15,7 +15,7 @@ if [[ "${MAINLINE}" != "Y" ]]; then
     if [ -d "linux-rockchip" ]; then
         rm -rf linux-rockchip
     fi
-    cp -r ../linux-rockchip linux-rockchip
+    cp -r ../kernel-6.1 linux-rockchip
 fi
 cd linux-rockchip
 
