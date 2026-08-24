@@ -50,6 +50,10 @@ properties:
     description: GPIO pin to enable RS485 bus termination.
     maxItems: 1
 
+  rs485-de-gpios:
+    description: if using other gpio instead of rts, set this gpio.
+    maxItems: 1
+
 additionalProperties: true
 
 ...

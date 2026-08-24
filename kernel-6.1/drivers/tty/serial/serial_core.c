@@ -3476,6 +3476,13 @@ int uart_get_rs485_mode(struct uart_port *port)
 		rs485conf->flags |= SER_RS485_RTS_AFTER_SEND;
 	}
 
+	port->rs485_de_gpio = devm_gpiod_get_optional(dev, "rs485-de",
+							GPIOD_OUT_LOW);
+	if (IS_ERR(port->rs485_de_gpio))
+		port->rs485_de_gpio = NULL;
+	if (port->rs485_de_gpio)
+		port->rs485_supported.flags |= SER_RS485_TERMINATE_BUS;
+
 	/*
 	 * Disabling termination by default is the safe choice:  Else if many
 	 * bus participants enable it, no communication is possible at all.
