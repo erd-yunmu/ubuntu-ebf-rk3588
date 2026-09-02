@@ -197,7 +197,7 @@ EOF
 cp -r ../packages/arm64/* ${chroot_dir}/tmp
 chroot ${chroot_dir} /bin/bash -c "dpkg -i /tmp/*.deb"
 chroot ${chroot_dir} /bin/bash -c "apt-mark hold ffmpeg"
-rm -f ${chroot_dir}/tmp/*
+rm -f ${chroot_dir}/tmp/*.deb
 
 # Customize header content
 cp ${overlay_dir}/etc/update-motd.d/{00-header,30-sysinfo} ${chroot_dir}/etc/update-motd.d
