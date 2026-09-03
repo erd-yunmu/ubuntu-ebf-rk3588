@@ -34,7 +34,7 @@
 	};
 
 	fragment@3 {
-		target = <&hdptxphy_hdmi1>;
+		target = <&hdptxphy1>;
 
 		__overlay__ {
 			status = "okay";
