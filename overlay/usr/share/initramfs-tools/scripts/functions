@@ -857,14 +857,12 @@ _checkfs_once()
 		log_begin_msg "Will now check $NAME file system"
 		# shellcheck disable=SC2086
 		logsave -a -s $FSCK_LOGFILE fsck $spinner $force $fix -V -t "$TYPE" "$DEV"
-		logsave -a -s $FSCK_LOGFILE fsck $spinner $force -y -V -t "$TYPE" "$DEV"
 		FSCKCODE=$?
 		log_end_msg
 	else
 		log_begin_msg "Checking $NAME file system"
 		# shellcheck disable=SC2086
 		logsave -a -s $FSCK_LOGFILE fsck $spinner $force $fix -T -t "$TYPE" "$DEV"
-		logsave -a -s $FSCK_LOGFILE fsck $spinner $force -y -V -t "$TYPE" "$DEV"
 		FSCKCODE=$?
 		log_end_msg
 	fi

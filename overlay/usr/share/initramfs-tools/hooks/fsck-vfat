@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+
+PREREQ=""
+
+prereqs()
+{
+	echo "$PREREQ"
+}
+
+case "$1" in
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+copy_exec /usr/sbin/fsck.fat /usr/sbin/fsck.fat
+ln -sf fsck.fat "${DESTDIR}/usr/sbin/fsck.vfat"
