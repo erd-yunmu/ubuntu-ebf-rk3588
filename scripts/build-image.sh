@@ -144,7 +144,7 @@ tar -xpf "${rootfs}" -C ${mount_point}/writable
 mkdir -p ${mount_point}/writable/boot/firmware
 cat > ${mount_point}/writable/etc/fstab << 'EOF'
 # <file system>       <mount point>  <type>  <options>                    <dump>  <fsck>
-LABEL=system-boot     /boot/firmware vfat    defaults                     0       2
+LABEL=system-boot     /boot/firmware vfat    defaults                     0       0
 LABEL=writable        /              ext4    defaults,x-systemd.growfs    0       1
 /swapfile             none           swap    sw                           0       0
 EOF
