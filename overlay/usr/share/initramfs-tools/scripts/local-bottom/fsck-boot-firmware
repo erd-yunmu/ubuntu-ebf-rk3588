@@ -1,0 +1,30 @@
+#!/bin/sh
+
+PREREQ=""
+
+prereqs()
+{
+	echo "$PREREQ"
+}
+
+case "$1" in
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+. /scripts/functions
+
+if read_fstab_entry /boot/firmware vfat; then
+	BOOTDEV_RAW="$MNT_FSNAME"
+	BOOTDEV=$(resolve_device "$BOOTDEV_RAW") || BOOTDEV=""
+
+	if [ -n "$BOOTDEV" ] && [ -b "$BOOTDEV" ]; then
+		checkfs "$BOOTDEV" /boot/firmware vfat
+	else
+		log_warning_msg "Unable to resolve boot filesystem device $BOOTDEV_RAW; skipping check."
+	fi
+else
+	log_warning_msg "No vfat /boot/firmware entry found in fstab; skipping boot filesystem check."
+fi
