@@ -57,6 +57,7 @@
 #define BT_UNBLOCK false
 #define BT_SLEEP true
 #define BT_WAKEUP false
+#define BT_PORT_NAME_LEN 64
 
 enum {
 	IOMUX_FNORMAL = 0,
@@ -72,6 +73,7 @@ struct rfkill_rk_data {
 	struct delayed_work bt_sleep_delay_work;
 	int irq_req;
 	bool enable_power_key;
+	char btdev_port[BT_PORT_NAME_LEN];
 };
 
 static struct rfkill_rk_data *g_rfkill = NULL;
@@ -476,6 +478,26 @@ static void rfkill_rk_pm_complete(struct device *dev)
 	}
 }
 
+static void rfkill_rk_shutdown(struct platform_device *pdev)
+{
+	struct rfkill_rk_data *rfkill = platform_get_drvdata(pdev);
+	struct rfkill_rk_irq *wake_host_irq;
+
+	LOG("Enter %s power:%d\n", __func__, bt_power_state);
+
+	if (!rfkill)
+		return;
+
+	wake_host_irq = &rfkill->pdata->wake_host_irq;
+
+	// enable bt wakeup host
+	DBG("enable irq for bt wakeup host\n");
+	if (gpio_is_valid(wake_host_irq->gpio.io) && bt_power_state) {
+		enable_irq(wake_host_irq->irq);
+		enable_irq_wake(wake_host_irq->irq);
+	}
+}
+
 static const struct rfkill_ops rfkill_rk_ops = {
 	.set_block = rfkill_rk_set_power,
 };
@@ -571,6 +593,27 @@ static ssize_t bluesleep_write_proc_powerupkey(struct file *file,
 	return count;
 }
 
+static ssize_t bluetooth_read_proc_btport(struct file *file,
+					  char __user *buffer, size_t count, loff_t *offset)
+{
+	struct rfkill_rk_data *rfkill = g_rfkill;
+
+	if (!rfkill)
+		return -EFAULT;
+
+	return simple_read_from_buffer(buffer, count, offset, rfkill->btdev_port, BT_PORT_NAME_LEN);
+}
+
+static ssize_t bluetooth_write_proc_btport(struct file *file,
+					   const char __user *buffer, size_t count, loff_t *offset)
+{
+	struct rfkill_rk_data *rfkill = g_rfkill;
+
+	if (!rfkill)
+		return -EFAULT;
+	return simple_write_to_buffer(rfkill->btdev_port, BT_PORT_NAME_LEN, offset, buffer, count);
+}
+
 #ifdef CONFIG_OF
 static int bluetooth_platdata_parse_dt(struct device *dev,
 				       struct rfkill_rk_platform_data *data)
@@ -578,11 +621,19 @@ static int bluetooth_platdata_parse_dt(struct device *dev,
 	struct device_node *node = dev->of_node;
 	int gpio;
 	enum of_gpio_flags flags;
+	const char *port_name;
 
 	if (!node)
 		return -ENODEV;
 
 	memset(data, 0, sizeof(*data));
+
+	if (!of_property_read_string(node, "bt_port", &port_name)) {
+		strscpy(g_rfkill->btdev_port, port_name, BT_PORT_NAME_LEN);
+	} else {
+		LOG("can't get dts bt_port prop");
+		g_rfkill->btdev_port[0] = 0x00;
+	}
 
 	if (of_find_property(node, "wifi-bt-power-toggle", NULL)) {
 		data->power_toggle = true;
@@ -673,6 +724,11 @@ static const struct proc_ops bluesleep_powerupkey = {
 	.proc_write = bluesleep_write_proc_powerupkey,
 };
 
+static const struct proc_ops bluetooth_port = {
+	.proc_read = bluetooth_read_proc_btport,
+	.proc_write = bluetooth_write_proc_btport,
+};
+
 static int rfkill_rk_register_power_key(struct device *dev)
 {
 	int ret = 0;
@@ -707,6 +763,11 @@ static int rfkill_rk_probe(struct platform_device *pdev)
 	struct proc_dir_entry *ent;
 
 	DBG("Enter %s\n", __func__);
+	rfkill = devm_kzalloc(&pdev->dev, sizeof(*rfkill), GFP_KERNEL);
+	if (!rfkill)
+		return -ENOMEM;
+
+	g_rfkill = rfkill;
 
 	if (!pdata) {
 #ifdef CONFIG_OF
@@ -729,18 +790,21 @@ static int rfkill_rk_probe(struct platform_device *pdev)
 	pdata->name = (char *)bt_name;
 	pdata->type = RFKILL_TYPE_BLUETOOTH;
 
-	rfkill = devm_kzalloc(&pdev->dev, sizeof(*rfkill), GFP_KERNEL);
-	if (!rfkill)
-		return -ENOMEM;
-
 	rfkill->pdata = pdata;
 	rfkill->pdev = pdev;
-	g_rfkill = rfkill;
 
 	bluetooth_dir = proc_mkdir("bluetooth", NULL);
 	if (!bluetooth_dir) {
 		LOG("Unable to create /proc/bluetooth directory");
 		return -ENOMEM;
+	}
+
+	/* read/write proc entries */
+	ent = proc_create("btport", 0660, bluetooth_dir, &bluetooth_port);
+	if (!ent) {
+		LOG("Unable to create /proc/%s/btport entry", PROC_DIR);
+		ret = -ENOMEM;
+		goto fail_alloc;
 	}
 
 	sleep_dir = proc_mkdir("sleep", bluetooth_dir);
@@ -790,10 +854,6 @@ static int rfkill_rk_probe(struct platform_device *pdev)
 	if (ret)
 		goto fail_gpio;
 
-	ret = rfkill_rk_setup_gpio(pdev, &pdata->rts_gpio, rfkill->pdata->name,
-				   "rts");
-	if (ret)
-		goto fail_gpio;
 
 	wake_lock_init(&rfkill->bt_irq_wl, WAKE_LOCK_SUSPEND,
 		       "rfkill_rk_irq_wl");
@@ -908,6 +968,7 @@ MODULE_DEVICE_TABLE(of, bt_platdata_of_match);
 static struct platform_driver rfkill_rk_driver = {
 	.probe = rfkill_rk_probe,
 	.remove = rfkill_rk_remove,
+	.shutdown = rfkill_rk_shutdown,
 	.driver = {
 		.name = "rfkill_bt",
 		.owner = THIS_MODULE,

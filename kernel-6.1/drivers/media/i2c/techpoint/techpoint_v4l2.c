@@ -283,7 +283,7 @@ static void __techpoint_power_off(struct techpoint *techpoint)
 	if (!IS_ERR(techpoint->reset_gpio))
 		gpiod_set_value_cansleep(techpoint->reset_gpio, 1);
 
-	if (IS_ERR(techpoint->xvclk))
+	if (!IS_ERR(techpoint->xvclk))
 		clk_disable_unprepare(techpoint->xvclk);
 
 	if (!IS_ERR_OR_NULL(techpoint->pins_sleep)) {
@@ -511,6 +511,22 @@ static int techpoint_g_mbus_config(struct v4l2_subdev *sd,
 		cfg->type = V4L2_MBUS_CSI2_DPHY;
 		cfg->bus.mipi_csi2.num_data_lanes = techpoint->data_lanes;
 	}
+
+	return 0;
+}
+
+static int techpoint_enum_frame_interval(struct v4l2_subdev *sd,
+					 struct v4l2_subdev_state *sd_state,
+					 struct v4l2_subdev_frame_interval_enum *fie)
+{
+	struct techpoint *techpoint = to_techpoint(sd);
+
+	if (fie->index >= techpoint->video_modes_num)
+		return -EINVAL;
+
+	fie->width = techpoint->video_modes[fie->index].width;
+	fie->height = techpoint->video_modes[fie->index].height;
+	fie->interval = techpoint->video_modes[fie->index].max_fps;
 
 	return 0;
 }
@@ -824,6 +840,7 @@ static const struct v4l2_subdev_video_ops techpoint_video_ops = {
 static const struct v4l2_subdev_pad_ops techpoint_subdev_pad_ops = {
 	.enum_mbus_code = techpoint_enum_mbus_code,
 	.enum_frame_size = techpoint_enum_frame_sizes,
+	.enum_frame_interval = techpoint_enum_frame_interval,
 	.get_fmt = techpoint_get_fmt,
 	.set_fmt = techpoint_set_fmt,
 	.get_mbus_config = techpoint_g_mbus_config,

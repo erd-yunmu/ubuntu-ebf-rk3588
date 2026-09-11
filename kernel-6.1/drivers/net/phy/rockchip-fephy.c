@@ -7,14 +7,18 @@
  * David Wu <david.wu@rock-chips.com>
  */
 
+#include <linux/clk.h>
 #include <linux/ethtool.h>
 #include <linux/kernel.h>
+#include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/mii.h>
 #include <linux/netdevice.h>
+#include <linux/nvmem-consumer.h>
 #include <linux/platform_device.h>
 #include <linux/property.h>
 #include <linux/phy.h>
+#include <linux/regmap.h>
 
 #define INTERNAL_FEPHY_ID			0x06808101
 
@@ -48,6 +52,17 @@
 #define GAIN_PRE				GENMASK(5, 2)
 #define WR_ADDR_A7CFG				0x18
 
+#define MDIX_OFFSET_MIN				-5
+#define MDI_OFFSET_MAX				3
+#define OFFSET_TIMES_MAX			5
+
+#define DEFAULT_TXAMP				0x9
+
+enum rockchip_fephy_version {
+	RK_FEPHY_VERSION0 = 0,
+	RK_FEPHY_VERSION1
+};
+
 enum {
 	GROUP_CFG0 = 0,
 	GROUP_WOL,
@@ -60,9 +75,18 @@ enum {
 struct rockchip_fephy_priv {
 	struct phy_device *phydev;
 	unsigned int clk_rate;
+	struct clk *pclk;
 	int old_link;
 	int wol_irq;
+	int txamp;
+	int mdi_offset;
+	int mdix_offset;
 	int current_group;
+	struct regmap *regs;
+	bool idle;
+	struct mutex lock;
+	struct delayed_work service_task;
+	enum rockchip_fephy_version version;
 };
 
 static int rockchip_fephy_group_read(struct phy_device *phydev, u8 group, u32 reg)
@@ -92,6 +116,149 @@ static int rockchip_fephy_group_write(struct phy_device *phydev, u8 group,
 	return phy_write(phydev, SMI_ADDR_CFGCNTL, CFGCNTL_WRITE(group, reg));
 }
 
+static int rockchip_fephy_get_txamp_from_nvmem(struct phy_device *phydev)
+{
+	struct rockchip_fephy_priv *priv = phydev->priv;
+	unsigned char *buf;
+	struct nvmem_cell *cell;
+	int txamp_type;
+	size_t len;
+
+	cell = nvmem_cell_get(&phydev->mdio.dev, "txamp");
+	if (IS_ERR(cell)) {
+		phydev_err(phydev, "failed to get txamp cell: %ld, use default\n",
+			   PTR_ERR(cell));
+	} else {
+		int ret;
+
+		buf = nvmem_cell_read(cell, &len);
+		nvmem_cell_put(cell);
+		if (!IS_ERR(buf)) {
+			if (len == 2) {
+				priv->txamp = buf[0] & 0x1f;
+				txamp_type =  buf[1];
+				/* For some cases, if it's an odd number, add 3 */
+				if (txamp_type == 0x8 && (priv->txamp & 1))
+					priv->txamp += 3;
+				ret = 0;
+			} else {
+				ret = -EINVAL;
+			}
+			kfree(buf);
+			return ret;
+		}
+		phydev_err(phydev, "failed to get nvmem buf, use default\n");
+	}
+
+	return -EINVAL;
+}
+
+static int rockchip_fephy_get_adc_offset_from_nvmem(struct phy_device *phydev)
+{
+	struct rockchip_fephy_priv *priv = phydev->priv;
+	unsigned char *buf;
+	struct nvmem_cell *cell;
+	size_t len;
+
+	cell = nvmem_cell_get(&phydev->mdio.dev, "adc_offset");
+	if (IS_ERR(cell)) {
+		phydev_err(phydev, "failed to get offset cell: %ld, use default\n",
+			   PTR_ERR(cell));
+	} else {
+		int ret;
+
+		buf = nvmem_cell_read(cell, &len);
+		nvmem_cell_put(cell);
+		if (!IS_ERR(buf)) {
+			if (len == 2) {
+				priv->mdi_offset = buf[0] & 0x7f;
+				priv->mdix_offset = buf[1] & 0x7f;
+				ret = 0;
+			} else {
+				ret = -EINVAL;
+			}
+			kfree(buf);
+			return ret;
+		}
+		phydev_err(phydev, "failed to get nvmem buf, use default\n");
+	}
+
+	return -EINVAL;
+}
+
+static int rockchip_fephy_fix_offset_v0(struct phy_device *phydev)
+{
+	struct rockchip_fephy_priv *priv = phydev->priv;
+	int offset, mdi_offset, mdix_offset, sum;
+	int mdi_fix, mdix_fix;
+	int ret = 0;
+
+	mdi_offset = (priv->mdi_offset < 0x40) ? priv->mdi_offset : (priv->mdi_offset - 0x80);
+	mdix_offset = (priv->mdix_offset < 0x40) ? priv->mdix_offset : (priv->mdix_offset - 0x80);
+
+	sum = mdi_offset + mdix_offset;
+	/* Balance to smaller side */
+	offset = ((sum >= 0) ? (sum + 1) : sum) / 2;
+	offset -= (MDI_OFFSET_MAX + MDIX_OFFSET_MIN) / 2;
+	mdi_fix = mdi_offset - offset;
+	mdix_fix = mdix_offset - offset;
+	if (mdi_fix > MDI_OFFSET_MAX || mdix_fix < MDIX_OFFSET_MIN) {
+		int reg;
+
+		reg = phy_read(priv->phydev, MII_INTERNAL_CTRL_STATUS);
+		if (reg < 0)
+			return reg;
+
+		if ((abs(mdi_offset)) <= abs(mdix_offset)) {
+			offset = mdi_offset;
+			/* Force MDI */
+			reg &= ~(MII_MDIX_EN | MII_AUTO_MDIX_EN);
+		} else {
+			offset = mdix_offset;
+			/* Force MDIX */
+			reg &= ~MII_AUTO_MDIX_EN;
+			reg |= MII_MDIX_EN;
+		}
+
+		ret = phy_write(phydev, MII_INTERNAL_CTRL_STATUS, reg);
+		if (ret)
+			return ret;
+	}
+
+	offset = (offset >= 0) ? offset : (offset + 0x80);
+	offset &= 0x7f;
+	regmap_write(priv->regs, 0xC0, offset);
+	regmap_write(priv->regs, 0xA0, 0xFFFF0008);
+
+	return ret;
+}
+
+static int rockchip_fephy_fix_offset_v1(struct phy_device *phydev)
+{
+	struct rockchip_fephy_priv *priv = phydev->priv;
+	int ret = 0, val;
+
+	priv->mdi_offset &= 0x7f;
+	priv->mdix_offset &= 0x7f;
+	val = 0xFFFF0000 | (priv->mdi_offset | (priv->mdix_offset << 8));
+	regmap_write(priv->regs, 0xB4, val);
+	regmap_write(priv->regs, 0xA0, 0xFFFF0008);
+
+	return ret;
+}
+
+static void rockchip_fephy_enable_low_power_state(struct phy_device *phydev, bool enable)
+{
+	struct rockchip_fephy_priv *priv = phydev->priv;
+
+	if (enable)
+		regmap_write(priv->regs, 0xb0, 0xffff801f);
+	else
+		regmap_write(priv->regs, 0xb0, 0xffff01f0);
+
+	priv->idle = enable;
+}
+
 static int rockchip_fephy_config_init(struct phy_device *phydev)
 {
 	struct rockchip_fephy_priv *priv = phydev->priv;
@@ -108,7 +275,7 @@ static int rockchip_fephy_config_init(struct phy_device *phydev)
 		return ret;
 
 	/* 100M amplitude control */
-	ret = rockchip_fephy_group_write(phydev, GROUP_CFG0, 0x18, 0x9);
+	ret = rockchip_fephy_group_write(phydev, GROUP_CFG0, 0x18, priv->txamp);
 	if (ret)
 		return ret;
 
@@ -124,7 +291,7 @@ static int rockchip_fephy_config_init(struct phy_device *phydev)
 		sel = rockchip_fephy_group_read(phydev, GROUP_AFE, 0x3);
 		if (sel < 0)
 			return sel;
-		ret = rockchip_fephy_group_write(phydev, GROUP_AFE, 0x3, sel | 0x2);
+		ret = rockchip_fephy_group_write(phydev, GROUP_AFE, 0x3, sel | 0x1);
 		if (ret)
 			return ret;
 
@@ -134,7 +301,17 @@ static int rockchip_fephy_config_init(struct phy_device *phydev)
 			return ret;
 	}
 
-	return ret;
+	if (priv->version == RK_FEPHY_VERSION1) {
+		mutex_lock(&priv->lock);
+		/* Enable low-power mode at init for V1*/
+		rockchip_fephy_enable_low_power_state(phydev, true);
+		schedule_delayed_work(&priv->service_task, msecs_to_jiffies(2000));
+		mutex_unlock(&priv->lock);
+		return rockchip_fephy_fix_offset_v1(phydev);
+	} else {
+		priv->version = RK_FEPHY_VERSION0;
+		return rockchip_fephy_fix_offset_v0(phydev);
+	}
 }
 
 static int rockchip_fephy_config_aneg(struct phy_device *phydev)
@@ -148,14 +325,25 @@ static void rockchip_feph_link_change_notify(struct phy_device *phydev)
 	int ret;
 
 	if (priv->old_link && !phydev->link) {
-		priv->old_link = 0;
 		ret = rockchip_fephy_group_write(phydev, GROUP_CFG0, 0xa, 0x6664);
 		if (ret)
 			return;
+
+		mutex_lock(&priv->lock);
+		priv->old_link = 0;
+		if (priv->version == RK_FEPHY_VERSION1)
+			schedule_delayed_work(&priv->service_task, msecs_to_jiffies(0));
+		mutex_unlock(&priv->lock);
 	} else if (!priv->old_link && phydev->link) {
 		int gain;
 
+		mutex_lock(&priv->lock);
 		priv->old_link = 1;
+		/* Disable low-power mode when the network cable is plugged */
+		if (priv->version == RK_FEPHY_VERSION1)
+			rockchip_fephy_enable_low_power_state(phydev, false);
+		mutex_unlock(&priv->lock);
+
 		/* read gain level */
 		gain = rockchip_fephy_group_read(phydev, GROUP_CFG0, 0x0);
 		if (gain < 0)
@@ -224,6 +412,35 @@ static irqreturn_t rockchip_fephy_wol_irq_thread(int irq, void *dev_id)
 	phy_read(priv->phydev, MII_INT_STATUS);
 
 	return IRQ_HANDLED;
+}
+
+static void rockchip_fephy_service_task(struct work_struct *work)
+{
+	struct rockchip_fephy_priv *priv = container_of(work, struct rockchip_fephy_priv,
+							service_task.work);
+
+	if (!priv->phydev || !priv->phydev->attached_dev)
+		return;
+
+	mutex_lock(&priv->lock);
+	if (!priv->phydev->link) {
+		unsigned int delay_time;
+
+		if (!priv->idle) {
+			/* Enable low-power mode for 2000ms */
+			rockchip_fephy_enable_low_power_state(priv->phydev, true);
+			delay_time = 2000;
+		} else {
+			/* Disable low-power mode for 300ms */
+			rockchip_fephy_enable_low_power_state(priv->phydev, false);
+			delay_time = 300;
+		}
+		schedule_delayed_work(&priv->service_task, msecs_to_jiffies(delay_time));
+	} else {
+		/* Disable low-power mode when the network cable is plugged */
+		rockchip_fephy_enable_low_power_state(priv->phydev, false);
+	}
+	mutex_unlock(&priv->lock);
 }
 
 static void rockchip_fephy_dump_cfg1_group_regs(struct phy_device *phydev, int group, char *buf)
@@ -399,7 +616,7 @@ rockchip_fephy_phy_write_priv_reg(struct phy_device *phydev, int group, int reg,
 			pr_err("group%d %2d write error: %d\n", group, reg, val);
 			return;
 		}
-		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, val);
+		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, rval);
 		break;
 	case GROUP_WOL: /* WOL register group */
 		val = rockchip_fephy_group_write(phydev, GROUP_WOL, reg, rval);
@@ -407,7 +624,7 @@ rockchip_fephy_phy_write_priv_reg(struct phy_device *phydev, int group, int reg,
 			pr_err("group%d %2d write error: %d\n", group, reg, val);
 			return;
 		}
-		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, val);
+		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, rval);
 		break;
 	case GROUP_CFG0_READ: /* CFG0_read register group */
 		val = rockchip_fephy_group_write(phydev, GROUP_CFG0_READ, reg, rval);
@@ -415,7 +632,7 @@ rockchip_fephy_phy_write_priv_reg(struct phy_device *phydev, int group, int reg,
 			pr_err("group%d %2d write error: %d\n", group, reg, val);
 			return;
 		}
-		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, val);
+		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, rval);
 		break;
 	case GROUP_BIST: /* BIST register group */
 		val = rockchip_fephy_group_write(phydev, GROUP_BIST, reg, rval);
@@ -423,7 +640,7 @@ rockchip_fephy_phy_write_priv_reg(struct phy_device *phydev, int group, int reg,
 			pr_err("group%d %2d write error: %d\n", group, reg, val);
 			return;
 		}
-		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, val);
+		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, rval);
 		break;
 	case GROUP_AFE: /* AFE register group */
 		val = rockchip_fephy_group_write(phydev, GROUP_AFE, reg, rval);
@@ -431,7 +648,7 @@ rockchip_fephy_phy_write_priv_reg(struct phy_device *phydev, int group, int reg,
 			pr_err("group%d %2d write error: %d\n", group, reg, val);
 			return;
 		}
-		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, val);
+		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, rval);
 		break;
 	case GROUP_CFG1: /* CFG1 register group */
 		val = rockchip_fephy_group_write(phydev, GROUP_CFG1, reg, rval);
@@ -439,7 +656,7 @@ rockchip_fephy_phy_write_priv_reg(struct phy_device *phydev, int group, int reg,
 			pr_err("group%d %2d write error: %d\n", group, reg, val);
 			return;
 		}
-		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, val);
+		pr_info("write group%d reg_%02d: 0x%x\n", group, reg, rval);
 		break;
 	default:
 		pr_err("error group num: %d\n", group);
@@ -578,11 +795,17 @@ static DEVICE_ATTR_RW(phy_param);
 static int rockchip_fephy_probe(struct phy_device *phydev)
 {
 	struct rockchip_fephy_priv *priv;
-	int ret;
+	int ret, val;
 
 	priv = devm_kzalloc(&phydev->mdio.dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
+
+	priv->regs = syscon_regmap_lookup_by_phandle(phydev->mdio.dev.of_node, "rockchip,macphy");
+	if (IS_ERR_OR_NULL(priv->regs)) {
+		phydev_err(phydev, "no macphy regmap found\n");
+		return -EINVAL;
+	}
 
 	phydev->priv = priv;
 	if (device_property_read_u32(&phydev->mdio.dev, "clock-frequency", &priv->clk_rate))
@@ -600,26 +823,51 @@ static int rockchip_fephy_probe(struct phy_device *phydev)
 						"rockchip_fephy_wol_irq", priv);
 		if (ret) {
 			phydev_err(phydev, "request wol_irq failed: %d\n", ret);
-			goto irq_err;
+			return ret;
 		}
 		enable_irq_wake(priv->wol_irq);
 	}
 
 	priv->phydev = phydev;
 
+	priv->pclk = devm_clk_get_enabled(&phydev->mdio.dev, "pclk");
+	if (IS_ERR(priv->pclk))
+		return PTR_ERR(priv->pclk);
+
+	ret = rockchip_fephy_get_txamp_from_nvmem(phydev);
+	if (ret || !priv->txamp)
+		priv->txamp = DEFAULT_TXAMP;
+
+	ret = rockchip_fephy_get_adc_offset_from_nvmem(phydev);
+	if (ret) {
+		priv->mdi_offset = 0;
+		priv->mdix_offset = 0;
+	}
+
+	ret = regmap_read(priv->regs, 0xfc, &val);
+	if (!ret && val == 0x100) {
+		priv->version = RK_FEPHY_VERSION1;
+		mutex_init(&priv->lock);
+		INIT_DELAYED_WORK(&priv->service_task, rockchip_fephy_service_task);
+	} else {
+		priv->version = RK_FEPHY_VERSION0;
+	}
+
 	ret = device_create_file(&phydev->mdio.dev, &dev_attr_phy_param);
 	if (ret)
-		goto irq_err;
+		return ret;
 
 	return 0;
-
-irq_err:
-
-	return ret;
 }
 
 static void rockchip_fephy_remove(struct phy_device *phydev)
 {
+	struct rockchip_fephy_priv *priv = phydev->priv;
+
+	if (priv->version == RK_FEPHY_VERSION1) {
+		cancel_delayed_work_sync(&priv->service_task);
+		mutex_destroy(&priv->lock);
+	}
 	device_remove_file(&phydev->mdio.dev, &dev_attr_phy_param);
 }
 
@@ -632,16 +880,27 @@ static int rockchip_fephy_suspend(struct phy_device *phydev)
 		enable_irq(priv->wol_irq);
 	}
 
+	/* reschedule at resume */
+	if (priv->version == RK_FEPHY_VERSION1)
+		cancel_delayed_work_sync(&priv->service_task);
+
 	return genphy_suspend(phydev);
 }
 
 static int rockchip_fephy_resume(struct phy_device *phydev)
 {
 	struct rockchip_fephy_priv *priv = phydev->priv;
+	int ret;
 
 	if (priv->wol_irq > 0) {
 		rockchip_fephy_wol_disable(phydev);
 		disable_irq(priv->wol_irq);
+	}
+
+	if (phydev->mac_managed_pm) {
+		ret = rockchip_fephy_config_init(phydev);
+		if (ret)
+			return ret;
 	}
 
 	return genphy_resume(phydev);

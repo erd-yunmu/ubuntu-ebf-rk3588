@@ -11,179 +11,6 @@
 #include "rga_job.h"
 #include "rga_debugger.h"
 
-int rga_buf_size_cal(unsigned long yrgb_addr, unsigned long uv_addr,
-		      unsigned long v_addr, int format, uint32_t w,
-		      uint32_t h, unsigned long *StartAddr, unsigned long *size)
-{
-	uint32_t size_yrgb = 0;
-	uint32_t size_uv = 0;
-	uint32_t size_v = 0;
-	uint32_t stride = 0;
-	unsigned long start, end;
-	uint32_t pageCount;
-
-	switch (format) {
-	case RGA_FORMAT_RGBA_8888:
-	case RGA_FORMAT_RGBX_8888:
-	case RGA_FORMAT_BGRA_8888:
-	case RGA_FORMAT_BGRX_8888:
-	case RGA_FORMAT_ARGB_8888:
-	case RGA_FORMAT_XRGB_8888:
-	case RGA_FORMAT_ABGR_8888:
-	case RGA_FORMAT_XBGR_8888:
-		stride = (w * 4 + 3) & (~3);
-		size_yrgb = stride * h;
-		start = yrgb_addr >> PAGE_SHIFT;
-		end = yrgb_addr + size_yrgb;
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	case RGA_FORMAT_RGB_888:
-	case RGA_FORMAT_BGR_888:
-		stride = (w * 3 + 3) & (~3);
-		size_yrgb = stride * h;
-		start = yrgb_addr >> PAGE_SHIFT;
-		end = yrgb_addr + size_yrgb;
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	case RGA_FORMAT_RGB_565:
-	case RGA_FORMAT_RGBA_5551:
-	case RGA_FORMAT_RGBA_4444:
-	case RGA_FORMAT_BGR_565:
-	case RGA_FORMAT_BGRA_5551:
-	case RGA_FORMAT_BGRA_4444:
-	case RGA_FORMAT_ARGB_5551:
-	case RGA_FORMAT_ARGB_4444:
-	case RGA_FORMAT_ABGR_5551:
-	case RGA_FORMAT_ABGR_4444:
-		stride = (w * 2 + 3) & (~3);
-		size_yrgb = stride * h;
-		start = yrgb_addr >> PAGE_SHIFT;
-		end = yrgb_addr + size_yrgb;
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-
-		/* YUV FORMAT */
-	case RGA_FORMAT_YCbCr_422_SP:
-	case RGA_FORMAT_YCrCb_422_SP:
-		stride = (w + 3) & (~3);
-		size_yrgb = stride * h;
-		size_uv = stride * h;
-		start = min(yrgb_addr, uv_addr);
-		start >>= PAGE_SHIFT;
-		end = max((yrgb_addr + size_yrgb), (uv_addr + size_uv));
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	case RGA_FORMAT_YCbCr_422_P:
-	case RGA_FORMAT_YCrCb_422_P:
-		stride = (w + 3) & (~3);
-		size_yrgb = stride * h;
-		size_uv = ((stride >> 1) * h);
-		size_v = ((stride >> 1) * h);
-		start = min3(yrgb_addr, uv_addr, v_addr);
-		start = start >> PAGE_SHIFT;
-		end =
-			max3((yrgb_addr + size_yrgb), (uv_addr + size_uv),
-			(v_addr + size_v));
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	case RGA_FORMAT_YCbCr_420_SP:
-	case RGA_FORMAT_YCrCb_420_SP:
-		stride = (w + 3) & (~3);
-		size_yrgb = stride * h;
-		size_uv = (stride * (h >> 1));
-		start = min(yrgb_addr, uv_addr);
-		start >>= PAGE_SHIFT;
-		end = max((yrgb_addr + size_yrgb), (uv_addr + size_uv));
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	case RGA_FORMAT_YCbCr_420_P:
-	case RGA_FORMAT_YCrCb_420_P:
-		stride = (w + 3) & (~3);
-		size_yrgb = stride * h;
-		size_uv = ((stride >> 1) * (h >> 1));
-		size_v = ((stride >> 1) * (h >> 1));
-		start = min3(yrgb_addr, uv_addr, v_addr);
-		start >>= PAGE_SHIFT;
-		end =
-			max3((yrgb_addr + size_yrgb), (uv_addr + size_uv),
-			(v_addr + size_v));
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	case RGA_FORMAT_YCbCr_400:
-	case RGA_FORMAT_Y8:
-		stride = (w + 3) & (~3);
-		size_yrgb = stride * h;
-		start = yrgb_addr >> PAGE_SHIFT;
-		end = yrgb_addr + size_yrgb;
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	case RGA_FORMAT_Y4:
-		stride = ((w + 3) & (~3)) >> 1;
-		size_yrgb = stride * h;
-		start = yrgb_addr >> PAGE_SHIFT;
-		end = yrgb_addr + size_yrgb;
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	case RGA_FORMAT_YVYU_422:
-	case RGA_FORMAT_VYUY_422:
-	case RGA_FORMAT_YUYV_422:
-	case RGA_FORMAT_UYVY_422:
-		stride = (w + 3) & (~3);
-		size_yrgb = stride * h;
-		size_uv = stride * h;
-		start = min(yrgb_addr, uv_addr);
-		start >>= PAGE_SHIFT;
-		end = max((yrgb_addr + size_yrgb), (uv_addr + size_uv));
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	case RGA_FORMAT_YVYU_420:
-	case RGA_FORMAT_VYUY_420:
-	case RGA_FORMAT_YUYV_420:
-	case RGA_FORMAT_UYVY_420:
-		stride = (w + 3) & (~3);
-		size_yrgb = stride * h;
-		size_uv = (stride * (h >> 1));
-		start = min(yrgb_addr, uv_addr);
-		start >>= PAGE_SHIFT;
-		end = max((yrgb_addr + size_yrgb), (uv_addr + size_uv));
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	case RGA_FORMAT_YCbCr_420_SP_10B:
-	case RGA_FORMAT_YCrCb_420_SP_10B:
-		stride = (w + 3) & (~3);
-		size_yrgb = stride * h;
-		size_uv = (stride * (h >> 1));
-		start = min(yrgb_addr, uv_addr);
-		start >>= PAGE_SHIFT;
-		end = max((yrgb_addr + size_yrgb), (uv_addr + size_uv));
-		end = (end + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-		pageCount = end - start;
-		break;
-	default:
-		pageCount = 0;
-		start = 0;
-		break;
-	}
-
-	*StartAddr = start;
-
-	if (size != NULL)
-		*size = size_yrgb + size_uv + size_v;
-
-	return pageCount;
-}
-
 int rga_virtual_memory_check(void *vaddr, u32 w, u32 h, u32 format, int fd)
 {
 	int bits = 32;
@@ -228,7 +55,10 @@ int rga_dma_memory_check(struct rga_dma_buffer *rga_dma_buffer, struct rga_img_i
 	dma_buf = rga_dma_buffer->dma_buf;
 
 	if (!IS_ERR_OR_NULL(dma_buf)) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+		ret = dma_buf_vmap_unlocked(dma_buf, &map);
+		vaddr = ret ? NULL : map.vaddr;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 		ret = dma_buf_vmap(dma_buf, &map);
 		vaddr = ret ? NULL : map.vaddr;
 #else
@@ -241,7 +71,9 @@ int rga_dma_memory_check(struct rga_dma_buffer *rga_dma_buffer, struct rga_img_i
 			rga_err("can't vmap the dma buffer!\n");
 			return -EINVAL;
 		}
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+		dma_buf_vunmap_unlocked(dma_buf, &map);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 		dma_buf_vunmap(dma_buf, &map);
 #else
 		dma_buf_vunmap(dma_buf, vaddr);
@@ -249,30 +81,6 @@ int rga_dma_memory_check(struct rga_dma_buffer *rga_dma_buffer, struct rga_img_i
 	}
 
 	return ret;
-}
-
-int rga_dma_map_phys_addr(phys_addr_t phys_addr, size_t size, struct rga_dma_buffer *buffer,
-			 enum dma_data_direction dir, struct device *map_dev)
-{
-	dma_addr_t addr;
-
-	addr = dma_map_resource(map_dev, phys_addr, size, dir, 0);
-	if (addr == DMA_MAPPING_ERROR) {
-		rga_err("dma_map_resouce failed!\n");
-		return -EINVAL;
-	}
-
-	buffer->dma_addr = addr;
-	buffer->dir = dir;
-	buffer->size = size;
-	buffer->map_dev = map_dev;
-
-	return 0;
-}
-
-void rga_dma_unmap_phys_addr(struct rga_dma_buffer *buffer)
-{
-	dma_unmap_resource(buffer->map_dev, buffer->dma_addr, buffer->size, buffer->dir, 0);
 }
 
 int rga_dma_map_sgt(struct sg_table *sgt, struct rga_dma_buffer *buffer,
@@ -285,6 +93,11 @@ int rga_dma_map_sgt(struct sg_table *sgt, struct rga_dma_buffer *buffer,
 	if (ret <= 0) {
 		rga_err("dma_map_sg failed! ret = %d\n", ret);
 		return ret < 0 ? ret : -EINVAL;
+	} else if (ret > 1) {
+		rga_err("dma_map_sg mapped more than one segment! orig_nents = %d, nents = %d\n",
+			sgt->orig_nents, ret);
+		dma_unmap_sg(map_dev, sgt->sgl, sgt->orig_nents, dir);
+		return -EINVAL;
 	}
 	sgt->nents = ret;
 
@@ -332,7 +145,11 @@ int rga_dma_map_buf(struct dma_buf *dma_buf, struct rga_dma_buffer *rga_dma_buff
 		goto err_get_attach;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	sgt = dma_buf_map_attachment_unlocked(attach, dir);
+#else
 	sgt = dma_buf_map_attachment(attach, dir);
+#endif
 	if (IS_ERR(sgt)) {
 		ret = PTR_ERR(sgt);
 		rga_err("Failed to map attachment, ret[%d]\n", ret);
@@ -384,7 +201,11 @@ int rga_dma_map_fd(int fd, struct rga_dma_buffer *rga_dma_buffer,
 		goto err_get_attach;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	sgt = dma_buf_map_attachment_unlocked(attach, dir);
+#else
 	sgt = dma_buf_map_attachment(attach, dir);
+#endif
 	if (IS_ERR(sgt)) {
 		ret = PTR_ERR(sgt);
 		rga_err("Failed to map attachment, ret[%d]\n", ret);
@@ -416,9 +237,15 @@ err_get_attach:
 void rga_dma_unmap_buf(struct rga_dma_buffer *rga_dma_buffer)
 {
 	if (rga_dma_buffer->attach && rga_dma_buffer->sgt)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+		dma_buf_unmap_attachment_unlocked(rga_dma_buffer->attach,
+						  rga_dma_buffer->sgt,
+						  rga_dma_buffer->dir);
+#else
 		dma_buf_unmap_attachment(rga_dma_buffer->attach,
 					 rga_dma_buffer->sgt,
 					 rga_dma_buffer->dir);
+#endif
 
 	if (rga_dma_buffer->attach) {
 		dma_buf_detach(rga_dma_buffer->dma_buf, rga_dma_buffer->attach);
@@ -457,19 +284,21 @@ struct rga_dma_buffer *rga_dma_alloc_coherent(struct rga_scheduler_t *scheduler,
 	size_t align_size;
 	dma_addr_t dma_addr;
 	struct  rga_dma_buffer *buffer;
+	struct device *map_dev;
 
 	buffer = kzalloc(sizeof(*buffer), GFP_KERNEL);
 	if (!buffer)
 		return NULL;
 
 	align_size = PAGE_ALIGN(size);
-	buffer->vaddr = dma_alloc_coherent(scheduler->dev, align_size, &dma_addr, GFP_KERNEL);
+	map_dev = scheduler->iommu_info ? scheduler->iommu_info->default_dev : scheduler->dev;
+	buffer->vaddr = dma_alloc_coherent(map_dev, align_size, &dma_addr, GFP_KERNEL);
 	if (!buffer->vaddr)
 		goto fail_dma_alloc;
 
 	buffer->size = align_size;
 	buffer->dma_addr = dma_addr;
-	buffer->map_dev = scheduler->dev;
+	buffer->map_dev = map_dev;
 	if (scheduler->data->mmu == RGA_IOMMU)
 		buffer->iova = buffer->dma_addr;
 
@@ -479,4 +308,149 @@ fail_dma_alloc:
 	kfree(buffer);
 
 	return NULL;
+}
+
+struct rga_dma_buf_pool *rga_dma_buf_pool_init(struct rga_scheduler_t *scheduler, int block_size)
+{
+	int ret;
+	struct rga_dma_buf_pool *pool;
+
+	pool = kzalloc(sizeof(*pool), GFP_KERNEL);
+	if (!pool) {
+		rga_err("Failed to allocate memory for rga_dma_buf_pool.\n");
+		return ERR_PTR(-ENOMEM);
+	}
+
+#ifdef CONFIG_ROCKCHIP_RGA_GENPOOL
+	block_size = ALIGN(block_size, scheduler->data->byte_stride_align);
+
+	pool->dma_buf = rga_dma_alloc_coherent(scheduler,
+					       block_size * CONFIG_ROCKCHIP_RGA_CMD_BUF_COUNT);
+	if (pool->dma_buf == NULL) {
+		rga_err("Failed to allocate coherent memory for dma_buf_pool.\n");
+		ret = -ENOMEM;
+		goto err_free_pool;
+	}
+
+	pool->pool = gen_pool_create(ilog2(block_size), -1);
+	if (!pool->pool) {
+		rga_err("Failed to create memory pool.\n");
+		ret = -ENOMEM;
+		goto err_free_dma_buf;
+	}
+
+	ret = gen_pool_add_virt(pool->pool, (unsigned long)pool->dma_buf->vaddr,
+				pool->dma_buf->dma_addr, pool->dma_buf->size, -1);
+	if (ret < 0) {
+		rga_err("Failed to add memory to gen_pool.\n");
+		goto err_destroy_pool;
+	}
+#else
+	pool->pool = dma_pool_create("rga_cmd_buf_pool",
+				     scheduler->iommu_info ? scheduler->iommu_info->default_dev :
+							     scheduler->dev,
+				     block_size, scheduler->data->byte_stride_align, 0);
+	if (!pool->pool) {
+		rga_err("Failed to create dma pool.\n");
+		ret = -ENOMEM;
+		goto err_free_pool;
+	}
+#endif
+
+	pool->scheduler = scheduler;
+	pool->block_size = block_size;
+
+	return pool;
+
+#ifdef CONFIG_ROCKCHIP_RGA_GENPOOL
+err_destroy_pool:
+	gen_pool_destroy(pool->pool);
+	pool->pool = NULL;
+
+err_free_dma_buf:
+	rga_dma_free(pool->dma_buf);
+	pool->dma_buf = NULL;
+#endif
+
+err_free_pool:
+	kfree(pool);
+
+	return ERR_PTR(ret);
+}
+
+void rga_dma_buf_pool_destroy(struct rga_dma_buf_pool *pool)
+{
+	if (!pool)
+		return;
+
+	if (pool->pool) {
+#ifdef CONFIG_ROCKCHIP_RGA_GENPOOL
+		gen_pool_destroy(pool->pool);
+#else
+		dma_pool_destroy(pool->pool);
+#endif
+		pool->pool = NULL;
+	}
+
+	if (pool->dma_buf) {
+		rga_dma_free(pool->dma_buf);
+		pool->dma_buf = NULL;
+	}
+
+	kfree(pool);
+}
+
+struct rga_dma_buffer *rga_dma_buf_pool_alloc(struct rga_dma_buf_pool *pool)
+{
+	struct rga_dma_buffer *buffer;
+
+	if (!pool || !pool->pool) {
+		rga_err("rga_dma_buf_pool is not initialized.\n");
+		return NULL;
+	}
+
+	buffer = kzalloc(sizeof(*buffer), GFP_KERNEL);
+	if (!buffer) {
+		rga_err("Failed to allocate memory for rga_dma_buffer.\n");
+		return NULL;
+	}
+
+#ifdef CONFIG_ROCKCHIP_RGA_GENPOOL
+	buffer->vaddr = gen_pool_dma_zalloc(pool->pool, pool->block_size, &buffer->dma_addr);
+#else
+	buffer->vaddr = dma_pool_zalloc(pool->pool, GFP_KERNEL, &buffer->dma_addr);
+#endif
+	if (!buffer->vaddr) {
+		rga_err("Failed to allocate memory from gen_pool.\n");
+		kfree(buffer);
+		return NULL;
+	}
+
+	buffer->size = pool->block_size;
+	buffer->map_dev = pool->scheduler->dev;
+	if (pool->scheduler->data->mmu == RGA_IOMMU)
+		buffer->iova = buffer->dma_addr;
+
+	return buffer;
+}
+
+int rga_dma_buf_pool_free(struct rga_dma_buf_pool *pool, struct rga_dma_buffer *buffer)
+{
+	if (!pool || !pool->pool || !buffer || !buffer->vaddr) {
+		rga_err("Invalid pool or buffer.\n");
+		return -EINVAL;
+	}
+
+#ifdef CONFIG_ROCKCHIP_RGA_GENPOOL
+	gen_pool_free(pool->pool, (unsigned long)buffer->vaddr, buffer->size);
+#else
+	dma_pool_free(pool->pool, buffer->vaddr, buffer->dma_addr);
+#endif
+	buffer->vaddr = NULL;
+	buffer->dma_addr = 0;
+	buffer->iova = 0;
+
+	kfree(buffer);
+
+	return 0;
 }

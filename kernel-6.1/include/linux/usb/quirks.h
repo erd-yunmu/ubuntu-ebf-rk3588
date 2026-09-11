@@ -75,7 +75,13 @@
 /* short SET_ADDRESS request timeout */
 #define USB_QUIRK_SHORT_SET_ADDRESS_REQ_TIMEOUT	BIT(16)
 
+/* skip BOS descriptor request */
+#define USB_QUIRK_NO_BOS			BIT(17)
+
+/* Device claims zero configurations, forcing to 1 */
+#define USB_QUIRK_FORCE_ONE_CONFIG		BIT(18)
+
 /* device can't support auto suspend function */
-#define USB_QUIRK_AUTO_SUSPEND			BIT(17)
+#define USB_QUIRK_AUTO_SUSPEND			BIT(19)
 
 #endif /* __LINUX_USB_QUIRKS_H */

@@ -98,6 +98,32 @@ static void rga_mpi_set_channel_info(uint32_t flags_mask, uint32_t flags,
 	}
 }
 
+static void rga_mpi_scale_protect(struct rga_req *msg)
+{
+	uint32_t rotate_mode;
+	uint32_t sw, sh;
+	uint32_t dw, dh;
+
+	rotate_mode = msg->rotate_mode & 0x3;
+
+	sw = msg->src.act_w;
+	sh = msg->src.act_h;
+
+	if ((rotate_mode == 1) || (rotate_mode == 3)) {
+		dw = msg->dst.act_h;
+		dh = msg->dst.act_w;
+	} else {
+		dw = msg->dst.act_w;
+		dh = msg->dst.act_h;
+	}
+
+	/* when scale-up, using default interpolation algorithm. */
+	if (sw < dw)
+		msg->interp.horiz = RGA_INTERP_DEFAULT;
+	if (sh < dh)
+		msg->interp.verti = RGA_INTERP_DEFAULT;
+}
+
 int rga_mpi_commit(struct rga_mpi_job_t *mpi_job)
 {
 	int ret = 0;
@@ -106,6 +132,7 @@ int rga_mpi_commit(struct rga_mpi_job_t *mpi_job)
 	struct rga_req *cached_cmd;
 	struct rga_req mpi_cmd;
 	unsigned long flags;
+	bool need_swap_act = false;
 
 	request_manager = rga_drvdata->pend_request_manager;
 
@@ -142,6 +169,12 @@ int rga_mpi_commit(struct rga_mpi_job_t *mpi_job)
 	cached_cmd = request->task_list;
 	memcpy(&mpi_cmd, cached_cmd, sizeof(mpi_cmd));
 
+	/* rotate 90/270, driver requires that act_w/h be swapped. */
+	if (((mpi_cmd.rotate_mode & 0xf) == 1) &&
+	    ((mpi_cmd.sina == 65536 && mpi_cmd.cosa == 0) ||
+	     (mpi_cmd.sina == -65536 && mpi_cmd.cosa == 0)))
+		need_swap_act = true;
+
 	spin_unlock_irqrestore(&request->lock, flags);
 
 	/* set channel info */
@@ -159,12 +192,20 @@ int rga_mpi_commit(struct rga_mpi_job_t *mpi_job)
 					 &mpi_cmd.pat,
 					 &cached_cmd->pat);
 
-	if ((mpi_job->dst != NULL) && (request->flags & RGA_CONTEXT_DST_MASK))
+	if ((mpi_job->dst != NULL) && (request->flags & RGA_CONTEXT_DST_MASK)) {
 		rga_mpi_set_channel_info(RGA_CONTEXT_DST_MASK,
 					 request->flags,
 					 mpi_job->dst,
 					 &mpi_cmd.dst,
 					 &cached_cmd->dst);
+
+		if (need_swap_act) {
+			swap(mpi_cmd.dst.act_w, mpi_cmd.dst.act_h);
+
+			if (request->flags & RGA_CONTEXT_DST_CACHE_INFO)
+				swap(cached_cmd->dst.act_w, cached_cmd->dst.act_h);
+		}
+	}
 
 	/* set buffer handle */
 	if (mpi_job->dma_buf_src0 != NULL) {
@@ -197,6 +238,8 @@ int rga_mpi_commit(struct rga_mpi_job_t *mpi_job)
 		}
 	}
 
+	rga_mpi_scale_protect(&mpi_cmd);
+
 	mpi_cmd.handle_flag = 1;
 	mpi_cmd.mmu_info.mmu_en = 0;
 	mpi_cmd.mmu_info.mmu_flag = 0;
@@ -227,6 +270,10 @@ int rga_mpi_commit(struct rga_mpi_job_t *mpi_job)
 		mpi_job->output->vir_h = mpi_cmd.dst.vir_h;
 		mpi_job->output->rd_mode = mpi_cmd.dst.rd_mode;
 		mpi_job->output->format = mpi_cmd.dst.format;
+
+		/* restore data that has been swapped */
+		if (need_swap_act)
+			swap(mpi_job->output->width, mpi_job->output->height);
 	}
 
 err_put_request:
@@ -792,15 +839,12 @@ static long rga_ioctl_request_submit(unsigned long arg, bool run_enbale)
 		ret = rga_request_submit(request);
 		if (ret < 0) {
 			rga_err("request[%d] submit failed!\n", user_request.id);
-			return -EFAULT;
-		}
-
-		if (request->sync_mode == RGA_BLIT_ASYNC) {
+		} else if (request->sync_mode == RGA_BLIT_ASYNC) {
 			user_request.release_fence_fd = request->release_fence_fd;
 			if (copy_to_user((struct rga_req *)arg,
 					 &user_request, sizeof(user_request))) {
 				rga_err("copy_to_user failed\n");
-				return -EFAULT;
+				ret = -EFAULT;
 			}
 		}
 	}
@@ -809,7 +853,7 @@ static long rga_ioctl_request_submit(unsigned long arg, bool run_enbale)
 	rga_request_put(request);
 	mutex_unlock(&request_manager->lock);
 
-	return 0;
+	return ret;
 }
 
 static long rga_ioctl_request_cancel(unsigned long arg)
@@ -1034,7 +1078,7 @@ static long rga_ioctl(struct file *file, uint32_t cmd, unsigned long arg)
 
 	case RGA_IOC_GET_DRVIER_VERSION:
 		/* Driver version */
-		driver_version.major = DRIVER_MAJOR_VERISON;
+		driver_version.major = DRIVER_MAJOR_VERSION;
 		driver_version.minor = DRIVER_MINOR_VERSION;
 		driver_version.revision = DRIVER_REVISION_VERSION;
 		strncpy((char *)driver_version.str, DRIVER_VERSION, sizeof(driver_version.str));
@@ -1436,7 +1480,10 @@ static int rga_drv_probe(struct platform_device *pdev)
 		scheduler->data = &rga3_data;
 	} else if (scheduler->core == RGA2_SCHEDULER_CORE0 ||
 		   scheduler->core == RGA2_SCHEDULER_CORE1) {
-		if (!strcmp(scheduler->version.str, "3.3.87975")) {
+		if (!strcmp(scheduler->version.str, "3.2.63318")) {
+			scheduler->data = &rga2e_data;
+			rga_hw_set_issue_mask(scheduler, RGA_HW_ISSUE_DIS_AUTO_RST);
+		} else if (!strcmp(scheduler->version.str, "3.3.87975")) {
 			scheduler->data = &rga2e_1106_data;
 		} else if (!strcmp(scheduler->version.str, "3.6.92812") ||
 			 !strcmp(scheduler->version.str, "3.7.93215")) {
@@ -1452,6 +1499,11 @@ static int rga_drv_probe(struct platform_device *pdev)
 			   scheduler->version.minor == 0x1 &&
 			   scheduler->version.revision == 0x34669) {
 			scheduler->data = &rga2p_iommu_non_fbc_data;
+		} else if (!strcmp(scheduler->version.str, "5.3.48733")) {
+			scheduler->data = &rga2p_iommu_rk3572_data;
+		} else if (!strcmp(scheduler->version.str, "5.2.48482")) {
+			scheduler->data = &rga2p_iommu_rk3538_data;
+			rga_hw_set_issue_mask(scheduler, RGA_HW_ISSUE_NO_NEED_AUTO_RST);
 		} else {
 			scheduler->data = &rga2e_data;
 		}
@@ -1556,6 +1608,7 @@ static struct platform_driver rga2_driver = {
 static int __init rga_init(void)
 {
 	int ret;
+	int i;
 
 	rga_drvdata = kzalloc(sizeof(struct rga_drvdata_t), GFP_KERNEL);
 	if (rga_drvdata == NULL) {
@@ -1590,6 +1643,21 @@ static int __init rga_init(void)
 		goto err_unbind_iommu;
 	}
 
+	/* init cmd reg buffer pool */
+	for (i = 0; i < rga_drvdata->num_of_scheduler; i++) {
+		struct rga_scheduler_t *scheduler = rga_drvdata->scheduler[i];
+
+		scheduler->cmd_buf_pool =
+			rga_dma_buf_pool_init(scheduler,
+					      scheduler->data->cmd_reg_size * sizeof(uint32_t));
+		if (IS_ERR(scheduler->cmd_buf_pool)) {
+			dev_err(scheduler->dev, "failed to init cmd buf pool\n");
+			ret = PTR_ERR(scheduler->cmd_buf_pool);
+			scheduler->cmd_buf_pool = NULL;
+			goto err_destroy_buf_pool;
+		}
+	}
+
 	rga_init_timer();
 
 	rga_mm_init(&rga_drvdata->mm);
@@ -1610,6 +1678,16 @@ static int __init rga_init(void)
 
 	return 0;
 
+err_destroy_buf_pool:
+	for (i = 0; i < rga_drvdata->num_of_scheduler; i++) {
+		struct rga_scheduler_t *scheduler = rga_drvdata->scheduler[i];
+
+		if (scheduler->cmd_buf_pool) {
+			rga_dma_buf_pool_destroy(scheduler->cmd_buf_pool);
+			scheduler->cmd_buf_pool = NULL;
+		}
+	}
+
 err_unbind_iommu:
 	rga_iommu_unbind();
 
@@ -1627,6 +1705,8 @@ err_free_drvdata:
 
 static void __exit rga_exit(void)
 {
+	int i;
+
 #ifdef CONFIG_ROCKCHIP_RGA_DEBUGGER
 	rga_debugger_remove(&rga_drvdata->debugger);
 #endif
@@ -1642,6 +1722,15 @@ static void __exit rga_exit(void)
 	rga_session_manager_remove(&rga_drvdata->session_manager);
 
 	rga_cancel_timer();
+
+	for (i = 0; i < rga_drvdata->num_of_scheduler; i++) {
+		struct rga_scheduler_t *scheduler = rga_drvdata->scheduler[i];
+
+		if (scheduler->cmd_buf_pool) {
+			rga_dma_buf_pool_destroy(scheduler->cmd_buf_pool);
+			scheduler->cmd_buf_pool = NULL;
+		}
+	}
 
 	rga_iommu_unbind();
 

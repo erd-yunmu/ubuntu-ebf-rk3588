@@ -123,7 +123,7 @@ static void rkaiisp_update_regs(struct rkaiisp_device *aidev, u32 start, u32 end
 	}
 }
 
-void rkaiisp_update_list_reg(struct rkaiisp_device *aidev)
+static void rkaiisp_update_list_reg(struct rkaiisp_device *aidev)
 {
 	rkaiisp_update_regs(aidev, AIISP_MI_CTRL, AIISP_MI_CTRL);
 	rkaiisp_update_regs(aidev, AIISP_MI_SLICE_CTRL, AIISP_MI_MANUAL_CTRL);
@@ -174,8 +174,8 @@ static void rkaiisp_dumpreg(struct rkaiisp_device *aidev, u32 start, u32 end)
 
 static void rkaiisp_dump_list_reg(struct rkaiisp_device *aidev)
 {
-	dev_info(aidev->dev, "frame_id: %d, run_idx: %d\n",
-		 aidev->frame_id, aidev->run_idx);
+	dev_info(aidev->dev, "frame_id: %d, run_idx: %d, parthdl %d\n",
+		 aidev->frame_id, aidev->run_idx, aidev->parthdl_idx);
 
 	rkaiisp_dumpreg(aidev, AIISP_CORE_CTRL, AIISP_CORE_NOISE_LMT);
 	rkaiisp_dumpreg(aidev, AIISP_CORE_COMP0, AIISP_CORE_DECOMP16);
@@ -350,13 +350,31 @@ static void rkaiisp_free_buffer(struct rkaiisp_device *aidev,
 	}
 }
 
+static void __maybe_unused rkaiisp_prepare_buffer(struct rkaiisp_device *aidev,
+			struct rkaiisp_dummy_buffer *buf)
+{
+	const struct vb2_mem_ops *g_ops = aidev->hw_dev->mem_ops;
+
+	if (buf && buf->mem_priv)
+		g_ops->prepare(buf->mem_priv);
+}
+
+static void __maybe_unused rkaiisp_finish_buffer(struct rkaiisp_device *aidev,
+			struct rkaiisp_dummy_buffer *buf)
+{
+	const struct vb2_mem_ops *g_ops = aidev->hw_dev->mem_ops;
+
+	if (buf && buf->mem_priv)
+		g_ops->finish(buf->mem_priv);
+}
+
 static void rkaiisp_detach_dmabuf(struct rkaiisp_device *aidev,
 				  struct rkaiisp_dummy_buffer *buffer)
 {
 	if (buffer->dma_fd >= 0) {
 		v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
-			 "%s buf:%pad size:%d\n", __func__,
-			 &buffer->dma_addr, buffer->size);
+			 "%s dma_fd:%d, buf:%pad size:%d\n", __func__,
+			 buffer->dma_fd, &buffer->dma_addr, buffer->size);
 		dma_buf_unmap_attachment(buffer->dba, buffer->sgt, DMA_BIDIRECTIONAL);
 		dma_buf_detach(buffer->dmabuf, buffer->dba);
 		dma_buf_put(buffer->dmabuf);
@@ -365,10 +383,39 @@ static void rkaiisp_detach_dmabuf(struct rkaiisp_device *aidev,
 	}
 }
 
+static void rkaiisp_free_aiynr_ybuf(struct rkaiisp_device *aidev)
+{
+	struct aiisp_aiynr_ybuf_cfg *buf_cfg = &aidev->ynr_ybuf_cfg;
+	struct rkaiisp_dummy_buffer *ynroutbuf = &aidev->ynroutbuf[0];
+	int i;
+
+	for (i = 0; i < buf_cfg->buf_cnt; i++) {
+		if (buf_cfg->buf[i]) {
+			v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
+				"%s buf:%pad size:%zu dmabuf:%p\n", __func__,
+				&ynroutbuf[i].dma_addr, ynroutbuf[i].dmabuf->size,
+				buf_cfg->buf[i]);
+			if (ynroutbuf[i].dba) {
+				if (ynroutbuf[i].sgt) {
+					dma_buf_unmap_attachment(ynroutbuf[i].dba,
+								 ynroutbuf[i].sgt,
+								 DMA_BIDIRECTIONAL);
+					ynroutbuf[i].sgt = NULL;
+				}
+				dma_buf_detach(ynroutbuf[i].dmabuf, ynroutbuf[i].dba);
+				dma_buf_put(ynroutbuf[i].dmabuf);
+				ynroutbuf[i].dba = NULL;
+			}
+			buf_cfg->buf[i] = NULL;
+		}
+	}
+
+	buf_cfg->buf_cnt = 0;
+}
+
 static void rkaiisp_free_tempbuf(struct rkaiisp_device *aidev)
 {
-	rkaiisp_free_buffer(aidev, &aidev->temp_buf[0]);
-	rkaiisp_free_buffer(aidev, &aidev->temp_buf[1]);
+	rkaiisp_free_buffer(aidev, &aidev->temp_buf);
 }
 
 static int rkaiisp_free_pool(struct rkaiisp_device *aidev)
@@ -394,7 +441,13 @@ static int rkaiisp_free_pool(struct rkaiisp_device *aidev)
 	for (i = 0; i < ispbuf->bnr_buf.u.v35.aiisp.buf_cnt; i++)
 		rkaiisp_detach_dmabuf(aidev, &aidev->aiispbuf[i]);
 
+	for (i = 0; i < ispbuf->bnr_buf.u.v35.y_src.buf_cnt; i++)
+		rkaiisp_detach_dmabuf(aidev, &aidev->ynrinbuf[i]);
+
 	rkaiisp_free_tempbuf(aidev);
+	if (aidev->exealgo == AIYNR)
+		rkaiisp_free_aiynr_ybuf(aidev);
+
 	aidev->init_buf = false;
 	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
 		"free buf poll\n");
@@ -432,9 +485,10 @@ static int rkaiisp_attach_dmabuf(struct rkaiisp_device *aidev,
 	buffer->sgt = sgt;
 	buffer->dma_addr = sg_dma_address(sgt->sgl);
 	buffer->size = sg_dma_len(sgt->sgl);
+	buffer->vaddr = NULL;
 	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
-		 "%s buf:%pad size:%d\n", __func__,
-		 &buffer->dma_addr, buffer->size);
+		 "%s dma_fd:%d, buf:%pad size:%d\n", __func__,
+		 buffer->dma_fd, &buffer->dma_addr, buffer->size);
 
 	return ret;
 }
@@ -445,6 +499,26 @@ static void rkaiisp_calc_outbuf_size(struct rkaiisp_device *aidev, u32 raw_hgt, 
 
 	if (aidev->model_mode == REMOSAIC_MODE)
 		return;
+
+	if (aidev->model_mode == AIYNR_MODE) {
+		for (i = 0; i < RKAIISP_AIYNR_LAYER_NUM; i++) {
+			if (i == 0) {
+				aidev->outbuf_size[i].height = raw_hgt;
+				aidev->outbuf_size[i].width = raw_wid;
+				aidev->outbuf_size[i].channel = 1;
+				aidev->outbuf_size[i].stride = raw_wid;
+			} else {
+				aidev->outbuf_size[i].height = raw_hgt / 2;
+				aidev->outbuf_size[i].width = raw_wid / 2;
+				aidev->outbuf_size[i].channel = 8;
+				aidev->outbuf_size[i].stride = raw_wid * 8;
+			}
+
+			raw_hgt = CEIL_BY(CEIL_DOWN(raw_hgt, 2), 2);
+			raw_wid = CEIL_BY(CEIL_DOWN(raw_wid, 2), 2);
+		}
+		return;
+	}
 
 	if (aidev->model_mode == SINGLEX2_MODE) {
 		for (i = 0; i < RKAIISP_PYRAMID_LAYER_NUM; i++) {
@@ -491,10 +565,41 @@ static void rkaiisp_calc_outbuf_size(struct rkaiisp_device *aidev, u32 raw_hgt, 
 	}
 }
 
+static void rkaiisp_set_lastout_buf(struct rkaiisp_device *aidev)
+{
+	int buffer_index;
+
+	if (aidev->model_mode == REMOSAIC_MODE) {
+		aidev->lastout_buf[0] = &aidev->temp_buf;
+		aidev->lastout_buf[1] = &aidev->temp_buf;
+		return;
+	}
+
+	if (aidev->model_runcnt % 2 == 0) {
+		aidev->lastout_buf[0] = &aidev->temp_buf;
+		if (aidev->model_mode == AIYNR_MODE) {
+			buffer_index = aidev->curr_idxbuf.aibnr_st.y_dest_index;
+			aidev->lastout_buf[1] = &aidev->ynroutbuf[buffer_index];
+		} else {
+			buffer_index = aidev->curr_idxbuf.aibnr_st.aiisp_index;
+			aidev->lastout_buf[1] = &aidev->aiispbuf[buffer_index];
+		}
+	} else {
+		aidev->lastout_buf[1] = &aidev->temp_buf;
+		if (aidev->model_mode == AIYNR_MODE) {
+			buffer_index = aidev->curr_idxbuf.aibnr_st.y_dest_index;
+			aidev->lastout_buf[0] = &aidev->ynroutbuf[buffer_index];
+		} else {
+			buffer_index = aidev->curr_idxbuf.aibnr_st.aiisp_index;
+			aidev->lastout_buf[0] = &aidev->aiispbuf[buffer_index];
+		}
+	}
+}
+
 static int rkaiisp_init_pool(struct rkaiisp_device *aidev, struct rkaiisp_ispbuf_info *ispbuf)
 {
 	int i, ret = 0;
-	u32 stride;
+	u32 stride, size;
 
 	for (i = 0; i < ispbuf->bnr_buf.iir.buf_cnt; i++) {
 		aidev->iirbuf[i].dma_fd = ispbuf->bnr_buf.iir.buf_fd[i];
@@ -536,23 +641,38 @@ static int rkaiisp_init_pool(struct rkaiisp_device *aidev, struct rkaiisp_ispbuf
 			return -EINVAL;
 		}
 	}
+	for (i = 0; i < ispbuf->bnr_buf.u.v35.y_src.buf_cnt; i++) {
+		aidev->ynrinbuf[i].dma_fd = ispbuf->bnr_buf.u.v35.y_src.buf_fd[i];
+		ret = rkaiisp_attach_dmabuf(aidev, &aidev->ynrinbuf[i]);
 
-	stride = ((ispbuf->iir_width + 1) / 2 * 15 * 11 + 7) >> 3;
-	aidev->temp_buf[0].size = stride * (ispbuf->iir_height + 1) / 2;
-	aidev->temp_buf[1].size = aidev->temp_buf[0].size;
-	aidev->temp_buf[0].is_need_vaddr = false;
-	aidev->temp_buf[0].is_need_dbuf = false;
-	aidev->temp_buf[0].is_need_dmafd = false;
-	aidev->temp_buf[1].is_need_vaddr = false;
-	aidev->temp_buf[1].is_need_dbuf = false;
-	aidev->temp_buf[1].is_need_dmafd = false;
-	ret = rkaiisp_allow_buffer(aidev, &aidev->temp_buf[0]);
-	ret |= rkaiisp_allow_buffer(aidev, &aidev->temp_buf[1]);
+		if (ret) {
+			rkaiisp_free_pool(aidev);
+			v4l2_err(&aidev->v4l2_dev, "attach dmabuf failed: %d\n", ret);
+			return -EINVAL;
+		}
+	}
+
+	if (aidev->exealgo == AIYNR) {
+		stride = ((ispbuf->iir_width + 3) / 4 * 8 * 11 + 7) >> 3;
+		size = stride * (ispbuf->iir_height + 3) / 4;
+	} else if (aidev->mem_mode == COMBO_MEMODE) {
+		stride = ((ispbuf->iir_width + 7) / 8 * 15 * 11 + 7) >> 3;
+		size = stride * (ispbuf->iir_height + 7) / 8;
+	} else {
+		stride = ((ispbuf->iir_width + 1) / 2 * 15 * 11 + 7) >> 3;
+		size = stride * (ispbuf->iir_height + 1) / 2;
+	}
+	aidev->temp_buf.size = size;
+	aidev->temp_buf.is_need_vaddr = false;
+	aidev->temp_buf.is_need_dbuf = false;
+	aidev->temp_buf.is_need_dmafd = false;
+	ret = rkaiisp_allow_buffer(aidev, &aidev->temp_buf);
 	if (ret)
 		rkaiisp_free_pool(aidev);
 
 	aidev->ispbuf = *ispbuf;
 	aidev->outbuf_idx = 0;
+	aidev->parthdl_num = 1;
 	aidev->init_buf = true;
 
 	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev, "init buf poll\n");
@@ -572,7 +692,6 @@ static int rkaiisp_free_airms_pool(struct rkaiisp_device *aidev)
 	for (i = 0; i < aidev->rmsbuf.outbuf_num; i++)
 		rkaiisp_free_buffer(aidev, &aidev->rms_outbuf[i]);
 
-	rkaiisp_free_buffer(aidev, &aidev->sigma_buf);
 	rkaiisp_free_buffer(aidev, &aidev->narmap_buf);
 
 	aidev->init_buf = false;
@@ -584,9 +703,12 @@ static int rkaiisp_free_airms_pool(struct rkaiisp_device *aidev)
 static int rkaiisp_init_airms_pool(struct rkaiisp_device *aidev, struct rkaiisp_rmsbuf_info *rmsbuf)
 {
 	int i, ret = 0;
+	u32 bin_width, bin_height;
 	u32 size;
 
-	size = rmsbuf->image_width * rmsbuf->image_height * 2;
+	bin_width  = CEIL_BY(CEIL_DOWN(rmsbuf->image_width, 2), 2);
+	bin_height = CEIL_BY(CEIL_DOWN(rmsbuf->image_height, 2), 2);
+	size = rmsbuf->image_width * rmsbuf->image_height * 2 + bin_width * bin_height;
 	rmsbuf->inbuf_num = RKAIISP_MIN(rmsbuf->inbuf_num, RKAIISP_AIRMS_BUF_MAXCNT);
 	for (i = 0; i < rmsbuf->inbuf_num; i++) {
 		aidev->rms_inbuf[i].size = size;
@@ -600,6 +722,25 @@ static int rkaiisp_init_airms_pool(struct rkaiisp_device *aidev, struct rkaiisp_
 			return -EINVAL;
 		}
 		rmsbuf->inbuf_fd[i] = aidev->rms_inbuf[i].dma_fd;
+	}
+
+	aidev->rmsbuf = *rmsbuf;
+	aidev->part_rmsbuf = aidev->rmsbuf;
+	if (rmsbuf->image_width > RKAIISP_AIRMS_MAX_WIDTH) {
+		int proc_width;
+
+		aidev->is_parthdl = true;
+		aidev->parthdl_num = 2;
+		proc_width = aidev->part_rmsbuf.image_width / 2 + RKAIISP_AIRMS_EXTEND_PIXEL;
+		aidev->part_rmsbuf.image_width = CEIL_BY(proc_width, 16);
+		aidev->part_rmsbuf.sigma_width = aidev->part_rmsbuf.image_width / 2;
+		aidev->part_rmsbuf.narmap_width = (aidev->part_rmsbuf.image_width + 7) / 8 * 2;
+		aidev->parthdl_image_oft = aidev->rmsbuf.image_width - aidev->part_rmsbuf.image_width;
+		size = (CEIL_BY(rmsbuf->image_width, 2) + 2 * RKAIISP_AIRMS_EXTEND_PIXEL) * rmsbuf->image_height * 2;
+	} else {
+		aidev->is_parthdl = false;
+		aidev->parthdl_num = 1;
+		size = rmsbuf->image_width * rmsbuf->image_height * 2;
 	}
 
 	rmsbuf->outbuf_num = RKAIISP_MIN(rmsbuf->outbuf_num, RKAIISP_AIRMS_BUF_MAXCNT);
@@ -617,25 +758,19 @@ static int rkaiisp_init_airms_pool(struct rkaiisp_device *aidev, struct rkaiisp_
 		rmsbuf->outbuf_fd[i] = aidev->rms_outbuf[i].dma_fd;
 	}
 
-	aidev->sigma_buf.size = rmsbuf->sigma_width * rmsbuf->sigma_height;
-	aidev->sigma_buf.is_need_vaddr = false;
-	aidev->sigma_buf.is_need_dbuf = false;
-	aidev->sigma_buf.is_need_dmafd = false;
-	rkaiisp_allow_buffer(aidev, &aidev->sigma_buf);
-	aidev->narmap_buf.size = rmsbuf->narmap_width * rmsbuf->narmap_height;
+	aidev->narmap_buf.size = aidev->rmsbuf.narmap_width * aidev->rmsbuf.narmap_height;
 	aidev->narmap_buf.is_need_vaddr = false;
 	aidev->narmap_buf.is_need_dbuf = false;
 	aidev->narmap_buf.is_need_dmafd = false;
 	rkaiisp_allow_buffer(aidev, &aidev->narmap_buf);
 
-	aidev->rmsbuf = *rmsbuf;
 	aidev->init_buf = true;
 
 	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev, "init buf poll\n");
 	return ret;
 }
 
-int rkaiisp_queue_ispbuf(struct rkaiisp_device *aidev, union rkaiisp_queue_buf *idxbuf)
+static int rkaiisp_queue_ispbuf(struct rkaiisp_device *aidev, union rkaiisp_queue_buf *idxbuf)
 {
 	struct kfifo *fifo = &aidev->idxbuf_kfifo;
 	struct rkaiisp_hw_dev *hw_dev = aidev->hw_dev;
@@ -656,10 +791,10 @@ int rkaiisp_queue_ispbuf(struct rkaiisp_device *aidev, union rkaiisp_queue_buf *
 	else
 		v4l2_err(&aidev->v4l2_dev, "fifo is full\n");
 
-	if (aidev->exealgo == AIBNR)
-		sequence = idxbuf->aibnr_st.sequence;
-	else if (aidev->exealgo == AIRMS)
+	if (aidev->exealgo == AIRMS)
 		sequence = idxbuf->airms_st.sequence;
+	else
+		sequence = idxbuf->aibnr_st.sequence;
 
 	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
 		"idxbuf fifo in: %d\n", sequence);
@@ -674,6 +809,40 @@ int rkaiisp_queue_ispbuf(struct rkaiisp_device *aidev, union rkaiisp_queue_buf *
 	}
 
 	return ret;
+}
+
+static int rkaiisp_get_ynrbuf_info(struct rkaiisp_device *aidev,
+				    struct rkaiisp_ynrbuf_info *ynrbuf_info)
+{
+
+	struct aiisp_aiynr_ybuf_cfg *buf_cfg = &aidev->ynr_ybuf_cfg;
+	struct rkaiisp_dummy_buffer *ynroutbuf = &aidev->ynroutbuf[0];
+	u32 buf_cnt;
+	int i;
+
+	buf_cnt = buf_cfg->buf_cnt;
+	if (buf_cnt > RKAIISP_AIYNR_YBUF_NUM_MAX) {
+		v4l2_err(&aidev->v4l2_dev,
+			"%s ynroutbuf cnt(%d) is too big\n", __func__,
+			buf_cnt);
+		buf_cnt = RKAIISP_AIYNR_YBUF_NUM_MAX;
+	}
+	ynrbuf_info->width  = buf_cfg->width;
+	ynrbuf_info->height = buf_cfg->height;
+	ynrbuf_info->buf_cnt = 0;
+	for (i = 0; i < buf_cnt; i++) {
+		if (buf_cfg->buf[i]) {
+			ynroutbuf[i].dma_fd = dma_buf_fd(ynroutbuf[i].dmabuf, O_CLOEXEC);
+			if (ynroutbuf[i].dma_fd < 0)
+				return -EINVAL;
+
+			get_dma_buf(ynroutbuf[i].dmabuf);
+			ynrbuf_info->dma_fd[i] = ynroutbuf[i].dma_fd;
+			ynrbuf_info->buf_cnt++;
+		}
+	}
+
+	return 0;
 }
 
 static void rkaiisp_gen_slice_param(struct rkaiisp_device *aidev,
@@ -748,6 +917,13 @@ static void rkaiisp_gen_slice_param(struct rkaiisp_device *aidev,
 		}
 	}
 
+	if (slice_idx > 8) {
+		aidev->is_state_err = true;
+		v4l2_err(&aidev->v4l2_dev,
+			"slice num %d is too big, input width %d\n", slice_idx, width);
+		return;
+	}
+
 	if (slice_idx >= 1)
 		slice_num = slice_idx - 1;
 	value = slice_mode[0] |
@@ -759,7 +935,7 @@ static void rkaiisp_gen_slice_param(struct rkaiisp_device *aidev,
 		slice_mode[6] << 12 |
 		slice_mode[7] << 14 |
 		slice_num << 24 |
-		AIISP_MODE_MODE1 << 30;
+		model_cfg->sw_aiisp_mode << 30;
 	rkaiisp_write(aidev, AIISP_MI_SLICE_CTRL, value, false);
 
 	lext_num_sel = ext_tab[model_cfg->sw_aiisp_op_mode][slice_mode[slice_num]];
@@ -857,6 +1033,9 @@ static int rkaiisp_determine_size(struct rkaiisp_device *aidev,
 
 		if (n == 3 && model_cfg->sw_mi_chn3_sel == 0)
 			bits = 8;
+
+		if (aidev->chn_size[n].stride != 0 && aidev->exealgo == AIRMS)
+			cols = aidev->chn_size[n].stride;
 
 		sw_mi_chn_stride[n] = CEIL_BY(cols * chns * bits, 16 * 8) / 32;
 	}
@@ -998,9 +1177,10 @@ static u32 rkaiisp_config_rdchannel(struct rkaiisp_device *aidev,
 {
 	struct rkaiisp_ispbuf_info *ispbuf = &aidev->ispbuf;
 	struct rkaiisp_rmsbuf_info *rmsbuf = &aidev->rmsbuf;
+	struct rkaiisp_rmsbuf_info *part_rmsbuf = &aidev->part_rmsbuf;
 	struct rkaiisp_dummy_buffer *vpsl_buf;
 	dma_addr_t dma_addr;
-	u32 width, height;
+	u32 width, height, stride;
 	u32 sig_width = 0;
 	int buffer_index;
 	int i;
@@ -1010,6 +1190,7 @@ static u32 rkaiisp_config_rdchannel(struct rkaiisp_device *aidev,
 		if (model_cfg->sw_mi_chn_en[i] == 0)
 			continue;
 
+		stride = 0;
 		switch (model_cfg->mi_chn_src[i]) {
 		case ISP_IIR:
 			width = CEIL_BY(ispbuf->iir_width, 16);
@@ -1022,60 +1203,71 @@ static u32 rkaiisp_config_rdchannel(struct rkaiisp_device *aidev,
 			width  = ispbuf->raw_width[0];
 			height = ispbuf->raw_height[0];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_yraw_offs[0];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_yraw_stride[0];
 			break;
 		case VPSL_YRAW_CHN1:
 			width  = ispbuf->raw_width[1];
 			height = ispbuf->raw_height[1];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_yraw_offs[1];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_yraw_stride[1];
 			break;
 		case VPSL_YRAW_CHN2:
 			width  = ispbuf->raw_width[2];
 			height = ispbuf->raw_height[2];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_yraw_offs[2];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_yraw_stride[2];
 			break;
 		case VPSL_YRAW_CHN3:
 			width  = ispbuf->raw_width[3];
 			height = ispbuf->raw_height[3];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_yraw_offs[3];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_yraw_stride[3];
 			break;
 		case VPSL_YRAW_CHN4:
 			width  = ispbuf->raw_width[4];
 			height = ispbuf->raw_height[4];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_yraw_offs[4];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_yraw_stride[4];
 			break;
 		case VPSL_YRAW_CHN5:
 			width  = ispbuf->raw_width[5];
 			height = ispbuf->raw_height[5];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_yraw_offs[5];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_yraw_stride[5];
 			break;
 		case VPSL_SIG_CHN0:
 			width  = ispbuf->sig_width[0];
 			height = ispbuf->sig_height[0];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_sig_offs[0];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_sig_stride[0];
 			sig_width = width;
 			break;
 		case VPSL_SIG_CHN1:
 			width  = ispbuf->sig_width[1];
 			height = ispbuf->sig_height[1];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_sig_offs[1];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_sig_stride[1];
 			sig_width = width;
 			break;
 		case VPSL_SIG_CHN2:
 			width  = ispbuf->sig_width[2];
 			height = ispbuf->sig_height[2];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_sig_offs[2];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_sig_stride[2];
 			sig_width = width;
 			break;
 		case VPSL_SIG_CHN3:
 			width  = ispbuf->sig_width[3];
 			height = ispbuf->sig_height[3];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_sig_offs[3];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_sig_stride[3];
 			sig_width = width;
 			break;
 		case VPSL_SIG_CHN4:
 			width  = ispbuf->sig_width[4];
 			height = ispbuf->sig_height[4];
 			dma_addr = vpsl_buf->dma_addr + ispbuf->bnr_buf.u.v35.vpsl_sig_offs[4];
+			stride = ispbuf->bnr_buf.u.v35.vpsl_sig_stride[4];
 			sig_width = width;
 			break;
 		case ISP_AIPRE_NARMAP:
@@ -1092,23 +1284,61 @@ static u32 rkaiisp_config_rdchannel(struct rkaiisp_device *aidev,
 				width  = aidev->outbuf_size[aidev->model_runcnt-run_idx].width;
 				height = aidev->outbuf_size[aidev->model_runcnt-run_idx].height;
 			}
-			dma_addr = aidev->temp_buf[aidev->outbuf_idx].dma_addr;
+			dma_addr = aidev->lastout_buf[aidev->outbuf_idx]->dma_addr;
 			break;
 		case VICAP_BAYER_RAW:
-			width  = rmsbuf->image_width;
-			height = rmsbuf->image_height;
-			dma_addr = aidev->rms_inbuf[aidev->curr_idxbuf.airms_st.inbuf_idx].dma_addr;
-			break;
-		case ALLZERO_SIGMA:
-			width  = rmsbuf->sigma_width;
-			height = rmsbuf->sigma_height;
-			dma_addr = aidev->sigma_buf.dma_addr;
-			sig_width = width;
+			if (aidev->is_parthdl) {
+				width  = part_rmsbuf->image_width;
+				height = part_rmsbuf->image_height;
+				buffer_index = aidev->curr_idxbuf.airms_st.inbuf_idx;
+				dma_addr = aidev->rms_inbuf[buffer_index].dma_addr;
+				if (aidev->parthdl_idx == 1)
+					dma_addr += aidev->parthdl_image_oft * 2;
+				stride = rmsbuf->image_width;
+			} else {
+				width  = rmsbuf->image_width;
+				height = rmsbuf->image_height;
+				buffer_index = aidev->curr_idxbuf.airms_st.inbuf_idx;
+				dma_addr = aidev->rms_inbuf[buffer_index].dma_addr;
+			}
 			break;
 		case ALLZERO_NARMAP:
-			width  = rmsbuf->narmap_width;
-			height = rmsbuf->narmap_height;
+			if (aidev->is_parthdl) {
+				width  = part_rmsbuf->narmap_width;
+				height = part_rmsbuf->narmap_height;
+			} else {
+				width  = rmsbuf->narmap_width;
+				height = rmsbuf->narmap_height;
+			}
 			dma_addr = aidev->narmap_buf.dma_addr;
+			break;
+		case ISP_FINAL_Y:
+			width = ispbuf->iir_width;
+			height = ispbuf->iir_height;
+			buffer_index = aidev->curr_idxbuf.aibnr_st.y_src_index;
+			dma_addr = aidev->ynrinbuf[buffer_index].dma_addr;
+			break;
+		case VICAP_BAYER_RAW_DOWN:
+			if (aidev->is_parthdl) {
+				width  = rmsbuf->image_width;
+				height = rmsbuf->image_height;
+				buffer_index = aidev->curr_idxbuf.airms_st.inbuf_idx;
+				dma_addr = aidev->rms_inbuf[buffer_index].dma_addr + width * height * 2;
+				if (aidev->parthdl_idx == 1)
+					dma_addr += aidev->parthdl_image_oft / 2;
+				width  = CEIL_BY(CEIL_DOWN(part_rmsbuf->image_width, 2), 2);
+				height = CEIL_BY(CEIL_DOWN(part_rmsbuf->image_height, 2), 2);
+				sig_width = width;
+				stride = CEIL_BY(CEIL_DOWN(rmsbuf->image_width, 2), 2);
+			} else {
+				width  = rmsbuf->image_width;
+				height = rmsbuf->image_height;
+				buffer_index = aidev->curr_idxbuf.airms_st.inbuf_idx;
+				dma_addr = aidev->rms_inbuf[buffer_index].dma_addr + width * height * 2;
+				width  = CEIL_BY(CEIL_DOWN(rmsbuf->image_width, 2), 2);
+				height = CEIL_BY(CEIL_DOWN(rmsbuf->image_height, 2), 2);
+				sig_width = width;
+			}
 			break;
 		default:
 			width  = 0;
@@ -1120,12 +1350,15 @@ static u32 rkaiisp_config_rdchannel(struct rkaiisp_device *aidev,
 		if (width > 0) {
 			aidev->chn_size[i].width  = width;
 			aidev->chn_size[i].height = height;
+			aidev->chn_size[i].stride = stride > 0 ? stride : width;
 			rkaiisp_write(aidev, AIISP_MI_RD_CH0_BASE + 0x100 * i, dma_addr, false);
 			rkaiisp_write(aidev, AIISP_MI_RD_CH0_HEIGHT + 0x100 * i, height, false);
 
 			v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
-				"configure channel %d, width %d, height %d, dma_addr %pad\n",
-				i, aidev->chn_size[i].width, aidev->chn_size[i].height, &dma_addr);
+				"configure channel %d, width %d, height %d, stride %d, dma_addr %pad, mi_chn_src %d\n",
+				i, aidev->chn_size[i].width, aidev->chn_size[i].height,
+				aidev->chn_size[i].stride, &dma_addr,
+				model_cfg->mi_chn_src[i]);
 		}
 	}
 
@@ -1135,6 +1368,7 @@ static u32 rkaiisp_config_rdchannel(struct rkaiisp_device *aidev,
 static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 {
 	struct rkaiisp_ispbuf_info *ispbuf = &aidev->ispbuf;
+	struct rkaiisp_rmsbuf_info *rmsbuf = &aidev->rmsbuf;
 	struct rkaiisp_params *cur_params;
 	struct rkaiisp_model_cfg *model_cfg;
 	int lastlv, lv_mode, out_chns, i;
@@ -1147,37 +1381,30 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 	int buffer_index;
 	int sequence = 0;
 
-	if (aidev->exealgo == AIBNR)
-		sequence = aidev->curr_idxbuf.aibnr_st.sequence;
-	else if (aidev->exealgo == AIRMS)
+	if (aidev->exealgo == AIRMS)
 		sequence = aidev->curr_idxbuf.airms_st.sequence;
+	else
+		sequence = aidev->curr_idxbuf.aibnr_st.sequence;
 
 	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
-		"run frame id: %d, run_idx: %d\n",
-		sequence, run_idx);
+		"run frame id: %d, run_idx: %d, model_mode %d\n",
+		sequence, run_idx, aidev->model_mode);
 
+	aidev->is_state_err = false;
 	cur_params = (struct rkaiisp_params *)aidev->cur_params->vaddr[0];
 	model_cfg = &cur_params->model_cfg[run_idx];
 
 	lastlv = model_cfg->sw_aiisp_level_num - 1;
 	lv_mode = model_cfg->sw_aiisp_lv_mode[lastlv];
 	out_chns = channels_lut[model_cfg->sw_aiisp_mode][lv_mode];
-	if (aidev->model_mode == REMOSAIC_MODE) {
-		sig_width = rkaiisp_config_rdchannel(aidev, model_cfg, run_idx);
-
-		dma_addr = aidev->rms_outbuf[aidev->curr_idxbuf.airms_st.outbuf_idx].dma_addr;
-		rkaiisp_write(aidev, AIISP_MI_CHN0_WR_BASE, dma_addr, false);
-
-		rkaiisp_gen_slice_param(aidev, model_cfg, sig_width);
-		rkaiisp_determine_size(aidev, model_cfg);
-	} else if (aidev->model_mode == SINGLEX2_MODE) {
+	if (aidev->model_mode == AIYNR_MODE) {
 		if (run_idx == 0) {
 			sig_width = rkaiisp_config_rdchannel(aidev, model_cfg, run_idx);
 
 			outbuf_idx = 0;
 			aidev->outbuf_idx = outbuf_idx;
 			rkaiisp_write(aidev, AIISP_MI_CHN0_WR_BASE,
-				      aidev->temp_buf[outbuf_idx].dma_addr, false);
+				      aidev->lastout_buf[outbuf_idx]->dma_addr, false);
 
 			rkaiisp_gen_slice_param(aidev, model_cfg, sig_width);
 			rkaiisp_determine_size(aidev, model_cfg);
@@ -1190,7 +1417,53 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 			outbuf_idx = (outbuf_idx + 1) % 2;
 			aidev->outbuf_idx = outbuf_idx;
 			rkaiisp_write(aidev, AIISP_MI_CHN0_WR_BASE,
-				      aidev->temp_buf[outbuf_idx].dma_addr, false);
+				      aidev->lastout_buf[outbuf_idx]->dma_addr, false);
+		} else {
+			sig_width = rkaiisp_config_rdchannel(aidev, model_cfg, run_idx);
+
+			buffer_index = aidev->curr_idxbuf.aibnr_st.y_dest_index;
+			dma_addr = aidev->ynroutbuf[buffer_index].dma_addr;
+			rkaiisp_write(aidev, AIISP_MI_CHN0_WR_BASE, dma_addr, false);
+
+			rkaiisp_gen_slice_param(aidev, model_cfg, sig_width);
+			rkaiisp_determine_size(aidev, model_cfg);
+		}
+	} else if (aidev->model_mode == REMOSAIC_MODE) {
+		sig_width = rkaiisp_config_rdchannel(aidev, model_cfg, run_idx);
+
+		dma_addr = aidev->rms_outbuf[aidev->curr_idxbuf.airms_st.outbuf_idx].dma_addr;
+		if (aidev->parthdl_idx == 1)
+			dma_addr += 2 * (CEIL_BY(rmsbuf->image_width, 2) / 2 + RKAIISP_AIRMS_EXTEND_PIXEL);
+		rkaiisp_write(aidev, AIISP_MI_CHN0_WR_BASE, dma_addr, false);
+
+		rkaiisp_gen_slice_param(aidev, model_cfg, sig_width);
+		rkaiisp_determine_size(aidev, model_cfg);
+
+		iir_stride = CEIL_BY(rmsbuf->image_width, 2);
+		if (aidev->is_parthdl)
+			iir_stride += 2 * RKAIISP_AIRMS_EXTEND_PIXEL;
+		rkaiisp_write(aidev, AIISP_MI_CHN0_WR_STRIDE, iir_stride / 2, false);
+	} else if (aidev->model_mode == SINGLEX2_MODE) {
+		if (run_idx == 0) {
+			sig_width = rkaiisp_config_rdchannel(aidev, model_cfg, run_idx);
+
+			outbuf_idx = 0;
+			aidev->outbuf_idx = outbuf_idx;
+			rkaiisp_write(aidev, AIISP_MI_CHN0_WR_BASE,
+				      aidev->lastout_buf[outbuf_idx]->dma_addr, false);
+
+			rkaiisp_gen_slice_param(aidev, model_cfg, sig_width);
+			rkaiisp_determine_size(aidev, model_cfg);
+		} else if (run_idx < aidev->model_runcnt-1) {
+			outbuf_idx = aidev->outbuf_idx;
+			sig_width = rkaiisp_config_rdchannel(aidev, model_cfg, run_idx);
+			rkaiisp_gen_slice_param(aidev, model_cfg, sig_width);
+			rkaiisp_determine_size(aidev, model_cfg);
+
+			outbuf_idx = (outbuf_idx + 1) % 2;
+			aidev->outbuf_idx = outbuf_idx;
+			rkaiisp_write(aidev, AIISP_MI_CHN0_WR_BASE,
+				      aidev->lastout_buf[outbuf_idx]->dma_addr, false);
 		} else {
 			sig_width = rkaiisp_config_rdchannel(aidev, model_cfg, run_idx);
 
@@ -1201,9 +1474,7 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 			rkaiisp_gen_slice_param(aidev, model_cfg, sig_width);
 			rkaiisp_determine_size(aidev, model_cfg);
 
-			iir_stride = CEIL_BY(ispbuf->iir_width, 16);
-			iir_stride = CEIL_BY(iir_stride * 9 / 4, 16);
-			iir_stride = iir_stride >> 1;
+			iir_stride = ispbuf->bnr_buf.u.v35.aiisp.buf_stride >> 1;
 			rkaiisp_write(aidev, AIISP_MI_CHN0_WR_STRIDE, iir_stride / 2, false);
 		}
 	} else {
@@ -1213,7 +1484,7 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 			outbuf_idx = 0;
 			aidev->outbuf_idx = outbuf_idx;
 			rkaiisp_write(aidev, AIISP_MI_CHN0_WR_BASE,
-				      aidev->temp_buf[outbuf_idx].dma_addr, false);
+				      aidev->lastout_buf[outbuf_idx]->dma_addr, false);
 
 			rkaiisp_gen_slice_param(aidev, model_cfg, ispbuf->sig_width[3]);
 			rkaiisp_determine_size(aidev, model_cfg);
@@ -1229,7 +1500,7 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 			outbuf_idx = (outbuf_idx + 1) % 2;
 			aidev->outbuf_idx = outbuf_idx;
 			rkaiisp_write(aidev, AIISP_MI_CHN0_WR_BASE,
-				      aidev->temp_buf[outbuf_idx].dma_addr, false);
+				      aidev->lastout_buf[outbuf_idx]->dma_addr, false);
 		} else {
 			rkaiisp_config_rdchannel(aidev, model_cfg, run_idx);
 
@@ -1240,9 +1511,7 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 			rkaiisp_gen_slice_param(aidev, model_cfg, ispbuf->sig_width[0]);
 			rkaiisp_determine_size(aidev, model_cfg);
 
-			iir_stride = CEIL_BY(ispbuf->iir_width, 16);
-			iir_stride = CEIL_BY(iir_stride * 9 / 4, 16);
-			iir_stride = iir_stride >> 1;
+			iir_stride = ispbuf->bnr_buf.u.v35.aiisp.buf_stride >> 1;
 			rkaiisp_write(aidev, AIISP_MI_CHN0_WR_STRIDE, iir_stride / 2, false);
 		}
 	}
@@ -1277,7 +1546,8 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 		rkaiisp_write(aidev, AIISP_CORE_LEVEL_CTRL0 + i * 4, val, false);
 	}
 
-	if ((out_chns == 4 && model_cfg->sw_out_d2s_en == 0))
+	if (out_chns == 4 &&
+		model_cfg->sw_out_d2s_en == (model_cfg->sw_out_mode == AIISP_OUT_MODE_BYPASS))
 		sw_lastlv_bypass = 1;
 	if (model_cfg->sw_aiisp_mode == 0 && model_cfg->sw_out_mode == AIISP_OUT_MODE_DIFF_MERGE)
 		sw_m0_diff_merge = 1;
@@ -1307,10 +1577,10 @@ static int rkaiisp_update_buf(struct rkaiisp_device *aidev)
 	} else {
 		ret = 0;
 		aidev->curr_idxbuf = idxbuf;
-		if (aidev->exealgo == AIBNR)
-			sequence = aidev->curr_idxbuf.aibnr_st.sequence;
-		else if (aidev->exealgo == AIRMS)
+		if (aidev->exealgo == AIRMS)
 			sequence = aidev->curr_idxbuf.airms_st.sequence;
+		else
+			sequence = aidev->curr_idxbuf.aibnr_st.sequence;
 
 		v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
 			"idxbuf fifo out: %d\n", sequence);
@@ -1324,16 +1594,25 @@ static void rkaiisp_run_start(struct rkaiisp_device *aidev)
 {
 	struct rkaiisp_hw_dev *hw_dev = aidev->hw_dev;
 
+	if (aidev->is_state_err) {
+		v4l2_err(&aidev->v4l2_dev,
+			"aiisp status is error!\n");
+		rkaiisp_dump_list_reg(aidev);
+		return;
+	}
+
 	rkaiisp_write(aidev, AIISP_MI_IMSC, AIISP_MI_ISR_ALL, false);
 	rkaiisp_write(aidev, AIISP_MI_WR_INIT, AIISP_MI_CHN0SELF_FORCE_UPD, false);
 
-	if ((aidev->run_idx == 0) && (rkaiisp_showreg != 0))
+	if ((aidev->run_idx == 0) && (aidev->parthdl_idx == 0) && (rkaiisp_showreg != 0))
 		aidev->showreg = true;
 
 	if (aidev->showreg)
 		rkaiisp_dump_list_reg(aidev);
 
-	if ((aidev->run_idx == aidev->model_runcnt - 1) && aidev->showreg) {
+	if ((aidev->run_idx + 1 == aidev->model_runcnt) &&
+		(aidev->parthdl_idx + 1 == aidev->parthdl_num) &&
+		aidev->showreg) {
 		aidev->showreg = false;
 		rkaiisp_showreg = 0;
 	}
@@ -1344,7 +1623,7 @@ static void rkaiisp_run_start(struct rkaiisp_device *aidev)
 		rkaiisp_update_list_reg(aidev);
 }
 
-static void rkaiisp_get_new_iqparam(struct rkaiisp_device *aidev)
+static int rkaiisp_get_new_iqparam(struct rkaiisp_device *aidev)
 {
 	struct rkaiisp_params *iq_params, *old_params;
 	struct rkaiisp_buffer *cur_buf = NULL;
@@ -1358,7 +1637,7 @@ static void rkaiisp_get_new_iqparam(struct rkaiisp_device *aidev)
 					   struct rkaiisp_buffer, queue);
 	if (!cur_buf) {
 		spin_unlock_irqrestore(&aidev->config_lock, flags);
-		return;
+		return -1;
 	}
 
 	list_del(&cur_buf->queue);
@@ -1393,26 +1672,42 @@ static void rkaiisp_get_new_iqparam(struct rkaiisp_device *aidev)
 		aidev->model_runcnt = iq_params->model_runcnt;
 		rkaiisp_cfg_other_iqparam(aidev, &iq_params->other_cfg);
 	}
+
+	return 0;
 }
 
+static int rkaiisp_clear_iqparams(struct rkaiisp_device *aidev)
+{
+	int i;
+
+	for (i = 0; i < aidev->iq_parambuf_num; i++) {
+		if (rkaiisp_get_new_iqparam(aidev) != 0)
+			break;
+	}
+	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
+		"clear unused iq params\n");
+	return 0;
+}
 
 void rkaiisp_trigger(struct rkaiisp_device *aidev)
 {
 	struct rkaiisp_ispbuf_info *ispbuf = &aidev->ispbuf;
 	int sequence = 0;
 
-	if (aidev->exealgo == AIBNR)
-		sequence = aidev->curr_idxbuf.aibnr_st.sequence;
-	else if (aidev->exealgo == AIRMS)
+	if (aidev->exealgo == AIRMS)
 		sequence = aidev->curr_idxbuf.airms_st.sequence;
+	else
+		sequence = aidev->curr_idxbuf.aibnr_st.sequence;
 
 	if (!rkaiisp_update_buf(aidev)) {
 		aidev->run_idx = 0;
+		aidev->parthdl_idx = 0;
 		aidev->frame_id = sequence;
 		aidev->pre_frm_st = aidev->frm_st;
 		aidev->frm_st = ktime_get_ns();
 		rkaiisp_get_new_iqparam(aidev);
 		rkaiisp_calc_outbuf_size(aidev, ispbuf->iir_height, ispbuf->iir_width);
+		rkaiisp_set_lastout_buf(aidev);
 		rkaiisp_run_cfg(aidev, aidev->run_idx);
 		aidev->hwstate = HW_RUNNING;
 		rkaiisp_run_start(aidev);
@@ -1425,10 +1720,10 @@ static void rkaiisp_event_queue(struct rkaiisp_device *aidev, union rkaiisp_queu
 	struct v4l2_event event = {0};
 	int sequence = 0;
 
-	if (aidev->exealgo == AIBNR)
-		sequence = idxbuf->aibnr_st.sequence;
-	else if (aidev->exealgo == AIRMS)
+	if (aidev->exealgo == AIRMS)
 		sequence = idxbuf->airms_st.sequence;
+	else
+		sequence = idxbuf->aibnr_st.sequence;
 
 	if (aidev->subdev.is_subs_evt && aidev->exemode != BOTHEVENT_IN_KERNEL) {
 		event.type = RKAIISP_V4L2_EVENT_AIISP_DONE;
@@ -1457,8 +1752,9 @@ enum rkaiisp_irqhdl_ret rkaiisp_irq_hdl(struct rkaiisp_device *aidev, u32 mi_mis
 	u64 frm_hdntim = 0;
 
 	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
-		"irq val: 0x%x, run_idx %d, model_runcnt %d\n",
-		mi_mis, aidev->run_idx, aidev->model_runcnt);
+		"irq val: 0x%x, run_idx %d, model_runcnt %d, parthdl %d, %d\n",
+		mi_mis, aidev->run_idx, aidev->model_runcnt,
+		aidev->parthdl_idx, aidev->parthdl_num);
 
 	if (mi_mis & AIISP_MI_ISR_BUSERR) {
 		v4l2_err(&aidev->v4l2_dev, "buserr 0x%x\n", mi_mis);
@@ -1471,8 +1767,14 @@ enum rkaiisp_irqhdl_ret rkaiisp_irq_hdl(struct rkaiisp_device *aidev, u32 mi_mis
 	rkaiisp_write(aidev, AIISP_MI_ICR, AIISP_MI_ISR_WREND, true);
 	aidev->isr_wrend_cnt++;
 
-	if (aidev->run_idx < aidev->model_runcnt - 1) {
+	if (aidev->run_idx + 1 < aidev->model_runcnt) {
 		aidev->run_idx++;
+		rkaiisp_run_cfg(aidev, aidev->run_idx);
+		rkaiisp_run_start(aidev);
+		return CONTINUE_RUN;
+	} else if (aidev->is_parthdl && (aidev->parthdl_idx + 1 < aidev->parthdl_num)) {
+		aidev->parthdl_idx++;
+		aidev->run_idx = 0;
 		rkaiisp_run_cfg(aidev, aidev->run_idx);
 		rkaiisp_run_start(aidev);
 		return CONTINUE_RUN;
@@ -1649,6 +1951,19 @@ static long rkaiisp_ioctl_default(struct file *file, void *fh,
 	case RKAIISP_CMD_INIT_AIRMS_BUFPOOL:
 		ret = rkaiisp_init_airms_pool(aidev, arg);
 		break;
+	case RKAIISP_CMD_GET_YNRBUF_INFO:
+		ret = rkaiisp_get_ynrbuf_info(aidev, arg);
+		break;
+	case RKAIISP_CMD_SET_MEMORY_MODE: {
+			enum rkaiisp_mem_mode *mem_mode = (enum rkaiisp_mem_mode *)arg;
+
+			aidev->mem_mode = *mem_mode;
+			ret = 0;
+		}
+		break;
+	case RKAIISP_CMD_CLEAR_IQPARAMS:
+		ret = rkaiisp_clear_iqparams(aidev);
+		break;
 	default:
 		ret = -EINVAL;
 	}
@@ -1690,6 +2005,7 @@ static int rkaiisp_vb2_queue_setup(struct vb2_queue *vq,
 
 	sizes[0] = sizeof(struct rkaiisp_params) + aidev->para_size * aidev->max_runcnt;
 	aidev->vdev_fmt.fmt.meta.buffersize = sizes[0];
+	aidev->iq_parambuf_num = *num_buffers;
 
 	INIT_LIST_HEAD(&aidev->params);
 
@@ -1951,5 +2267,56 @@ void rkaiisp_unregister_vdev(struct rkaiisp_device *aidev)
 	video_unregister_device(vdev);
 	media_entity_cleanup(&vdev->entity);
 	vb2_queue_release(vdev->queue);
+}
+
+int rkaiisp_set_aiynr_ybuf(struct rkaiisp_device *aidev, struct aiisp_aiynr_ybuf_cfg *buf_cfg)
+{
+	struct rkaiisp_dummy_buffer *ynroutbuf = &aidev->ynroutbuf[0];
+	u32 buf_cnt;
+	int i;
+
+	mutex_lock(&aidev->apilock);
+	if (aidev->ynr_ybuf_cfg.buf_cnt > 0)
+		rkaiisp_free_aiynr_ybuf(aidev);
+
+	buf_cnt = buf_cfg->buf_cnt;
+	if (buf_cnt > RKAIISP_AIYNR_YBUF_NUM_MAX) {
+		v4l2_err(&aidev->v4l2_dev,
+			"%s input ynroutbuf cnt(%d) is too big\n", __func__,
+			buf_cnt);
+		buf_cnt = RKAIISP_AIYNR_YBUF_NUM_MAX;
+	}
+	for (i = 0; i < buf_cnt; i++) {
+		struct dma_buf_attachment *dba;
+		struct sg_table *sgt;
+
+		dba = dma_buf_attach(buf_cfg->buf[i], aidev->hw_dev->dev);
+		if (IS_ERR(dba)) {
+			mutex_unlock(&aidev->apilock);
+			return PTR_ERR(dba);
+		}
+
+		sgt = dma_buf_map_attachment(dba, DMA_BIDIRECTIONAL);
+		if (IS_ERR(sgt)) {
+			dma_buf_detach(buf_cfg->buf[i], dba);
+			mutex_unlock(&aidev->apilock);
+			return PTR_ERR(sgt);
+		}
+		ynroutbuf[i].vaddr = NULL;
+		ynroutbuf[i].dma_addr = sg_dma_address(sgt->sgl);
+		get_dma_buf(buf_cfg->buf[i]);
+		ynroutbuf[i].dmabuf = buf_cfg->buf[i];
+		ynroutbuf[i].dba = dba;
+		ynroutbuf[i].sgt = sgt;
+		v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
+			"%s buf:%pad size:%zu dmabuf:%p\n", __func__,
+			&ynroutbuf[i].dma_addr, ynroutbuf[i].dmabuf->size,
+			buf_cfg->buf[i]);
+	}
+
+	aidev->ynr_ybuf_cfg = *buf_cfg;
+	mutex_unlock(&aidev->apilock);
+
+	return 0;
 }
 

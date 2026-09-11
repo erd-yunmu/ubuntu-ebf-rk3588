@@ -28,6 +28,8 @@
 #include <linux/spinlock.h>
 #include <soc/rockchip/rockchip_iommu.h>
 
+#include "dma-iommu.h"
+
 /** MMU register offsets */
 #define RK_MMU_DTE_ADDR		0x00	/* Directory table address */
 #define RK_MMU_STATUS		0x04
@@ -39,6 +41,9 @@
 #define RK_MMU_INT_MASK		0x1C	/* IRQ enable */
 #define RK_MMU_INT_STATUS	0x20	/* IRQ status after masking */
 #define RK_MMU_AUTO_GATING	0x24
+
+/* v3 registers */
+#define RK_MMU_PAGE_FAULT	0x44	/* Pagefault register */
 
 #define DTE_ADDR_DUMMY		0xCAFEBABE
 
@@ -67,6 +72,8 @@
 /* RK_MMU_INT_* register fields */
 #define RK_MMU_IRQ_PAGE_FAULT    0x01  /* page fault */
 #define RK_MMU_IRQ_BUS_ERROR     0x02  /* bus read error */
+#define RK_MMU_IRQ_PF_FAKE_MST0  0x10000 /* page fault fake mode */
+
 #define RK_MMU_IRQ_MASK          (RK_MMU_IRQ_PAGE_FAULT | RK_MMU_IRQ_BUS_ERROR)
 
 #define NUM_DT_ENTRIES 1024
@@ -76,6 +83,9 @@
 #define SPAGE_SIZE (1 << SPAGE_ORDER)
 
 #define DISABLE_FETCH_DTE_TIME_LIMIT BIT(31)
+
+#define RK_MMU_PAGEFAULT_FAKE_MODE_EN	BIT(24)
+#define RK_MMU_PAGEFAULT_MST0_DONE	BIT(0)
 
 #define CMD_RETRY_COUNT 10
 
@@ -126,6 +136,7 @@ struct rk_iommu {
 	struct third_iommu_ops_wrap *opt_ops;
 	bool iommu_enabled;
 	bool need_res_map;
+	bool pf_fake_mode_en;
 };
 
 struct rk_iommudata {
@@ -660,9 +671,9 @@ static void log_iova(struct rk_iommu *iommu, int index, dma_addr_t iova)
 	page_flags = pte & RK_PTE_PAGE_FLAGS_MASK;
 
 print_it:
-	dev_err(iommu->dev, "iova = %pad: dte_index: %#03x pte_index: %#03x page_offset: %#03x\n",
+	dev_err_ratelimited(iommu->dev, "iova = %pad: dte_index: %#03x pte_index: %#03x page_offset: %#03x\n",
 		&iova, dte_index, pte_index, page_offset);
-	dev_err(iommu->dev, "mmu_dte_addr: %pa dte@%pa: %#08x valid: %u pte@%pa: %#08x valid: %u page@%pa flags: %#03x\n",
+	dev_err_ratelimited(iommu->dev, "mmu_dte_addr: %pa dte@%pa: %#08x valid: %u pte@%pa: %#08x valid: %u page@%pa flags: %#03x\n",
 		&mmu_dte_addr_phys, &dte_addr_phys, dte,
 		rk_dte_is_pt_valid(dte), &pte_addr_phys, pte,
 		rk_pte_is_page_valid(pte), &page_addr_phys, page_flags);
@@ -676,6 +687,7 @@ static int rk_pagefault_done(struct rk_iommu *iommu)
 	int i;
 	u32 int_mask;
 	irqreturn_t ret = IRQ_NONE;
+	u32 val;
 
 	for (i = 0; i < iommu->num_mmu; i++) {
 		int_status = rk_iommu_read(iommu->bases[i], RK_MMU_INT_STATUS);
@@ -685,14 +697,15 @@ static int rk_pagefault_done(struct rk_iommu *iommu)
 		ret = IRQ_HANDLED;
 		iova = rk_iommu_read(iommu->bases[i], RK_MMU_PAGE_FAULT_ADDR);
 
-		if (int_status & RK_MMU_IRQ_PAGE_FAULT) {
+		if ((int_status & RK_MMU_IRQ_PAGE_FAULT) ||
+		    (iommu->pf_fake_mode_en && (int_status & RK_MMU_IRQ_PF_FAKE_MST0))) {
 			int flags;
 
 			status = rk_iommu_read(iommu->bases[i], RK_MMU_STATUS);
 			flags = (status & RK_MMU_STATUS_PAGE_FAULT_IS_WRITE) ?
 					IOMMU_FAULT_WRITE : IOMMU_FAULT_READ;
 
-			dev_err(iommu->dev, "Page fault at %pad of type %s\n",
+			dev_err_ratelimited(iommu->dev, "Page fault at %pad of type %s\n",
 				&iova,
 				(flags == IOMMU_FAULT_WRITE) ? "write" : "read");
 
@@ -704,11 +717,13 @@ static int rk_pagefault_done(struct rk_iommu *iommu)
 				 * Ignore the return code, though, since we always zap cache
 				 * and clear the page fault anyway.
 				 */
-				if (iommu->domain)
-					report_iommu_fault(iommu->domain, iommu->dev, iova,
-						   status);
-				else
+				if (iommu->domain) {
+					if (!iommu->pf_fake_mode_en)
+						report_iommu_fault(iommu->domain, iommu->dev, iova,
+								   status);
+				} else {
 					dev_err(iommu->dev, "Page fault while iommu not attached to domain?\n");
+				}
 			}
 
 			rk_iommu_base_command(iommu->bases[i], RK_MMU_CMD_ZAP_CACHE);
@@ -726,7 +741,14 @@ static int rk_pagefault_done(struct rk_iommu *iommu)
 		if (int_status & RK_MMU_IRQ_BUS_ERROR)
 			dev_err(iommu->dev, "BUS_ERROR occurred at %pad\n", &iova);
 
-		if (int_status & ~RK_MMU_IRQ_MASK)
+		if (iommu->pf_fake_mode_en && (int_status & RK_MMU_IRQ_PF_FAKE_MST0)) {
+			val = rk_iommu_read(iommu->bases[i], RK_MMU_PAGE_FAULT);
+			val |= RK_MMU_PAGEFAULT_MST0_DONE;
+			rk_iommu_write(iommu->bases[i], RK_MMU_PAGE_FAULT, val);
+			dev_err_ratelimited(iommu->dev, "PF_FAKE_MST0 occurred at %pad\n", &iova);
+		}
+
+		if ((int_status & ~RK_MMU_IRQ_MASK) && (!iommu->pf_fake_mode_en))
 			dev_err(iommu->dev, "unexpected int_status: %#08x\n",
 				int_status);
 
@@ -1158,6 +1180,11 @@ static int rk_iommu_enable(struct rk_iommu *iommu)
 	struct rk_iommu_domain *rk_domain = to_rk_domain(domain);
 	int ret, i;
 	u32 auto_gate;
+	u32 page_fault;
+	u32 irq_mask = RK_MMU_IRQ_MASK;
+
+	if (iommu->pf_fake_mode_en)
+		irq_mask |= RK_MMU_IRQ_PF_FAKE_MST0;
 
 	ret = clk_bulk_enable(iommu->num_clocks, iommu->clocks);
 	if (ret)
@@ -1175,12 +1202,18 @@ static int rk_iommu_enable(struct rk_iommu *iommu)
 		rk_iommu_write(iommu->bases[i], RK_MMU_DTE_ADDR,
 			       rk_ops->mk_dtentries(rk_domain->dt_dma));
 		rk_iommu_base_command(iommu->bases[i], RK_MMU_CMD_ZAP_CACHE);
-		rk_iommu_write(iommu->bases[i], RK_MMU_INT_MASK, RK_MMU_IRQ_MASK);
+		rk_iommu_write(iommu->bases[i], RK_MMU_INT_MASK, irq_mask);
 
 		/* Workaround for iommu blocked, BIT(31) default to 1 */
 		auto_gate = rk_iommu_read(iommu->bases[i], RK_MMU_AUTO_GATING);
 		auto_gate |= DISABLE_FETCH_DTE_TIME_LIMIT;
 		rk_iommu_write(iommu->bases[i], RK_MMU_AUTO_GATING, auto_gate);
+
+		if (iommu->pf_fake_mode_en) {
+			page_fault = rk_iommu_read(iommu->bases[i], RK_MMU_PAGE_FAULT);
+			page_fault |= RK_MMU_PAGEFAULT_FAKE_MODE_EN;
+			rk_iommu_write(iommu->bases[i], RK_MMU_PAGE_FAULT, page_fault);
+		}
 	}
 
 	ret = rk_iommu_enable_paging(iommu);
@@ -1501,6 +1534,11 @@ static int rk_iommu_of_xlate(struct device *dev,
 	return 0;
 }
 
+static void rk_iommu_get_resv_regions(struct device *dev, struct list_head *head)
+{
+	iommu_dma_get_resv_regions(dev, head);
+}
+
 void rockchip_iommu_mask_irq(struct device *dev)
 {
 	struct rk_iommu *iommu = rk_iommu_from_dev(dev);
@@ -1518,14 +1556,18 @@ void rockchip_iommu_unmask_irq(struct device *dev)
 {
 	struct rk_iommu *iommu = rk_iommu_from_dev(dev);
 	int i;
+	u32 irq_mask = RK_MMU_IRQ_MASK;
 
 	if (!iommu)
 		return;
 
+	if (iommu->pf_fake_mode_en)
+		irq_mask |= RK_MMU_IRQ_PF_FAKE_MST0;
+
 	for (i = 0; i < iommu->num_mmu; i++) {
 		/* Need to zap tlb in case of mapping during pagefault */
 		rk_iommu_base_command(iommu->bases[i], RK_MMU_CMD_ZAP_CACHE);
-		rk_iommu_write(iommu->bases[i], RK_MMU_INT_MASK, RK_MMU_IRQ_MASK);
+		rk_iommu_write(iommu->bases[i], RK_MMU_INT_MASK, irq_mask);
 		/* Leave iommu in pagefault state until mapping finished */
 		rk_iommu_base_command(iommu->bases[i], RK_MMU_CMD_PAGE_FAULT_DONE);
 	}
@@ -1540,6 +1582,7 @@ static const struct iommu_ops rk_iommu_ops = {
 	.device_group = rk_iommu_device_group,
 	.pgsize_bitmap = RK_IOMMU_PGSIZE_BITMAP,
 	.of_xlate = rk_iommu_of_xlate,
+	.get_resv_regions = rk_iommu_get_resv_regions,
 	.owner = THIS_MODULE,
 	.default_domain_ops = &(const struct iommu_domain_ops) {
 		.attach_dev	= rk_iommu_attach_device,
@@ -1627,6 +1670,8 @@ static int rk_iommu_probe(struct platform_device *pdev)
 					"rockchip,reserve-map");
 	iommu->first_reset_disabled = device_property_read_bool(dev,
 					"rockchip,disable-first-mmu-reset");
+	iommu->pf_fake_mode_en = device_property_read_bool(dev,
+					"rockchip,enable-pagefault-fake-mode");
 	/*
 	 * iommu clocks should be present for all new devices and devicetrees
 	 * but there are older devicetrees without clocks out in the wild.
@@ -1782,8 +1827,8 @@ static int __maybe_unused rk_iommu_resume(struct device *dev)
 
 static const struct dev_pm_ops rk_iommu_pm_ops = {
 	SET_RUNTIME_PM_OPS(rk_iommu_suspend, rk_iommu_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	LATE_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
+				 pm_runtime_force_resume)
 };
 
 static struct rk_iommu_ops iommu_data_ops_v1 = {
@@ -1805,6 +1850,9 @@ static const struct of_device_id rk_iommu_dt_ids[] = {
 		.data = &iommu_data_ops_v1,
 	},
 	{	.compatible = "rockchip,iommu-v2",
+		.data = &iommu_data_ops_v2,
+	},
+	{	.compatible = "rockchip,iommu-v3",
 		.data = &iommu_data_ops_v2,
 	},
 	{	.compatible = "rockchip,rk3568-iommu",

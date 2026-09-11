@@ -34,7 +34,7 @@
 	};
 
 	fragment@3 {
-		target = <&hdptxphy_hdmi0>;
+		target = <&hdptxphy0>;
 
 		__overlay__ {
 			status = "okay";
@@ -70,6 +70,14 @@
 				rockchip,codec = <&hdmi0>;
 				rockchip,jack-det;
 			};
+		};
+	};
+
+	fragment@7 {
+		target = <&i2s5_8ch>;
+
+		__overlay__ {
+			status = "okay";
 		};
 	};
 };

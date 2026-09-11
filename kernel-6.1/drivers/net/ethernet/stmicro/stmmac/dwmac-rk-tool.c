@@ -628,17 +628,14 @@ static int dwmac_rk_get_desc_status(struct stmmac_priv *priv,
 	int tx_status, rx_status;
 
 	txp = lb_priv->dma_tx;
-	tx_status = priv->hw->desc->tx_status(&priv->dev->stats,
-					      &priv->xstats, txp,
-					      priv->ioaddr);
+	tx_status = stmmac_tx_status(priv, &priv->xstats, txp, priv->ioaddr);
 	/* Check if the descriptor is owned by the DMA */
 	if (unlikely(tx_status & tx_dma_own))
 		return -EBUSY;
 
 	rxp = lb_priv->dma_rx;
 	/* read the status of the incoming frame */
-	rx_status = priv->hw->desc->rx_status(&priv->dev->stats,
-					      &priv->xstats, rxp);
+	rx_status = stmmac_rx_status(priv, &priv->xstats, rxp);
 	if (unlikely(rx_status & dma_own))
 		return -EBUSY;
 
@@ -678,7 +675,7 @@ static int dwmac_rk_xmit(struct sk_buff *skb, struct net_device *dev,
 	unsigned int nopaged_len = skb_headlen(skb);
 	int csum_insertion = 0;
 	struct dma_desc *desc;
-	unsigned int des;
+	dma_addr_t des;
 
 	priv->hw->mac->reset_eee_mode(priv->hw);
 

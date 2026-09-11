@@ -50,6 +50,9 @@
 #define JPGENC_START_EN			BIT(8)
 #define JPGENC_INT_ST_ENC_DONE		BIT(0)
 
+#define JPGENC_VPU730_REG_NUM		241
+#define JPGENC_VPU730_REG_END_INDEX	240
+
 #define to_jpgenc_task(task)	\
 		container_of(task, struct jpgenc_task, mpp_task)
 #define to_jpgenc_dev(dev)	\
@@ -87,7 +90,7 @@ struct jpgenc_reg_msg {
 struct jpgenc_task {
 	struct mpp_task mpp_task;
 	enum MPP_CLOCK_MODE clk_mode;
-	u32 reg[JPGENC_REG_NUM];
+	u32 reg[JPGENC_VPU730_REG_NUM];
 
 	struct reg_offset_info off_inf;
 	u32 irq_status;
@@ -128,6 +131,14 @@ static struct mpp_hw_info jpgenc_v1_hw_info = {
 	.reg_id = JPGENC_REG_HW_ID_INDEX,
 	.reg_start = JPGENC_REG_START_INDEX,
 	.reg_end = JPGENC_REG_END_INDEX,
+	.reg_en = JPGENC_REG_START_EN_INDEX,
+};
+
+static struct mpp_hw_info jpgenc_v2_hw_info = {
+	.reg_num = JPGENC_VPU730_REG_NUM,
+	.reg_id = JPGENC_REG_HW_ID_INDEX,
+	.reg_start = JPGENC_REG_START_INDEX,
+	.reg_end = JPGENC_VPU730_REG_END_INDEX,
 	.reg_en = JPGENC_REG_START_EN_INDEX,
 };
 
@@ -575,10 +586,22 @@ static const struct mpp_dev_var jpgenc_v1_data = {
 	.dev_ops = &jpgenc_v1_dev_ops,
 };
 
+static const struct mpp_dev_var jpgenc_v2_data = {
+	.device_type = MPP_DEVICE_RKJPEGE,
+	.hw_info = &jpgenc_v2_hw_info,
+	.trans_info = jpgenc_v1_trans,
+	.hw_ops = &jpgenc_v1_hw_ops,
+	.dev_ops = &jpgenc_v1_dev_ops,
+};
+
 static const struct of_device_id mpp_jpgenc_dt_match[] = {
 	{
 		.compatible = "rockchip,rkv-jpeg-encoder-v1",
 		.data = &jpgenc_v1_data,
+	},
+	{
+		.compatible = "rockchip,rkv-jpeg-encoder-v2",
+		.data = &jpgenc_v2_data,
 	},
 	{},
 };

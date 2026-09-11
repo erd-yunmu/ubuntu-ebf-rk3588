@@ -17,7 +17,6 @@
 #include "vpss_offline.h"
 #include "hw.h"
 #include "regs.h"
-
 #include "procfs.h"
 
 #include "vpss_offline_v20.h"
@@ -41,6 +40,64 @@ struct rkvpss_offline_buf {
 	int fd;
 	bool alloc;
 };
+
+/**
+ * rkvpss_offline_set_core_clk - Set core clock frequency for offline mode
+ * @ofl: Pointer to the offline device
+ * @dev: Pointer to the VPSS device (used to check ISP status)
+ *
+ * Sets the CLK_CORE_VPSS to 400MHz when ISP is not working to improve offline processing performance.
+ * Clock setting failure will not prevent offline mode from running, only a warning is printed.
+ */
+static void rkvpss_offline_set_core_clk(struct rkvpss_offline_dev *ofl,
+					struct rkvpss_device *dev)
+{
+	struct rkvpss_hw_dev *hw = ofl->hw;
+	int isp_working = 0;
+	struct clk *core_clk;
+	unsigned long target_rate = 400 * 1000000UL; /* 400MHz */
+	unsigned long actual_rate;
+	int ret;
+
+	/* Check if core clock exists */
+	if (hw->clks_num < 3 || !hw->clks[2]) {
+		v4l2_warn(&ofl->v4l2_dev,
+			  "CLK_CORE_VPSS not available, skip frequency setting\n");
+		return;
+	}
+
+	core_clk = hw->clks[0]; /* CLK_CORE_VPSS */
+
+	/* Check ISP working status */
+	if (dev && dev->remote_sd) {
+		ret = v4l2_subdev_call(dev->remote_sd, core, ioctl,
+				       RKISP_VPSS_GET_ISP_WORKING, &isp_working);
+		if (ret < 0) {
+			v4l2_warn(&ofl->v4l2_dev,
+				  "Failed to get ISP working status: %d\n", ret);
+			/* Continue to try setting clock */
+		} else if (isp_working) {
+			v4l2_info(&ofl->v4l2_dev,
+				  "ISP is working, skip core clock adjustment\n");
+			return;
+		}
+	}
+
+	/* Set core clock frequency */
+	rkvpss_set_clk_rate(core_clk, target_rate);
+
+	/* Verify the actual set frequency */
+	actual_rate = clk_get_rate(core_clk);
+	if (actual_rate != target_rate) {
+		v4l2_warn(&ofl->v4l2_dev,
+			  "CLK_CORE_VPSS set to %lu Hz (requested %lu Hz)\n",
+			  actual_rate, target_rate);
+	} else {
+		v4l2_info(&ofl->v4l2_dev,
+			  "CLK_CORE_VPSS successfully set to %lu Hz for offline mode\n",
+			  actual_rate);
+	}
+}
 
 static void init_vb2(struct rkvpss_offline_dev *ofl,
 		     struct rkvpss_offline_buf *buf)
@@ -296,8 +353,9 @@ void rkvpss_ofl_buf_del_by_file(struct rkvpss_offline_dev *ofl,
 }
 
 static void average_scale_down(struct rkvpss_frame_cfg *frame_cfg,
-			   struct rkvpss_offline_dev *ofl,
-			   struct rkvpss_output_cfg *cfg, int idx, bool unite, bool left)
+			       struct rkvpss_offline_dev *ofl,
+			       struct rkvpss_output_cfg *cfg,
+			       int idx, bool unite, bool left)
 {
 	struct rkvpss_hw_dev *hw = ofl->hw;
 	u32 in_w = cfg->crop_width, in_h = cfg->crop_height;
@@ -317,15 +375,23 @@ static void average_scale_down(struct rkvpss_frame_cfg *frame_cfg,
 		return;
 	}
 
-	/*config scl clk gate*/
+	/* config scl clk gate */
 	if (in_w == out_w && in_h == out_h)
 		rkvpss_hw_clear_bits(hw, RKVPSS_VPSS_CLK_GATE, clk_mask);
 	else
 		rkvpss_hw_set_bits(hw, RKVPSS_VPSS_CLK_GATE, clk_mask, clk_mask);
 
 	if (!unite) {
-		if (in_w == out_w && in_h == out_w)
+		if (in_w == out_w && in_h == out_h)
 			goto end;
+
+		rkvpss_hw_write(hw, reg_base + 0x50, 0);
+		rkvpss_hw_write(hw, reg_base + 0x30, 0);
+		rkvpss_hw_write(hw, reg_base + 0x34, 0);
+		rkvpss_hw_write(hw, reg_base + 0x38, 0);
+		rkvpss_hw_write(hw, reg_base + 0x3c, 0);
+		rkvpss_hw_write(hw, reg_base + 0x48, 0);
+		rkvpss_hw_write(hw, reg_base + 0x4c, 0);
 
 		val = in_w | (in_h << 16);
 		rkvpss_hw_write(hw, reg_base + 0x8, val);
@@ -335,38 +401,94 @@ static void average_scale_down(struct rkvpss_frame_cfg *frame_cfg,
 		if (in_w != out_w) {
 			val = (out_w - 1) * 65536 / (in_w - 1) + 1;
 			rkvpss_hw_write(hw, reg_base + 0x10, val);
-			val = (out_w / 2 - 1) * 65536 / (in_w / 2 - 1) + 1;
 			rkvpss_hw_write(hw, reg_base + 0x14, val);
-
-			ctrl |= RKVPSS_SCL_HY_EN | RKVPSS_SCL_HC_EN | RKVPSS2X_SW_AVG_SCALE_H_EN;
+			ctrl |= RKVPSS2X_SW_SCL_HY_EN
+			     | RKVPSS2X_SW_SCL_HC_EN
+			     | RKVPSS2X_SW_AVG_SCALE_H_EN;
 		}
+
 		if (in_h != out_h) {
 			val = (out_h - 1) * 65536 / (in_h - 1) + 1;
 			rkvpss_hw_write(hw, reg_base + 0x18, val);
-			val = (out_h - 1) * 65536 / (in_h  - 1) + 1;
 			rkvpss_hw_write(hw, reg_base + 0x1c, val);
+			ctrl |= RKVPSS2X_SW_SCL_VY_EN
+			     | RKVPSS2X_SW_SCL_VC_EN
+			     | RKVPSS2X_SW_AVG_SCALE_V_EN;
+		}
+	} else {
+		/* Unite mode: use pre-calculated parameters */
+		if (left) {
+			rkvpss_hw_write(hw, reg_base + 0x50, 0);
+			rkvpss_hw_write(hw, reg_base + 0x30, 0);
+			rkvpss_hw_write(hw, reg_base + 0x34, 0);
+			rkvpss_hw_write(hw, reg_base + 0x38, 0);
+			rkvpss_hw_write(hw, reg_base + 0x3c, 0);
+			rkvpss_hw_write(hw, reg_base + 0x48, 0);
+			rkvpss_hw_write(hw, reg_base + 0x4c, 0);
 
-			ctrl |= RKVPSS_SCL_VY_EN | RKVPSS_SCL_VC_EN | RKVPSS2X_SW_AVG_SCALE_V_EN;
+			if (in_w == out_w)
+				val = cfg->crop_width / 2;
+			else
+				val = cfg->crop_width / 2 + ofl->unite_right_enlarge;
+
+			val |= (cfg->crop_height << 16);
+			rkvpss_hw_write(hw, reg_base + 0x8, val);
+
+			val = cfg->scl_width / 2 | (cfg->scl_height << 16);
+			rkvpss_hw_write(hw, reg_base + 0xc, val);
+
+			ctrl |= RKVPSS2X_SW_SCL_CLIP_EN;
+		} else {
+			u32 scl_in_crop_y = ofl->unite_params[idx].scl_in_crop_w_y;
+			u32 scl_in_crop_c = ofl->unite_params[idx].scl_in_crop_w_c;
+
+			val = scl_in_crop_y | (scl_in_crop_c << 4);
+			rkvpss_hw_write(hw, reg_base + 0x50, val);
+			rkvpss_hw_write(hw, reg_base + 0x30, ofl->unite_params[idx].y_w_phase);
+			rkvpss_hw_write(hw, reg_base + 0x34, ofl->unite_params[idx].c_w_phase);
+			rkvpss_hw_write(hw, reg_base + 0x38, 0);
+			rkvpss_hw_write(hw, reg_base + 0x3c, 0);
+
+			val = cfg->scl_width / 2 - ALIGN_DOWN(cfg->scl_width / 2, 16);
+			rkvpss_hw_write(hw, reg_base + 0x48, val);
+			rkvpss_hw_write(hw, reg_base + 0x4c, val);
+
+			val = (cfg->crop_width / 2 + ofl->unite_right_enlarge)
+			      | (cfg->crop_height << 16);
+			rkvpss_hw_write(hw, reg_base + 0x8, val);
+
+			val = cfg->scl_width / 2 | (cfg->scl_height << 16);
+			rkvpss_hw_write(hw, reg_base + 0xc, val);
+			ctrl |= RKVPSS2X_SW_SCL_CLIP_EN | RKVPSS2X_SW_SCL_IN_CLIP_EN
+			     | RKVPSS2X_SW_SCL_HPHASE_EN;
+		}
+
+		if (cfg->scl_width != cfg->crop_width) {
+			rkvpss_hw_write(hw, reg_base + 0x10, ofl->unite_params[idx].y_w_fac);
+			rkvpss_hw_write(hw, reg_base + 0x14, ofl->unite_params[idx].c_w_fac);
+			ctrl |= RKVPSS2X_SW_SCL_HY_EN
+			     | RKVPSS2X_SW_SCL_HC_EN
+			     | RKVPSS2X_SW_AVG_SCALE_H_EN;
+		}
+		if (cfg->scl_height != cfg->crop_height) {
+			rkvpss_hw_write(hw, reg_base + 0x18, ofl->unite_params[idx].y_h_fac);
+			rkvpss_hw_write(hw, reg_base + 0x1c, ofl->unite_params[idx].c_h_fac);
+			ctrl |= RKVPSS2X_SW_SCL_VY_EN
+			     | RKVPSS2X_SW_SCL_VC_EN
+			     | RKVPSS2X_SW_AVG_SCALE_V_EN;
 		}
 	}
-	//unite todo
 
 end:
 	rkvpss_hw_write(hw, reg_base, ctrl);
 	val = RKVPSS_SCL_GEN_UPD | RKVPSS_SCL_FORCE_UPD;
 	rkvpss_hw_write(hw, reg_base + 0x4, val);
-
-	v4l2_dbg(3, rkvpss_debug, &ofl->v4l2_dev,
-		 "%s unite:%d left:%d hw ch:%d ctrl:0x%x y_src_size:0x%x y_dst_size:0x%x\n",
-		 __func__, unite, left, idx,
-		 rkvpss_hw_read(hw, reg_base),
-		 rkvpss_hw_read(hw, reg_base + 0x8),
-		 rkvpss_hw_read(hw, reg_base + 0xc));
 }
 
 static void bilinear_scale(struct rkvpss_frame_cfg *frame_cfg,
-			   struct rkvpss_offline_dev *ofl,
-			   struct rkvpss_output_cfg *cfg, int idx, bool unite, bool left)
+				 struct rkvpss_offline_dev *ofl,
+				 struct rkvpss_output_cfg *cfg,
+				 int idx, bool unite, bool left)
 {
 	struct rkvpss_hw_dev *hw = ofl->hw;
 	u32 in_w = cfg->crop_width, in_h = cfg->crop_height;
@@ -403,17 +525,22 @@ static void bilinear_scale(struct rkvpss_frame_cfg *frame_cfg,
 		return;
 	}
 
-	/*config scl clk gate*/
+	/* config scl clk gate */
 	if (in_w == out_w && in_h == out_h)
 		rkvpss_hw_clear_bits(hw, RKVPSS_VPSS_CLK_GATE, clk_mask);
 	else
 		rkvpss_hw_set_bits(hw, RKVPSS_VPSS_CLK_GATE, clk_mask, clk_mask);
 
 	if (!unite) {
-		if (in_w == out_w && in_h == out_w)
+		if (in_w == out_w && in_h == out_h)
 			goto end;
 
-		/* TODO diff for input and output format */
+		rkvpss_hw_write(hw, reg_base + 0x50, 0);
+		rkvpss_hw_write(hw, reg_base + 0x20, 0);
+		rkvpss_hw_write(hw, reg_base + 0x24, 0);
+		rkvpss_hw_write(hw, reg_base + 0x48, 0);
+		rkvpss_hw_write(hw, reg_base + 0x4c, 0);
+
 		if (yuv420_in) {
 			in_div = 2;
 			out_div = 2;
@@ -447,43 +574,50 @@ static void bilinear_scale(struct rkvpss_frame_cfg *frame_cfg,
 			ctrl |= RKVPSS_SCL_VY_EN | RKVPSS_SCL_VC_EN;
 		}
 	} else {
+		/* Unite mode: use pre-calculated parameters */
 		if (left) {
 			rkvpss_hw_write(hw, reg_base + 0x50, 0);
 			rkvpss_hw_write(hw, reg_base + 0x20, 0);
 			rkvpss_hw_write(hw, reg_base + 0x24, 0);
 			rkvpss_hw_write(hw, reg_base + 0x48, 0);
 			rkvpss_hw_write(hw, reg_base + 0x4c, 0);
+
 			if (in_w == out_w)
-				val = (cfg->crop_width / 2) | (cfg->crop_height << 16);
+				val = cfg->crop_width / 2;
 			else
-				val = (cfg->crop_width / 2 + UNITE_ENLARGE) |
-				       (cfg->crop_height << 16);
+				val = cfg->crop_width / 2 + ofl->unite_right_enlarge;
+
+			val |= (cfg->crop_height << 16);
 			rkvpss_hw_write(hw, reg_base + 0x8, val);
 			val = cfg->scl_width / 2 | (cfg->scl_height << 16);
 			rkvpss_hw_write(hw, reg_base + 0xc, val);
 			ctrl |= RKVPSS_SCL_CLIP_EN;
 		} else {
-			val = ofl->unite_params[idx].scl_in_crop_w_y |
-			      (ofl->unite_params[idx].scl_in_crop_w_c << 4);
+			val = ofl->unite_params[idx].scl_in_crop_w_y
+			      | (ofl->unite_params[idx].scl_in_crop_w_c << 4);
 			rkvpss_hw_write(hw, reg_base + 0x50, val);
+
 			rkvpss_hw_write(hw, reg_base + 0x20, ofl->unite_params[idx].y_w_phase);
 			rkvpss_hw_write(hw, reg_base + 0x24, ofl->unite_params[idx].c_w_phase);
+
 			val = cfg->scl_width / 2 - ALIGN_DOWN(cfg->scl_width / 2, 16);
 			rkvpss_hw_write(hw, reg_base + 0x48, val);
 			rkvpss_hw_write(hw, reg_base + 0x4c, val);
-			val = (cfg->crop_width / 2 + ofl->unite_right_enlarge) |
-			      (cfg->crop_height << 16);
+
+			val = (cfg->crop_width / 2 + ofl->unite_right_enlarge)
+			      | (cfg->crop_height << 16);
 			rkvpss_hw_write(hw, reg_base + 0x8, val);
 			val = cfg->scl_width / 2 | (cfg->scl_height << 16);
 			rkvpss_hw_write(hw, reg_base + 0xc, val);
 			ctrl |= RKVPSS_SCL_CLIP_EN | RKVPSS_SCL_IN_CLIP_EN;
 		}
-		if (cfg->scl_width != frame_cfg->input.width) {
+
+		if (cfg->scl_width != cfg->crop_width) {
 			rkvpss_hw_write(hw, reg_base + 0x10, ofl->unite_params[idx].y_w_fac);
 			rkvpss_hw_write(hw, reg_base + 0x14, ofl->unite_params[idx].c_w_fac);
 			ctrl |= RKVPSS_SCL_HY_EN | RKVPSS_SCL_HC_EN;
 		}
-		if (cfg->scl_height != frame_cfg->input.height) {
+		if (cfg->scl_height != cfg->crop_height) {
 			rkvpss_hw_write(hw, reg_base + 0x18, ofl->unite_params[idx].y_h_fac);
 			rkvpss_hw_write(hw, reg_base + 0x1c, ofl->unite_params[idx].c_h_fac);
 			ctrl |= RKVPSS_SCL_VY_EN | RKVPSS_SCL_VC_EN;
@@ -503,18 +637,53 @@ end:
 		 rkvpss_hw_read(hw, reg_base + 0xc));
 }
 
-static void scale_config(struct rkvpss_offline_dev *ofl,
-			 struct rkvpss_frame_cfg *cfg, bool unite, bool left)
+static void scale_config(struct rkvpss_offline_dev *ofl, struct rkvpss_frame_cfg *cfg,
+			 bool unite, bool left)
 {
 	int i;
+	bool is_downscale_w;
+	bool is_downscale_h;
+	bool is_downscale;
+	bool use_avg_scale;
 
 	for (i = 0; i < RKVPSS_OUT_V20_MAX; i++) {
 		if (!cfg->output[i].enable)
 			continue;
-		if ((i == 0 || i == 2) && cfg->output[i].avg_scl_down)
+
+		is_downscale_w = cfg->output[i].scl_width < cfg->output[i].crop_width;
+		is_downscale_h = cfg->output[i].scl_height < cfg->output[i].crop_height;
+		is_downscale = is_downscale_w && is_downscale_h;
+
+		/* Scale algorithm selection for CH0 and CH2:
+		 * - Average algorithm: ONLY supports downscaling (scl < crop)
+		 * - Bilinear algorithm: supports both upscaling and downscaling
+		 *
+		 * Strategy:
+		 * - If downscaling AND user configured avg_scl_down=1: use average algorithm
+		 * - Otherwise (upscaling or user set avg_scl_down=0): use bilinear algorithm
+		 */
+		use_avg_scale = (i == RKVPSS_OUTPUT_CH0 || i == RKVPSS_OUTPUT_CH2) &&
+				is_downscale && cfg->output[i].avg_scl_down;
+
+		/* Warn if user configured average but it cannot be used */
+		if ((i == RKVPSS_OUTPUT_CH0 || i == RKVPSS_OUTPUT_CH2) &&
+		    cfg->output[i].avg_scl_down && !is_downscale) {
+			v4l2_info(&ofl->v4l2_dev,
+				 "%s CH%d: avg_scl_down configured but not downscaling, using bilinear instead\n",
+				 __func__, i);
+		}
+
+		if (use_avg_scale) {
+			v4l2_dbg(2, rkvpss_debug, &ofl->v4l2_dev,
+				 "%s CH%d: average_scale_down, unite:%d left:%d\n",
+				 __func__, i, unite, left);
 			average_scale_down(cfg, ofl, &cfg->output[i], i, unite, left);
-		else
+		} else {
+			v4l2_dbg(2, rkvpss_debug, &ofl->v4l2_dev,
+				 "%s CH%d: bilinear_scale, unite:%d left:%d\n",
+				 __func__, i, unite, left);
 			bilinear_scale(cfg, ofl, &cfg->output[i], i, unite, left);
+		}
 	}
 }
 
@@ -844,8 +1013,6 @@ static int read_config(struct rkvpss_offline_dev *ofl,
 	in_ctrl = 0;
 	switch (cfg->input.format) {
 	case V4L2_PIX_FMT_NV16:
-		if (cfg->input.stride < ALIGN(cfg->input.width, 16))
-			cfg->input.stride = ALIGN(cfg->input.width, 16);
 		in_c_offs = cfg->input.ver_stride ?
 				cfg->input.stride * cfg->input.ver_stride :
 				cfg->input.stride * cfg->input.height;
@@ -854,8 +1021,6 @@ static int read_config(struct rkvpss_offline_dev *ofl,
 		unite_off = 8;
 		break;
 	case V4L2_PIX_FMT_NV12:
-		if (cfg->input.stride < ALIGN(cfg->input.width, 16))
-			cfg->input.stride = ALIGN(cfg->input.width, 16);
 		in_c_offs = cfg->input.ver_stride ?
 				cfg->input.stride * cfg->input.ver_stride :
 				cfg->input.stride * cfg->input.height;
@@ -864,8 +1029,6 @@ static int read_config(struct rkvpss_offline_dev *ofl,
 		unite_off = 8;
 		break;
 	case V4L2_PIX_FMT_NV61:
-		if (cfg->input.stride < ALIGN(cfg->input.width, 16))
-			cfg->input.stride = ALIGN(cfg->input.width, 16);
 		in_c_offs = cfg->input.ver_stride ?
 				cfg->input.stride * cfg->input.ver_stride :
 				cfg->input.stride * cfg->input.height;
@@ -874,8 +1037,6 @@ static int read_config(struct rkvpss_offline_dev *ofl,
 		unite_off = 8;
 		break;
 	case V4L2_PIX_FMT_NV21:
-		if (cfg->input.stride < ALIGN(cfg->input.width, 16))
-			cfg->input.stride = ALIGN(cfg->input.width, 16);
 		in_c_offs = cfg->input.ver_stride ?
 				cfg->input.stride * cfg->input.ver_stride :
 				cfg->input.stride * cfg->input.height;
@@ -884,58 +1045,42 @@ static int read_config(struct rkvpss_offline_dev *ofl,
 		unite_off = 8;
 		break;
 	case V4L2_PIX_FMT_RGB565:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 2, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 2, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS_MI_RD_INPUT_BGR565;
 		unite_off = 16;
 		break;
 	case V4L2_PIX_FMT_RGB565X:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 2, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 2, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS_MI_RD_INPUT_BGR565 | RKVPSS_MI_RD_RB_SWAP;
 		unite_off = 16;
 		break;
 	case V4L2_PIX_FMT_RGB24:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 3, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 3, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS_MI_RD_INPUT_BGR888;
 		unite_off = 24;
 		break;
 	case V4L2_PIX_FMT_BGR24:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 3, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 3, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS_MI_RD_INPUT_BGR888 | RKVPSS_MI_RD_RB_SWAP;
 		unite_off = 24;
 		break;
 	case V4L2_PIX_FMT_XRGB32:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 4, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 4, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS_MI_RD_INPUT_ABGR888;
 		unite_off = 32;
 		break;
 	case V4L2_PIX_FMT_XBGR32:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 4, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 4, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS_MI_RD_INPUT_ABGR888 | RKVPSS_MI_RD_RB_SWAP;
 		unite_off = 32;
 		break;
 	case V4L2_PIX_FMT_RGBX32:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 4, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 4, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS_MI_RD_INPUT_ABGR888
 				| RKVPSS_MI_RD_ALPHA_SWAP;
 		unite_off = 32;
 		break;
 	case V4L2_PIX_FMT_BGRX32:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 4, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 4, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS_MI_RD_INPUT_ABGR888
 				| RKVPSS_MI_RD_RB_SWAP
@@ -973,43 +1118,31 @@ static int read_config(struct rkvpss_offline_dev *ofl,
 		in_ctrl |= RKVPSS_MI_RD_INPUT_422SP | RKVPSS_MI_RD_FBCD_YUV444_EN;
 		break;
 	case V4L2_PIX_FMT_TILE420:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 6, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 6, 16);
 		in_c_offs = 0;
 		in_size = cfg->input.stride * (cfg->input.height / 4);
 		in_ctrl |= RKVPSS_MI_RD_INPUT_420SP;
 		break;
 	case V4L2_PIX_FMT_TILE422:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 8, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 8, 16);
 		in_c_offs = 0;
 		in_size = cfg->input.stride * (cfg->input.height / 4);
 		in_ctrl |= RKVPSS_MI_RD_INPUT_422SP;
 		break;
 	case V4L2_PIX_FMT_UYVY:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 2, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 2, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS2X_MI_RD_INPUT_UYVY;
 		//unite_off  todo
 		break;
 	case V4L2_PIX_FMT_VYUY:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 2, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 2, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS2X_MI_RD_INPUT_UYVY | RKVPSS_MI_RD_UV_SWAP;
 		//unite_off  todo
 		break;
 	case V4L2_PIX_FMT_YUYV:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 2, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 2, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS2X_MI_RD_INPUT_UYVY | RKVPSS_MI_RD_RB_SWAP;
 		//unite_off  todo
 		break;
 	case V4L2_PIX_FMT_YVYU:
-		if (cfg->input.stride < ALIGN(cfg->input.width * 2, 16))
-			cfg->input.stride = ALIGN(cfg->input.width * 2, 16);
 		in_size = cfg->input.stride * cfg->input.height;
 		in_ctrl |= RKVPSS2X_MI_RD_INPUT_UYVY | RKVPSS_MI_RD_RB_SWAP | RKVPSS_MI_RD_UV_SWAP;
 		//unite_off  todo
@@ -1169,7 +1302,7 @@ static void crop_config(struct rkvpss_offline_dev *ofl,
 
 	crop_en = 0;
 	if (!unite) {
-		for (i = 0; i < RKVPSS_OUTPUT_CH3; i++) {
+		for (i = 0; i <= RKVPSS_OUTPUT_CH3; i++) {
 			if (!cfg->output[i].enable)
 				continue;
 			reg = RKVPSS_CROP0_0_H_OFFS;
@@ -1188,18 +1321,17 @@ static void crop_config(struct rkvpss_offline_dev *ofl,
 		}
 	} else {
 		if (left) {
-			for (i = 0; i < RKVPSS_OUTPUT_CH3; i++) {
+			for (i = 0; i <= RKVPSS_OUTPUT_CH3; i++) {
 				if (!cfg->output[i].enable)
 					continue;
 
 				reg = RKVPSS_CROP0_0_H_OFFS;
-				val = cfg->output[i].crop_h_offs;
+				val = 0;
 				rkvpss_hw_write(hw, reg + i * 0x10, val);
 				reg = RKVPSS_CROP0_0_V_OFFS;
 				val = cfg->output[i].crop_v_offs;
 				rkvpss_hw_write(hw, reg + i * 0x10, val);
 				reg = RKVPSS_CROP0_0_H_SIZE;
-				/*if no scale, left don't enlarge*/
 				if (cfg->output[i].crop_width == cfg->output[i].scl_width)
 					val = cfg->output[i].crop_width / 2;
 				else
@@ -1211,7 +1343,7 @@ static void crop_config(struct rkvpss_offline_dev *ofl,
 				crop_en |= RKVPSS_CROP_CHN_EN(i);
 			}
 		} else {
-			for (i = 0; i < RKVPSS_OUTPUT_CH3; i++) {
+			for (i = 0; i <= RKVPSS_OUTPUT_CH3; i++) {
 				if (!cfg->output[i].enable)
 					continue;
 				reg = RKVPSS_CROP0_0_H_OFFS;
@@ -1238,7 +1370,7 @@ static void crop_config(struct rkvpss_offline_dev *ofl,
 	rkvpss_hw_write(hw, RKVPSS_CROP0_CTRL, crop_en);
 	rkvpss_hw_write(hw, RKVPSS_CROP0_UPDATE, RKVPSS_CROP_FORCE_UPD);
 
-	for (i = 0; i < RKVPSS_OUTPUT_CH3; i++) {
+	for (i = 0; i <= RKVPSS_OUTPUT_CH3; i++) {
 		if (!cfg->output[i].enable)
 			continue;
 		v4l2_dbg(3, rkvpss_debug, &ofl->v4l2_dev,
@@ -1273,7 +1405,6 @@ static int write_config(struct rkvpss_offline_dev *ofl,
 				 cfg->dev_id, i);
 			cfg->output[i].enable = 0;
 		}
-
 		if (!cfg->output[i].enable)
 			continue;
 		ch_en = true;
@@ -1290,36 +1421,24 @@ static int write_config(struct rkvpss_offline_dev *ofl,
 
 			switch (cfg->output[i].format) {
 			case V4L2_PIX_FMT_RGB565:
-				if (cfg->output[i].stride < ALIGN(w * 2, 16))
-					cfg->output[i].stride = ALIGN(w * 2, 16);
 				out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_OUTPUT_RGB565 |
 						  RKVPSS_MI_CHN_WR_RB_SWAP;
 				break;
 			case V4L2_PIX_FMT_RGB24:
-				if (cfg->output[i].stride < ALIGN(w * 3, 16))
-					cfg->output[i].stride = ALIGN(w * 3, 16);
 				out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_OUTPUT_RGB888 |
 						  RKVPSS_MI_CHN_WR_RB_SWAP;
 				break;
 			case V4L2_PIX_FMT_RGB565X:
-				if (cfg->output[i].stride < ALIGN(w * 2, 16))
-					cfg->output[i].stride = ALIGN(w * 2, 16);
 				out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_OUTPUT_RGB565;
 				break;
 			case V4L2_PIX_FMT_BGR24:
-				if (cfg->output[i].stride < ALIGN(w * 3, 16))
-					cfg->output[i].stride = ALIGN(w * 3, 16);
 				out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_OUTPUT_RGB888;
 				break;
 			case V4L2_PIX_FMT_XBGR32:
-				if (cfg->output[i].stride < ALIGN(w * 4, 16))
-					cfg->output[i].stride = ALIGN(w * 4, 16);
 				out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_OUTPUT_ARGB888 |
 						RKVPSS2X_CH1_WR_RGB888_ALPHA(cfg->output[i].alpha);
 				break;
 			case V4L2_PIX_FMT_XRGB32:
-				if (cfg->output[i].stride < ALIGN(w * 4, 16))
-					cfg->output[i].stride = ALIGN(w * 4, 16);
 				out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_OUTPUT_ARGB888 |
 						RKVPSS_MI_CHN_WR_RB_SWAP |
 						RKVPSS2X_CH1_WR_RGB888_ALPHA(cfg->output[i].alpha);
@@ -1335,88 +1454,72 @@ static int write_config(struct rkvpss_offline_dev *ofl,
 		}
 		switch (cfg->output[i].format) {
 		case V4L2_PIX_FMT_UYVY:
-			if (cfg->output[i].stride < ALIGN(w * 2, 16))
-				cfg->output[i].stride = ALIGN(w * 2, 16);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_422P | RKVPSS_MI_CHN_WR_OUTPUT_YUV422;
 			out_ch[i].size = cfg->output[i].stride * h;
 			break;
 		case V4L2_PIX_FMT_NV16:
-			if (cfg->output[i].stride < ALIGN(w, 16))
-				cfg->output[i].stride = ALIGN(w, 16);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_42XSP | RKVPSS_MI_CHN_WR_OUTPUT_YUV422;
 			out_ch[i].size = cfg->output[i].stride * h * 2;
 			out_ch[i].c_offs = cfg->output[i].stride * h;
 			break;
 		case V4L2_PIX_FMT_NV12:
-			if (cfg->output[i].stride < ALIGN(w, 16))
-				cfg->output[i].stride = ALIGN(w, 16);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_42XSP | RKVPSS_MI_CHN_WR_OUTPUT_YUV420;
 			out_ch[i].size = cfg->output[i].stride * h * 3 / 2;
 			out_ch[i].c_offs = cfg->output[i].stride * h;
 			break;
 		case V4L2_PIX_FMT_GREY:
-			if (cfg->output[i].stride < ALIGN(w, 16))
-				cfg->output[i].stride = ALIGN(w, 16);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_42XSP | RKVPSS_MI_CHN_WR_OUTPUT_YUV400;
 			out_ch[i].size = cfg->output[i].stride * h;
 			break;
 		case V4L2_PIX_FMT_VYUY:
-			if (cfg->output[i].stride < ALIGN(w * 2, 16))
-				cfg->output[i].stride = ALIGN(w * 2, 16);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_422P | RKVPSS_MI_CHN_WR_OUTPUT_YUV422;
 			out_ch[i].size = cfg->output[i].stride * h;
 			break;
 		case V4L2_PIX_FMT_NV61:
-			if (cfg->output[i].stride < ALIGN(w, 16))
-				cfg->output[i].stride = ALIGN(w, 16);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_42XSP | RKVPSS_MI_CHN_WR_OUTPUT_YUV422;
 			out_ch[i].size = cfg->output[i].stride * h * 2;
 			out_ch[i].c_offs = cfg->output[i].stride * h;
 			break;
 		case V4L2_PIX_FMT_NV21:
-			if (cfg->output[i].stride < ALIGN(w, 16))
-				cfg->output[i].stride = ALIGN(w, 16);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_42XSP | RKVPSS_MI_CHN_WR_OUTPUT_YUV420;
 			out_ch[i].size = cfg->output[i].stride * h * 3 / 2;
 			out_ch[i].c_offs = cfg->output[i].stride * h;
 			break;
 		case V4L2_PIX_FMT_TILE420:
-			if (cfg->output[i].stride < ALIGN(w * 6, 16))
-				cfg->output[i].stride = ALIGN(w * 6, 16);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_OUTPUT_YUV420;
 			out_ch[i].size = cfg->output[i].stride * (h / 4);
 			out_ch[i].c_offs = 0;
 			break;
 		case V4L2_PIX_FMT_TILE422:
-			if (cfg->output[i].stride < ALIGN(w * 8, 16))
-				cfg->output[i].stride = ALIGN(w * 8, 16);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_OUTPUT_YUV422;
 			out_ch[i].size = cfg->output[i].stride * (h / 4);
 			out_ch[i].c_offs = 0;
 			break;
 		case V4L2_PIX_FMT_FBC0:
 			cfg->output[i].stride = 0;
-			header_size = ((cfg->input.width + 63) / 64) *
-				((cfg->input.height + 3) / 4) * 16;
-			payload_size = ((cfg->input.width + 63) / 64) * 384 *
-				((cfg->input.height + 3) / 4);
+			header_size = ((w + 63) / 64) *
+				((h + 3) / 4) * 16;
+			payload_size = ((w + 63) / 64) * 384 *
+				((h + 3) / 4);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_OUTPUT_YUV420;
 			out_ch[i].size = header_size + payload_size;
 			break;
 		case V4L2_PIX_FMT_FBC2:
-			cfg->input.stride = 0;
-			header_size = ((cfg->input.width + 63) / 64) *
-				((cfg->input.height + 3) / 4) * 16;
-			payload_size = ((cfg->input.width + 63) / 64) * 512 *
-				((cfg->input.height + 3) / 4);
+			cfg->output[i].stride = 0;
+			header_size = ((w + 63) / 64) *
+				((h + 3) / 4) * 16;
+			payload_size = ((w + 63) / 64) * 512 *
+				((h + 3) / 4);
 			out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_OUTPUT_YUV422;
 			out_ch[i].size = header_size + payload_size;
 			break;
 		default:
-			v4l2_err(&ofl->v4l2_dev, "dev_id:%d no support output ch%d format:%c%c%c%c\n",
-				 cfg->dev_id, i,
-				 cfg->output[i].format, cfg->output[i].format >> 8,
-				 cfg->output[i].format >> 16, cfg->output[i].format >> 24);
+			v4l2_err(&ofl->v4l2_dev, "%s dev_id:%d no support ch%d format:%c%c%c%c\n",
+				 __func__, cfg->dev_id, i,
+				 cfg->output[i].format & 0xff,
+				 (cfg->output[i].format >> 8) & 0xff,
+				 (cfg->output[i].format >> 16) & 0xff,
+				 (cfg->output[i].format >> 24) & 0xff);
 			return -EINVAL;
 		}
 		out_ch[i].ctrl |= RKVPSS_MI_CHN_WR_EN | RKVPSS_MI_CHN_WR_AUTO_UPD;
@@ -1459,13 +1562,19 @@ static int write_config(struct rkvpss_offline_dev *ofl,
 
 		if (cfg->output[i].format == V4L2_PIX_FMT_FBC0 ||
 		    cfg->output[i].format == V4L2_PIX_FMT_FBC2) {
+			/* Recalculate w/h for this channel */
+			int fbc_w = cfg->output[i].aspt.enable ?
+			    cfg->output[i].aspt.width : cfg->output[i].scl_width;
+			int fbc_h = cfg->output[i].aspt.enable ?
+			    cfg->output[i].aspt.height : cfg->output[i].scl_height;
+
 			val = sg_dma_address(sg_tbl->sgl);
 
 			reg = RKVPSS_MI_CHN0_WR_CB_BASE;
 			rkvpss_hw_write(hw, reg + i * 0x100, val);
 
-			header_size = ((cfg->input.width + 63) / 64) *
-				((cfg->input.height + 3) / 4) * 16;
+			header_size = ((fbc_w + 63) / 64) *
+				((fbc_h + 3) / 4) * 16;
 			val += header_size;
 			reg = RKVPSS_MI_CHN0_WR_Y_BASE;
 			rkvpss_hw_write(hw, reg + i * 0x100, val);
@@ -1477,11 +1586,11 @@ static int write_config(struct rkvpss_offline_dev *ofl,
 
 			reg = RKVPSS_MI_CHN0_WR_Y_SIZE;
 			if (cfg->output[i].format == V4L2_PIX_FMT_FBC0)
-				payload_size = ((cfg->input.width + 63) / 64) * 384 *
-					((cfg->input.height + 3) / 4);
+				payload_size = ((fbc_w + 63) / 64) * 384 *
+					((fbc_h + 3) / 4);
 			else if (cfg->output[i].format == V4L2_PIX_FMT_FBC2)
-				payload_size = ((cfg->input.width + 63) / 64) * 512 *
-					((cfg->input.height + 3) / 4);
+				payload_size = ((fbc_w + 63) / 64) * 512 *
+					((fbc_h + 3) / 4);
 
 			val = payload_size;
 			rkvpss_hw_write(hw, reg + i * 0x100, val);
@@ -1498,7 +1607,11 @@ static int write_config(struct rkvpss_offline_dev *ofl,
 			rkvpss_hw_write(hw, reg + i * 0x100, val);
 
 			reg = RKVPSS_MI_CHN0_WR_Y_STRIDE;
-			val = cfg->output[i].stride;
+			/* If 16-aligned, use stride; otherwise set to 0 */
+			if (IS_ALIGNED(cfg->output[i].stride, 16))
+				val = cfg->output[i].stride;
+			else
+				val = 0;
 			rkvpss_hw_write(hw, reg + i * 0x100, val);
 
 			reg = RKVPSS_MI_CHN0_WR_Y_SIZE;
@@ -1633,88 +1746,164 @@ free_buf:
 	return -ENOMEM;
 }
 
-//1126b todo
-static void calc_unite_scl_params(struct rkvpss_offline_dev *ofl,
-				  struct rkvpss_frame_cfg *cfg)
+static void calc_unite_scl_params_avg(struct rkvpss_offline_dev *ofl,
+				      struct rkvpss_output_cfg *out_cfg,
+				      struct rkvpss_unite_scl_params *params,
+				      u32 *right_scl_need_size_y,
+				      u32 *right_scl_need_size_c)
 {
-	struct rkvpss_unite_scl_params *params;
-	int i;
-	u32 right_scl_need_size_y, right_scl_need_size_c;
+	u32 left_in_used_size_y, left_in_used_size_c;
+	u32 scl_h_size = out_cfg->scl_width / 2;
+	u64 left_used_q16_y, left_used_q16_c;
+	u64 phase_left_y_val, phase_left_c_val;
+	u32 phase_left_y, phase_left_c;
+
+	/* Average downscaling calculation */
+	params->y_w_fac = ((out_cfg->scl_width - 1) * 65536 /
+			  (out_cfg->crop_width - 1)) + 1;
+	params->c_w_fac = ((out_cfg->scl_width / 2 - 1) * 65536 /
+			  (out_cfg->crop_width / 2 - 1)) + 1;
+	params->y_h_fac = ((out_cfg->scl_height - 1) * 65536 /
+			  (out_cfg->crop_height - 1)) + 1;
+	params->c_h_fac = ((out_cfg->scl_height - 1) * 65536 /
+			  (out_cfg->crop_height - 1)) + 1;
+
+	left_used_q16_y = (u64)scl_h_size * 65536;
+	left_used_q16_c = (u64)(scl_h_size / 2) * 65536;
+
+	left_in_used_size_y = div64_u64(left_used_q16_y + params->y_w_fac - 1, params->y_w_fac);
+	left_in_used_size_c = div64_u64(left_used_q16_c + params->c_w_fac - 1, params->c_w_fac);
+
+	phase_left_y_val = (u64)left_in_used_size_y * params->y_w_fac;
+	phase_left_c_val = (u64)left_in_used_size_c * params->c_w_fac;
+
+	phase_left_y = params->y_w_fac - (u32)(phase_left_y_val - left_used_q16_y);
+	phase_left_c = params->c_w_fac - (u32)(phase_left_c_val - left_used_q16_c);
+
+	*right_scl_need_size_y = out_cfg->crop_width - (left_in_used_size_y - 1);
+	*right_scl_need_size_c = out_cfg->crop_width - ((left_in_used_size_c - 1) * 2);
+
+	params->y_w_phase = phase_left_y & 0xffff;
+	params->c_w_phase = phase_left_c & 0xffff;
+	params->right_scl_need_size_y = *right_scl_need_size_y;
+	params->right_scl_need_size_c = *right_scl_need_size_c;
+}
+
+static void calc_unite_scl_params_bilinear(struct rkvpss_offline_dev *ofl,
+					   struct rkvpss_output_cfg *out_cfg,
+					   struct rkvpss_unite_scl_params *params,
+					   u32 *right_scl_need_size_y,
+					   u32 *right_scl_need_size_c)
+{
 	u32 left_in_used_size_y, left_in_used_size_c;
 	u32 right_fst_position_y, right_fst_position_c;
-	u32 right_y_crop_total;
-	u32 right_c_crop_total;
+
+	/* Bilinear scale calculation */
+	params->y_w_fac = (out_cfg->crop_width - 1) * 4096 /
+			  (out_cfg->scl_width - 1);
+	params->c_w_fac = (out_cfg->crop_width / 2 - 1) * 4096 /
+			  (out_cfg->scl_width / 2 - 1);
+	params->y_h_fac = (out_cfg->crop_height - 1) * 4096 /
+			  (out_cfg->scl_height - 1);
+	params->c_h_fac = (out_cfg->crop_height - 1) * 4096 /
+			  (out_cfg->scl_height - 1);
+
+	right_fst_position_y = out_cfg->scl_width / 2 * params->y_w_fac;
+	right_fst_position_c = out_cfg->scl_width / 2 / 2 * params->c_w_fac;
+
+	left_in_used_size_y = right_fst_position_y >> 12;
+	left_in_used_size_c = (right_fst_position_c >> 12) * 2;
+
+	params->y_w_phase = right_fst_position_y & 0xfff;
+	params->c_w_phase = right_fst_position_c & 0xfff;
+
+	*right_scl_need_size_y = out_cfg->crop_width - left_in_used_size_y;
+	*right_scl_need_size_c = out_cfg->crop_width - left_in_used_size_c;
+
+	params->right_scl_need_size_y = *right_scl_need_size_y;
+	params->right_scl_need_size_c = *right_scl_need_size_c;
+}
+
+static void calc_unite_crop_params(struct rkvpss_offline_dev *ofl,
+				   struct rkvpss_output_cfg *out_cfg,
+				   struct rkvpss_unite_scl_params *params,
+				   u32 right_scl_need_size_y,
+				   u32 right_scl_need_size_c,
+				   bool use_average)
+{
+	u32 right_y_crop_total, right_c_crop_total;
+
+	right_y_crop_total = out_cfg->crop_width / 2
+				+ ofl->unite_right_enlarge - right_scl_need_size_y;
+	right_c_crop_total = out_cfg->crop_width / 2
+				+ ofl->unite_right_enlarge - right_scl_need_size_c;
+
+	if ((s32)right_y_crop_total < 0)
+		right_y_crop_total = 0;
+	if ((s32)right_c_crop_total < 0)
+		right_c_crop_total = 0;
+
+	params->quad_crop_w = ALIGN_DOWN(min(right_y_crop_total, right_c_crop_total), 2);
+
+	params->scl_in_crop_w_y = right_y_crop_total - params->quad_crop_w;
+	params->scl_in_crop_w_c = right_c_crop_total - params->quad_crop_w;
+}
+
+static void calc_unite_scl_params(struct rkvpss_offline_dev *ofl, struct rkvpss_frame_cfg *cfg)
+{
+	struct rkvpss_unite_scl_params *params;
+	u32 right_scl_need_size_y, right_scl_need_size_c;
+	bool use_average;
+	bool is_downscale_w;
+	bool is_downscale_h;
+	bool is_downscale;
+	int i;
 
 	for (i = 0; i < RKVPSS_OUT_V20_MAX; i++) {
 		if (cfg->output[i].enable == 0)
 			continue;
+
 		params = &ofl->unite_params[i];
-		params->y_w_fac = (cfg->output[i].crop_width - 1) * 4096 /
-				  (cfg->output[i].scl_width  - 1);
-		params->c_w_fac = (cfg->output[i].crop_width / 2 - 1) * 4096 /
-				  (cfg->output[i].scl_width / 2 - 1);
-		params->y_h_fac = (cfg->output[i].crop_height - 1) * 4096 /
-				  (cfg->output[i].scl_height - 1);
-		params->c_h_fac = (cfg->output[i].crop_height - 1) * 4096 /
-				  (cfg->output[i].scl_height - 1);
 
-		right_fst_position_y = cfg->output[i].scl_width / 2 *
-				       params->y_w_fac;
-		right_fst_position_c = cfg->output[i].scl_width / 2 / 2 *
-				       params->c_w_fac;
+		is_downscale_w = cfg->output[i].scl_width < cfg->output[i].crop_width;
+		is_downscale_h = cfg->output[i].scl_height < cfg->output[i].crop_height;
+		is_downscale = is_downscale_w && is_downscale_h;
 
-		left_in_used_size_y = right_fst_position_y >> 12;
-		left_in_used_size_c = (right_fst_position_c >> 12) * 2;
+		use_average = (i == RKVPSS_OUTPUT_CH0 || i == RKVPSS_OUTPUT_CH2)
+			      && is_downscale && cfg->output[i].avg_scl_down;
 
-		params->y_w_phase = right_fst_position_y & 0xfff;
-		params->c_w_phase = right_fst_position_c & 0xfff;
-
-		right_scl_need_size_y = cfg->output[i].crop_width -
-					left_in_used_size_y;
-		params->right_scl_need_size_y = right_scl_need_size_y;
-		right_scl_need_size_c = cfg->output[i].crop_width -
-					left_in_used_size_c;
-		params->right_scl_need_size_c = right_scl_need_size_c;
-
-		if (i == 0 && cfg->output[i].crop_width != cfg->output[i].scl_width) {
-			right_y_crop_total = cfg->output[i].crop_width / 2 +
-					     ofl->unite_right_enlarge -
-					     right_scl_need_size_y - 3;
-			right_c_crop_total = cfg->output[i].crop_width / 2 +
-					     ofl->unite_right_enlarge -
-					     right_scl_need_size_c - 6;
-		} else {
-			right_y_crop_total = cfg->output[i].crop_width / 2 +
-					     ofl->unite_right_enlarge -
-					     right_scl_need_size_y;
-			right_c_crop_total = cfg->output[i].crop_width / 2 +
-					     ofl->unite_right_enlarge -
-					     right_scl_need_size_c;
+		/* Warn if user configured average but it cannot be used in unite mode */
+		if ((i == RKVPSS_OUTPUT_CH0 || i == RKVPSS_OUTPUT_CH2) &&
+		    cfg->output[i].avg_scl_down && !is_downscale) {
+			v4l2_info(&ofl->v4l2_dev,
+				 "%s CH%d: avg_scl_down configured but not downscaling, using bilinear instead (unite mode)\n",
+				 __func__, i);
 		}
 
-		params->quad_crop_w = ALIGN_DOWN(min(right_y_crop_total, right_c_crop_total), 2);
+		if (use_average)
+			calc_unite_scl_params_avg(ofl, &cfg->output[i], params,
+						 &right_scl_need_size_y, &right_scl_need_size_c);
+		else
+			calc_unite_scl_params_bilinear(ofl, &cfg->output[i], params,
+						       &right_scl_need_size_y, &right_scl_need_size_c);
 
-		params->scl_in_crop_w_y = right_y_crop_total - params->quad_crop_w;
-		params->scl_in_crop_w_c = right_c_crop_total - params->quad_crop_w;
+		calc_unite_crop_params(ofl, &cfg->output[i], params,
+				      right_scl_need_size_y, right_scl_need_size_c, use_average);
 
-		if (rkvpss_debug >= 4) {
-			v4l2_info(&ofl->v4l2_dev,
-				  "%s dev_id:%d seq:%d ch:%d y_w_fac:%u c_w_fac:%u y_h_fac:%u c_h_fac:%u\n",
-				  __func__, cfg->dev_id, cfg->sequence, i, params->y_w_fac,
-				  params->c_w_fac, params->y_h_fac, params->c_h_fac);
-			v4l2_info(&ofl->v4l2_dev,
-				  "\t\t\t\t\t\t unite_right_enlarge:%u",
-				  ofl->unite_right_enlarge);
-			v4l2_info(&ofl->v4l2_dev,
-				  "\t\t\t\t\t\t y_w_phase:%u c_w_phase:%u quad_crop_w:%u scl_in_crop_w_y:%u scl_in_crop_w_c:%u\n",
-				  params->y_w_phase, params->c_w_phase,
-				  params->quad_crop_w,
-				  params->scl_in_crop_w_y, params->scl_in_crop_w_c);
-			v4l2_info(&ofl->v4l2_dev,
-				  "\t\t\t\t\t\t right_scl_need_size_y:%u right_scl_need_size_c:%u\n",
-				  params->right_scl_need_size_y,
-				  params->right_scl_need_size_c);
-		}
+		v4l2_dbg(4, rkvpss_debug, &ofl->v4l2_dev,
+			  "%s dev_id:%d seq:%d ch:%d y_w_fac:%d c_w_fac:%d y_h_fac:%d c_h_fac:%d\n",
+			  __func__, cfg->dev_id, cfg->sequence, i,
+			  params->y_w_fac, params->c_w_fac, params->y_h_fac, params->c_h_fac);
+		v4l2_dbg(4, rkvpss_debug, &ofl->v4l2_dev,
+			  "\t\t\t\t\t unite_right_enlarge:%d\n",
+			  ofl->unite_right_enlarge);
+		v4l2_dbg(4, rkvpss_debug, &ofl->v4l2_dev,
+			  "\t\t\t\t\t y_w_phase:%d c_w_phase:%d quad_crop_w:%d scl_in_crop_w_y:%d scl_in_crop_w_c:%d\n",
+			  params->y_w_phase, params->c_w_phase, params->quad_crop_w,
+			  params->scl_in_crop_w_y, params->scl_in_crop_w_c);
+		v4l2_dbg(4, rkvpss_debug, &ofl->v4l2_dev,
+			  "\t\t\t\t\t right_scl_need_size_y:%d right_scl_need_size_c:%d\n",
+			  params->right_scl_need_size_y, params->right_scl_need_size_c);
 	}
 }
 
@@ -1747,11 +1936,13 @@ static int rkvpss_ofl_run(struct rkvpss_offline_dev *ofl,
 		add_cfginfo(ofl, cfg);
 
 	init_completion(&ofl->cmpl);
-	ofl->mode_sel_en = false;
 
 	ret = read_config(ofl, file_id, cfg, unite, left);
-	if (ret < 0)
+	if (ret < 0) {
+		v4l2_err(&ofl->v4l2_dev,
+			 "%s read_config failed, ret=%d\n", __func__, ret);
 		return ret;
+	}
 
 	if (unite && left)
 		calc_unite_scl_params(ofl, cfg);
@@ -1762,16 +1953,22 @@ static int rkvpss_ofl_run(struct rkvpss_offline_dev *ofl,
 		left_tmp = left;
 
 	ret = cmsc_config(ofl, cfg, unite, left_tmp);
-	if (ret)
+	if (ret) {
+		v4l2_err(&ofl->v4l2_dev,
+			 "%s cmsc_config failed, ret=%d\n", __func__, ret);
 		return ret;
+	}
 
 	crop_config(ofl, cfg, unite, left_tmp);
 	scale_config(ofl, cfg, unite, left_tmp);
 	if (!unite)
 		aspt_config(ofl, cfg);
 	ret = write_config(ofl, file_id, cfg, unite, left_tmp);
-	if (ret < 0)
+	if (ret < 0) {
+		v4l2_err(&ofl->v4l2_dev,
+			 "%s write_config failed, ret=%d\n", __func__, ret);
 		return ret;
+	}
 
 	mask = 0;
 	val = 0;
@@ -1871,13 +2068,11 @@ int rkvpss_module_sel(struct rkvpss_offline_dev *ofl,
 	struct rkvpss_device *vpss;
 	int i, ret = 0;
 
-	mutex_lock(&hw->dev_lock);
+	v4l2_dbg(3, rkvpss_debug, &ofl->v4l2_dev,
+		 "%s mirror_cmsc_en=%d\n",
+		 __func__, sel->mirror_cmsc_en);
 
-	if (!ofl->mode_sel_en) {
-		v4l2_err(&ofl->v4l2_dev, "already set module_sel\n");
-		ret = -EINVAL;
-		goto unlock;
-	}
+	mutex_lock(&hw->dev_lock);
 
 	for (i = 0; i < hw->dev_num; i++) {
 		vpss = hw->vpss[i];
@@ -1891,6 +2086,11 @@ int rkvpss_module_sel(struct rkvpss_offline_dev *ofl,
 	hw->is_ofl_cmsc = !!sel->mirror_cmsc_en;
 	for (i = 0; i < RKVPSS_OUT_V20_MAX; i++)
 		hw->is_ofl_ch[i] = !!sel->ch_en[i];
+
+	v4l2_dbg(3, rkvpss_debug, &ofl->v4l2_dev,
+		 "%s result: is_ofl_cmsc=%d\n",
+		 __func__, hw->is_ofl_cmsc);
+
 unlock:
 	mutex_unlock(&hw->dev_lock);
 	return ret;
@@ -1911,12 +2111,6 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 		ret = -EINVAL;
 		goto end;
 	}
-
-	/* set unite mode */
-	if (cfg->input.width > RKVPSS_MAX_WIDTH_V20)
-		*unite = true;
-	else
-		*unite = false;
 
 	/* check input format */
 	switch (cfg->input.format) {
@@ -1961,6 +2155,48 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 		goto end;
 	}
 
+	/* check input format alignment */
+	if (cfg->input.format == V4L2_PIX_FMT_FBC0 ||
+	    cfg->input.format == V4L2_PIX_FMT_FBC2 ||
+	    cfg->input.format == V4L2_PIX_FMT_FBC4) {
+		if (!IS_ALIGNED(cfg->input.width, 64)) {
+			v4l2_err(&ofl->v4l2_dev,
+				 "dev_id:%d fbc input width %d is not 64 aligned\n",
+				 cfg->dev_id, cfg->input.width);
+			ret = -EINVAL;
+			goto end;
+		}
+		if (!IS_ALIGNED(cfg->input.height, 4)) {
+			v4l2_err(&ofl->v4l2_dev,
+				 "dev_id:%d fbc input height %d is not 4 aligned\n",
+				 cfg->dev_id, cfg->input.height);
+			ret = -EINVAL;
+			goto end;
+		}
+	} else {
+		if (!IS_ALIGNED(cfg->input.stride, 4)) {
+			v4l2_err(&ofl->v4l2_dev,
+				 "dev_id:%d input stride %d is not 4-byte aligned\n",
+				 cfg->dev_id, cfg->input.stride);
+			ret = -EINVAL;
+			goto end;
+		}
+	}
+
+	*unite = false;
+	if (cfg->input.width > RKVPSS_MAX_WIDTH_V20) {
+		*unite = true;
+	} else {
+		for (i = 0; i < RKVPSS_OUT_V20_MAX; i++) {
+			if (!cfg->output[i].enable)
+				continue;
+			if (cfg->output[i].scl_width > RKVPSS_MAX_WIDTH_V20) {
+				*unite = true;
+				break;
+			}
+		}
+	}
+
 	for (i = 0; i < RKVPSS_OUT_V20_MAX; i++) {
 		if (!cfg->output[i].enable)
 			continue;
@@ -1979,19 +2215,22 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 			if (i == RKVPSS_OUTPUT_CH0 || i == RKVPSS_OUTPUT_CH1) {
 				tile_num++;
 				if (tile_num > 1) {
-					v4l2_err(&ofl->v4l2_dev, "dev_id:%d only ch0 or ch1 can tile write\n",
+					v4l2_err(&ofl->v4l2_dev,
+						"dev_id:%d only ch0 or ch1 can tile write\n",
 						 cfg->dev_id);
 					ret = -EINVAL;
 					goto end;
 				}
 				if (cfg->output[i].flip) {
-					v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch:%d tile write no support flip\n",
+					v4l2_err(&ofl->v4l2_dev,
+						"dev_id:%d ch:%d tile write no support flip\n",
 						 cfg->dev_id, i);
 					ret = -EINVAL;
 					goto end;
 				}
 			} else {
-				v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch:%d no support output format:%c%c%c%c\n",
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch:%d no support output format:%c%c%c%c\n",
 					 cfg->dev_id, i, cfg->output[i].format,
 					 cfg->output[i].format >> 8,
 					 cfg->output[i].format >> 16, cfg->output[i].format >> 24);
@@ -2006,7 +2245,8 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 		case V4L2_PIX_FMT_XBGR32:
 		case V4L2_PIX_FMT_XRGB32:
 			if (i != RKVPSS_OUTPUT_CH1) {
-				v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch:%d no support output format:%c%c%c%c\n",
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch:%d no support output format:%c%c%c%c\n",
 					 cfg->dev_id, i, cfg->output[i].format,
 					 cfg->output[i].format >> 8,
 					 cfg->output[i].format >> 16, cfg->output[i].format >> 24);
@@ -2018,12 +2258,41 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 		case V4L2_PIX_FMT_FBC2:
 			break;
 		default:
-			v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch:%d no support output format:%c%c%c%c\n",
+			v4l2_err(&ofl->v4l2_dev,
+				"dev_id:%d ch:%d no support output format:%c%c%c%c\n",
 				 cfg->dev_id, i, cfg->output[i].format,
 				 cfg->output[i].format >> 8,
 				 cfg->output[i].format >> 16, cfg->output[i].format >> 24);
 			ret = -EINVAL;
 			goto end;
+		}
+
+		/* check output format alignment */
+		if (cfg->output[i].format == V4L2_PIX_FMT_FBC0 ||
+		    cfg->output[i].format == V4L2_PIX_FMT_FBC2 ||
+		    cfg->output[i].format == V4L2_PIX_FMT_FBC4) {
+			if (!IS_ALIGNED(cfg->input.width, 64)) {
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch:%d fbc output width %d is not 64 aligned\n",
+					cfg->dev_id, i, cfg->input.width);
+				ret = -EINVAL;
+				goto end;
+			}
+			if (!IS_ALIGNED(cfg->input.height, 4)) {
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch:%d fbc output height %d is not 4 aligned\n",
+					cfg->dev_id, i, cfg->input.height);
+				ret = -EINVAL;
+				goto end;
+			}
+		} else {
+			if (!IS_ALIGNED(cfg->output[i].stride, 4)) {
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch:%d output stride %d is not 4-byte aligned\n",
+					cfg->dev_id, i, cfg->output[i].stride);
+				ret = -EINVAL;
+				goto end;
+			}
 		}
 
 		/* check output size */
@@ -2038,8 +2307,17 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 			out_height > RKVPSS_UNITE_MAX_HEIGHT ||
 			out_width < RKVPSS_MIN_WIDTH ||
 			out_height < RKVPSS_MIN_HEIGHT) {
-			v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch:%d output size not support width:%d height:%d\n",
-				 cfg->dev_id, i, out_width, out_height);
+			v4l2_err(&ofl->v4l2_dev,
+				"dev_id:%d ch:%d output size not support width:%d height:%d\n",
+				cfg->dev_id, i, out_width, out_height);
+			ret = -EINVAL;
+			goto end;
+		}
+
+		if ((out_width % 4) != 0) {
+			v4l2_err(&ofl->v4l2_dev,
+				"dev_id:%d ch:%d output width:%d must be 4-byte aligned\n",
+				cfg->dev_id, i, out_width);
 			ret = -EINVAL;
 			goto end;
 		}
@@ -2050,41 +2328,46 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 		cfg->output[i].crop_width = ALIGN(cfg->output[i].crop_width, 2);
 		cfg->output[i].crop_height = ALIGN(cfg->output[i].crop_height, 2);
 		if (cfg->output[i].crop_width == 0 || cfg->output[i].crop_height == 0)
-			v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch%d crop output width:%d height:%d can't be zero\n",
-				 cfg->dev_id, i,
-				 cfg->output[i].crop_width, cfg->output[i].crop_height);
+			v4l2_err(&ofl->v4l2_dev,
+				"dev_id:%d ch%d crop output width:%d height:%d can't be zero\n",
+				cfg->dev_id, i,
+				cfg->output[i].crop_width, cfg->output[i].crop_height);
 		if ((!cfg->input.rotate || cfg->input.rotate == 2)
 		     && !cfg->input.rotate_90) {
 			if (cfg->output[i].crop_width + cfg->output[i].crop_h_offs >
 			    cfg->input.width) {
-				v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch%d inval crop(offs:%d w:%d) input width:%d\n",
-					 cfg->dev_id, i, cfg->output[i].crop_h_offs,
-					 cfg->output[i].crop_width, cfg->input.width);
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch%d inval crop(offs:%d w:%d) input width:%d\n",
+					cfg->dev_id, i, cfg->output[i].crop_h_offs,
+					cfg->output[i].crop_width, cfg->input.width);
 				ret = -EINVAL;
 				goto end;
 			}
 			if (cfg->output[i].crop_height + cfg->output[i].crop_v_offs >
 			    cfg->input.height) {
-				v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch%d inval crop(offs:%d h:%d) input height:%d\n",
-					 cfg->dev_id, i, cfg->output[i].crop_v_offs,
-					 cfg->output[i].crop_height, cfg->input.height);
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch%d inval crop(offs:%d h:%d) input height:%d\n",
+					cfg->dev_id, i, cfg->output[i].crop_v_offs,
+					cfg->output[i].crop_height, cfg->input.height);
 				ret = -EINVAL;
 				goto end;
 			}
 		} else {
 			if (cfg->output[i].crop_width + cfg->output[i].crop_h_offs >
 			    cfg->input.height) {
-				v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch%d rotate inval crop(offs:%d w:%d) input height:%d\n",
-					 cfg->dev_id, i, cfg->output[i].crop_h_offs,
-					 cfg->output[i].crop_width, cfg->input.height);
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch%d inval crop(offs:%d w:%d) input height:%d\n",
+					cfg->dev_id, i, cfg->output[i].crop_h_offs,
+					cfg->output[i].crop_width, cfg->input.height);
 				ret = -EINVAL;
 				goto end;
 			}
 			if (cfg->output[i].crop_height + cfg->output[i].crop_v_offs >
 			    cfg->input.width) {
-				v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch%d rotate inval crop(offs:%d h:%d) input width:%d\n",
-					 cfg->dev_id, i, cfg->output[i].crop_v_offs,
-					 cfg->output[i].crop_height, cfg->input.width);
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch%d inval crop(offs:%d h:%d) input width:%d\n",
+					cfg->dev_id, i, cfg->output[i].crop_v_offs,
+					cfg->output[i].crop_height, cfg->input.width);
 				ret = -EINVAL;
 				goto end;
 			}
@@ -2093,7 +2376,8 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 			if (cfg->output[i].crop_h_offs != (cfg->input.width -
 							   (cfg->output[i].crop_h_offs +
 							   cfg->output[i].crop_width))) {
-				v4l2_err(&ofl->v4l2_dev, " dev_id:%d ch%d unite crop_v need centered crop(h_offs:%d w:%d) input width:%d\n",
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch%d unite crop_v need centered crop(h_offs:%d w:%d) input width:%d\n",
 					 cfg->dev_id, i, cfg->output[i].crop_h_offs,
 					 cfg->output[i].crop_width, cfg->input.width);
 				ret = -EINVAL;
@@ -2124,8 +2408,9 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 				cfg->output[i].crop_height != cfg->output[i].scl_height) {
 				if ((!*unite && cfg->output[i].scl_width > 1920) ||
 				    (*unite && cfg->output[i].scl_width > 1920 * 2)) {
-					v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch%d single scale max width 1920\n",
-						 cfg->dev_id, i);
+					v4l2_err(&ofl->v4l2_dev,
+						"dev_id:%d ch%d single scale max width 1920\n",
+						cfg->dev_id, i);
 					ret = -EINVAL;
 					goto end;
 				}
@@ -2140,10 +2425,11 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 	case ROTATE_270:
 		if (cfg->input.format != V4L2_PIX_FMT_TILE420 &&
 		    cfg->input.format != V4L2_PIX_FMT_TILE422) {
-			v4l2_err(&ofl->v4l2_dev, "dev_id:%d input format:%c%c%c%c not support rotate\n",
-				 cfg->dev_id, cfg->input.format,
-				 cfg->input.format >> 8,
-				 cfg->input.format >> 16, cfg->input.format >> 24);
+			v4l2_err(&ofl->v4l2_dev,
+				"dev_id:%d input format:%c%c%c%c not support rotate\n",
+				cfg->dev_id, cfg->input.format,
+				cfg->input.format >> 8,
+				cfg->input.format >> 16, cfg->input.format >> 24);
 			ret = -EINVAL;
 			goto end;
 		}
@@ -2193,10 +2479,11 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 			case V4L2_PIX_FMT_BGR24:
 			case V4L2_PIX_FMT_XBGR32:
 			case V4L2_PIX_FMT_XRGB32:
-				v4l2_err(&ofl->v4l2_dev, "dev_id:%d ch:%d wrap no support output format:%c%c%c%c\n",
-					 cfg->dev_id, i, output->format,
-					 output->format >> 8,
-					 output->format >> 16, output->format >> 24);
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d ch:%d wrap no support output format:%c%c%c%c\n",
+					cfg->dev_id, i, output->format,
+					output->format >> 8,
+					output->format >> 16, output->format >> 24);
 				ret = -EINVAL;
 				break;
 			default:
@@ -2212,10 +2499,11 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 		    cfg->input.format == V4L2_PIX_FMT_FBC4 ||
 		    cfg->input.format == V4L2_PIX_FMT_TILE420 ||
 		    cfg->input.format == V4L2_PIX_FMT_TILE422) {
-			v4l2_err(&ofl->v4l2_dev, "dev_id:%d unite no support input this format:%c%c%c%c\n",
-					 cfg->dev_id, cfg->input.format,
-					 cfg->input.format >> 8,
-					 cfg->input.format >> 16, cfg->input.format >> 24);
+			v4l2_err(&ofl->v4l2_dev,
+				"dev_id:%d unite no support input this format:%c%c%c%c\n",
+				cfg->dev_id, cfg->input.format,
+				cfg->input.format >> 8,
+				cfg->input.format >> 16, cfg->input.format >> 24);
 			ret = -EINVAL;
 			goto end;
 		}
@@ -2226,19 +2514,15 @@ int rkvpss_check_params(struct rkvpss_offline_dev *ofl,
 			    cfg->output[i].format != V4L2_PIX_FMT_NV16 &&
 			    cfg->output[i].format != V4L2_PIX_FMT_NV21 &&
 			    cfg->output[i].format != V4L2_PIX_FMT_NV61) {
-				v4l2_err(&ofl->v4l2_dev, "dev_id:%d unite no support output this format:%c%c%c%c\n",
-					 cfg->dev_id, cfg->output[i].format,
-					 cfg->output[i].format >> 8,
-					 cfg->output[i].format >> 16, cfg->output[i].format >> 24);
+				v4l2_err(&ofl->v4l2_dev,
+					"dev_id:%d unite no support output this format:%c%c%c%c\n",
+					cfg->dev_id, cfg->output[i].format,
+					cfg->output[i].format >> 8,
+					cfg->output[i].format >> 16, cfg->output[i].format >> 24);
 				ret = -EINVAL;
 				goto end;
 			}
-			if (cfg->output[i].scl_width > cfg->input.width) {
-				v4l2_err(&ofl->v4l2_dev, "dev_id:%d unite horizontal no support scale up\n",
-					 cfg->dev_id);
-				ret = -EINVAL;
-				goto end;
-			}
+
 			if (cfg->output[i].aspt.enable) {
 				v4l2_err(&ofl->v4l2_dev, "dev_id:%d unite no support aspt\n",
 					 cfg->dev_id);
@@ -2378,14 +2662,14 @@ end:
 static int ofl_get_file_id(struct rkvpss_offline_dev *ofl,
 			   struct file *file)
 {
-	void *idr_entity_temp;
+	void *idr_entity;
 	int file_id = 0;
 	bool in_idr = false;
 	int ret;
 
 	mutex_lock(&ofl->idr_lock);
-	idr_for_each_entry(&ofl->file_idr, idr_entity_temp, file_id) {
-		if ((void *)file == idr_entity_temp) {
+	idr_for_each_entry(&ofl->file_idr, idr_entity, file_id) {
+		if (idr_entity == (void *)file) {
 			in_idr = true;
 			break;
 		}
@@ -2500,6 +2784,9 @@ long rkvpss_ofl_action(struct rkvpss_offline_dev *ofl,
 	case RKVPSS_CMD_BUF_DEL:
 		rkvpss_ofl_buf_del(ofl, file_id, arg);
 		break;
+	case RKVPSS_CMD_BUF_DEL_BY_FILE:
+		rkvpss_ofl_buf_del_by_file(ofl, file_id);
+		break;
 	case RKVPSS_CMD_CHECKPARAMS:
 		ret = rkvpss_check_params(ofl, arg, &unite);
 		break;
@@ -2531,9 +2818,15 @@ static long rkvpss_ofl_ioctl(struct file *file, void *fh,
 	long ret = 0;
 	int file_id = 0;
 
-	if (!arg) {
-		ret = -EINVAL;
-		goto out;
+	switch (cmd) {
+	case RKVPSS_CMD_BUF_DEL_BY_FILE:
+		break;
+	default:
+		if (!arg) {
+			ret = -EINVAL;
+			goto out;
+		}
+		break;
 	}
 
 	file_id = ofl_get_file_id(ofl, file);
@@ -2559,20 +2852,25 @@ static const struct v4l2_ioctl_ops offline_ioctl_ops = {
 
 int rkvpss_ofl_add_file_id(struct rkvpss_offline_dev *ofl, void *idr_entity)
 {
-	void *idr_entity_temp;
+	void *idr_entity_tmp;
 	int idr_id = 0, ret = 0;
 	bool in_idr = false;
 
 	mutex_lock(&ofl->idr_lock);
 
-	idr_for_each_entry(&ofl->file_idr, idr_entity_temp, idr_id) {
-		if (idr_entity == idr_entity_temp) {
+	idr_for_each_entry(&ofl->file_idr, idr_entity_tmp, idr_id) {
+		if (idr_entity_tmp == idr_entity) {
 			in_idr = true;
 			break;
 		}
 	}
-	if (!in_idr)
+	if (!in_idr) {
 		ret = idr_alloc(&ofl->file_idr, idr_entity, 1, 0, GFP_KERNEL);
+		if (ret > 0) {
+			v4l2_dbg(3, rkvpss_debug, &ofl->v4l2_dev,
+				 "%s new file_id=%d\n", __func__, ret);
+		}
+	}
 
 	mutex_unlock(&ofl->idr_lock);
 
@@ -2582,15 +2880,18 @@ int rkvpss_ofl_add_file_id(struct rkvpss_offline_dev *ofl, void *idr_entity)
 void *rkvpss_ofl_del_file_id(struct rkvpss_offline_dev *ofl, struct file *file)
 {
 	void *ret = NULL;
+	void *idr_entity;
 	int idr_id = 0;
 
-	idr_id = ofl_get_file_id(ofl, file);
-
 	mutex_lock(&ofl->idr_lock);
-
-	if (idr_id)
-		ret = idr_remove(&ofl->file_idr, idr_id);
-
+	idr_for_each_entry(&ofl->file_idr, idr_entity, idr_id) {
+		if (idr_entity == (void *)file) {
+			ret = idr_remove(&ofl->file_idr, idr_id);
+			v4l2_dbg(3, rkvpss_debug, &ofl->v4l2_dev,
+				 "%s file_id=%d\n", __func__, idr_id);
+			break;
+		}
+	}
 	mutex_unlock(&ofl->idr_lock);
 
 	return ret;
@@ -2611,12 +2912,23 @@ static int ofl_open(struct file *file)
 		goto end;
 
 	mutex_lock(&ofl->hw->dev_lock);
-	ret = pm_runtime_get_sync(ofl->hw->dev);
-	mutex_unlock(&ofl->hw->dev_lock);
-
+	ret = pm_runtime_resume_and_get(ofl->hw->dev);
 	if (ret < 0) {
+		mutex_unlock(&ofl->hw->dev_lock);
+		v4l2_dbg(1, rkvpss_debug, &ofl->v4l2_dev,
+			 "%s pm_runtime_resume_and_get failed, ret=%d\n",
+			 __func__, ret);
 		v4l2_fh_release(file);
 		goto end;
+	}
+	ofl->ref_cnt++;
+	v4l2_dbg(3, rkvpss_debug, &ofl->v4l2_dev,
+		 "%s ref_cnt=%d\n", __func__, ofl->ref_cnt);
+	mutex_unlock(&ofl->hw->dev_lock);
+
+	/* Set core clock frequency for offline mode after power domain is ready */
+	if (ofl->hw->dev_num > 0 && ofl->hw->vpss[0]) {
+		rkvpss_offline_set_core_clk(ofl, ofl->hw->vpss[0]);
 	}
 
 	ret = rkvpss_ofl_add_file_id(ofl, (void *)file);
@@ -2631,6 +2943,7 @@ end:
 static int ofl_release(struct file *file)
 {
 	struct rkvpss_offline_dev *ofl = video_drvdata(file);
+	struct rkvpss_hw_dev *hw = ofl->hw;
 	int ret = 0;
 	int file_id = 0;
 
@@ -2642,9 +2955,19 @@ static int ofl_release(struct file *file)
 	if (file_id)
 		buf_del(ofl, NULL, file_id, 0, 0, true, false);
 
-	mutex_lock(&ofl->hw->dev_lock);
-	pm_runtime_put_sync(ofl->hw->dev);
-	mutex_unlock(&ofl->hw->dev_lock);
+	mutex_lock(&hw->dev_lock);
+	ofl->ref_cnt--;
+	v4l2_dbg(3, rkvpss_debug, &ofl->v4l2_dev,
+		 "%s ref_cnt=%d\n", __func__, ofl->ref_cnt);
+	if (ofl->ref_cnt == 0) {
+		v4l2_dbg(2, rkvpss_debug, &ofl->v4l2_dev,
+			 "%s ref_cnt=0, clearing is_ofl_cmsc and is_ofl_ch\n",
+			 __func__);
+		hw->is_ofl_cmsc = false;
+		memset(hw->is_ofl_ch, 0, sizeof(hw->is_ofl_ch));
+	}
+	pm_runtime_put_sync(hw->dev);
+	mutex_unlock(&hw->dev_lock);
 
 	if (rkvpss_ofl_del_file_id(ofl, file) != (void *)file)
 		ret = -EINVAL;
@@ -2698,7 +3021,7 @@ int rkvpss_register_offline_v20(struct rkvpss_hw_dev *hw)
 
 	mutex_init(&ofl->apilock);
 	ofl->vfd = offline_videodev;
-	ofl->mode_sel_en = true;
+	ofl->ref_cnt = 0;
 	vfd = &ofl->vfd;
 	vfd->device_caps = V4L2_CAP_STREAMING;
 	vfd->v4l2_dev = v4l2_dev;

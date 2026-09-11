@@ -227,7 +227,7 @@ static void rk_crypto_complete(struct crypto_async_request *base, int err)
 	}
 
 	if (base->complete)
-		base->complete(base, err);
+		base->complete(COMPLETE_PARAM(base), err);
 }
 
 static int rk_cipher_crypt(struct skcipher_request *req, bool encrypt)
@@ -511,9 +511,8 @@ static int rk_aead_init_tfm(struct crypto_aead *tfm)
 					  CRYPTO_ALG_ASYNC |
 					  CRYPTO_ALG_NEED_FALLBACK);
 		if (IS_ERR(ctx->fallback_aead)) {
-			dev_err(rk_dev->dev,
-				"Load fallback driver %s err: %ld.\n",
-				alg_name, PTR_ERR(ctx->fallback_aead));
+			CRYPTO_MSG("Load fallback driver %s err: %ld.\n",
+				   alg_name, PTR_ERR(ctx->fallback_aead));
 			ctx->fallback_aead = NULL;
 			crypto_aead_set_reqsize(tfm, sizeof(struct aead_request));
 		} else {

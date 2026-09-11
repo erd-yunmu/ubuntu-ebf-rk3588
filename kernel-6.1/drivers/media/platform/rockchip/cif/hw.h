@@ -92,7 +92,7 @@ struct rkcif_dummy_buffer {
 	bool is_need_vaddr;
 	bool is_need_dbuf;
 	bool is_need_dmafd;
-	bool is_free;
+	bool is_allocated;
 };
 
 /*
@@ -167,6 +167,7 @@ struct rkcif_hw {
 	u64				irq_time;
 	bool				is_rk3588s2;
 	bool				is_in_reset;
+	bool				is_irq_share;
 };
 
 void rkcif_hw_soft_reset(struct rkcif_hw *cif_hw, bool is_rst_iommu);

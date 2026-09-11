@@ -2809,6 +2809,9 @@ static long imx415_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	u64 pixel_rate = 0;
 	struct rkmodule_csi_dphy_param *dphy_param;
 	u8 lanes = imx415->bus_cfg.bus.mipi_csi2.num_data_lanes;
+	struct rkmodule_exp_delay *exp_delay;
+	struct rkmodule_exp_info *exp_info;
+	int idx_max = 0;
 
 	switch (cmd) {
 	case PREISP_CMD_SET_HDRAE_EXP:
@@ -2912,6 +2915,30 @@ static long imx415_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		} else
 			ret = -EINVAL;
 		break;
+	case RKMODULE_GET_EXP_DELAY:
+		exp_delay = (struct rkmodule_exp_delay *)arg;
+		exp_delay->exp_delay = 2;
+		exp_delay->gain_delay = 2;
+		exp_delay->vts_delay = 1;
+		break;
+	case RKMODULE_GET_EXP_INFO:
+		exp_info = (struct rkmodule_exp_info *)arg;
+		if (imx415->cur_mode->hdr_mode == NO_HDR)
+			idx_max = 1;
+		else if (imx415->cur_mode->hdr_mode == HDR_X2)
+			idx_max = 2;
+		else
+			idx_max = 3;
+		for (i = 0; i < idx_max; i++) {
+			exp_info->exp[i] = imx415->cur_exposure[i];
+			exp_info->gain[i] = imx415->cur_gain[i];
+		}
+		exp_info->hts = imx415->cur_mode->hts_def;
+		exp_info->vts = imx415->cur_vts;
+		exp_info->pclk = imx415->pclk;
+		exp_info->gain_mode.gain_mode = RKMODULE_GAIN_MODE_DB;
+		exp_info->gain_mode.factor = 1000;
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -2934,6 +2961,8 @@ static long imx415_compat_ioctl32(struct v4l2_subdev *sd,
 	u32  stream;
 	u32 brl = 0;
 	struct rkmodule_csi_dphy_param *dphy_param;
+	struct rkmodule_exp_delay *exp_delay;
+	struct rkmodule_exp_info *exp_info;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
@@ -3051,6 +3080,36 @@ static long imx415_compat_ioctl32(struct v4l2_subdev *sd,
 				ret = -EFAULT;
 		}
 		kfree(dphy_param);
+		break;
+	case RKMODULE_GET_EXP_DELAY:
+		exp_delay = kzalloc(sizeof(*exp_delay), GFP_KERNEL);
+		if (!exp_delay) {
+			ret = -ENOMEM;
+			return ret;
+		}
+
+		ret = imx415_ioctl(sd, cmd, exp_delay);
+		if (!ret) {
+			ret = copy_to_user(up, exp_delay, sizeof(*exp_delay));
+			if (ret)
+				ret = -EFAULT;
+		}
+		kfree(exp_delay);
+		break;
+	case RKMODULE_GET_EXP_INFO:
+		exp_info = kzalloc(sizeof(*exp_info), GFP_KERNEL);
+		if (!exp_info) {
+			ret = -ENOMEM;
+			return ret;
+		}
+
+		ret = imx415_ioctl(sd, cmd, exp_info);
+		if (!ret) {
+			ret = copy_to_user(up, exp_info, sizeof(*exp_info));
+			if (ret)
+				ret = -EFAULT;
+		}
+		kfree(exp_info);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;

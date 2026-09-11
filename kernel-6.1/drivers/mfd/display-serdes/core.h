@@ -47,7 +47,7 @@
 #include <drm/drm_of.h>
 #include <drm/drm_connector.h>
 #include <drm/drm_probe_helper.h>
-#if (KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE)
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 #include <drm/display/drm_dp_helper.h>
 #else
 #include <drm/drm_dp_helper.h>
@@ -63,12 +63,17 @@
 #include <video/display_timing.h>
 #include <uapi/linux/media-bus-format.h>
 
+#include <linux/debugfs.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinconf-generic.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinmux.h>
-
+#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+#include <linux/unaligned.h>
+#else
 #include <asm/unaligned.h>
+#endif
 #include "gpio.h"
 
 #include "../../../../drivers/pinctrl/core.h"
@@ -108,11 +113,20 @@ enum serdes_debug_mode {
 	SERDES_CLOSE_I2C_WRITE,
 	SERDES_SET_SEQUENCE,
 	SERDES_SET_PINCTRL_SLEEP,
-	SERDES_SET_PINCTRL_DEFAULT,
+	SERDES_SET_PINCTRL_INIT,
 };
 
 #define MFD_SERDES_DISPLAY_VERSION "serdes-mfd-displaly-v11-241025"
 #define MAX_NUM_SERDES_SPLIT 8
+
+#define MAX_NUM_SERDES_SUPPLIES			4
+#define MAXIM_SERDES_REG_CHIP_ID		0x0D
+
+#define SERDES_FBD_CONFIG_FROM_NONE		0
+#define SERDES_FBD_CONFIG_FROM_UBOOT		1
+
+#define SERDES_CHECK_DEPTH			2
+#define SERDES_ATTACH_DEPTH			4
 
 struct serdes;
 enum ser_link_mode {
@@ -192,7 +206,8 @@ struct serdes_chip_split_ops {
 	int (*set_i2c_addr)(struct serdes *serdes, int address, int link);
 };
 
-struct serdes_check_reg_ops {
+struct serdes_check_state_ops {
+	int (*check_hw)(struct serdes *serdes);
 	int (*check_reg)(struct serdes *serdes);
 };
 
@@ -232,7 +247,7 @@ struct serdes_chip_data {
 	struct serdes_chip_pinctrl_ops *pinctrl_ops;
 	struct serdes_chip_gpio_ops *gpio_ops;
 	struct serdes_chip_split_ops *split_ops;
-	struct serdes_check_reg_ops *check_ops;
+	struct serdes_check_state_ops *check_ops;
 	struct serdes_chip_pm_ops *pm_ops;
 	struct serdes_chip_irq_ops *irq_ops;
 };
@@ -271,6 +286,7 @@ struct serdes_panel {
 	u32 link_rate;
 	u32 lane_count;
 	bool ssc;
+	u32 bus_format;
 
 	struct device *dev;
 	struct serdes *parent;
@@ -299,6 +315,7 @@ struct serdes_panel_split {
 	u32 link_rate;
 	u32 lane_count;
 	bool ssc;
+	u32 bus_format;
 
 	struct device *dev;
 	struct serdes *parent;
@@ -323,12 +340,12 @@ struct serdes_bridge {
 	atomic_t triggered;
 	struct drm_connector connector;
 	struct drm_panel *panel;
+	struct drm_panel *split_panel;
 
 	struct device *dev;
 	struct serdes *parent;
 	struct regmap *regmap;
 	struct mipi_dsi_device *dsi;
-	struct device_node *remote_node;
 	struct drm_display_mode mode;
 	struct backlight_device *backlight;
 
@@ -336,7 +353,9 @@ struct serdes_bridge {
 	bool dv_swp_ab;
 	bool dpi_deskew_en;
 	bool split_mode;
-	u32 num_lanes;
+	unsigned long flags;
+	enum mipi_dsi_pixel_format format;
+	u32 lanes;
 	u32 dsi_lane_map[4];
 };
 
@@ -352,14 +371,15 @@ struct serdes_bridge_split {
 	struct serdes *parent;
 	struct regmap *regmap;
 	struct mipi_dsi_device *dsi;
-	struct device_node *remote_node;
 	struct drm_display_mode mode;
 	struct backlight_device *backlight;
 
 	bool sel_mipi;
 	bool dv_swp_ab;
 	bool dpi_deskew_en;
-	u32 num_lanes;
+	unsigned long flags;
+	enum mipi_dsi_pixel_format format;
+	u32 lanes;
 	u32 dsi_lane_map[4];
 };
 
@@ -379,7 +399,9 @@ struct serdes {
 	/* serdes power and reset pin */
 	struct gpio_desc *reset_gpio;
 	struct gpio_desc *enable_gpio;
-	struct regulator *vpower;
+	int num_supplies;
+	struct regulator_bulk_data supplies[MAX_NUM_SERDES_SUPPLIES];
+	bool power_enabled;
 
 	/* serdes irq pin */
 	struct gpio_desc *lock_gpio;
@@ -428,6 +450,13 @@ struct serdes {
 	struct serdes_chip_data *chip_data;
 };
 
+struct serdes_route_entry {
+	struct list_head list;
+	struct device_node *prev_node;
+	struct device_node *node;
+	u32 fbd_mode;
+};
+
 /* Device I/O API */
 int serdes_reg_read(struct serdes *serdes, unsigned int reg, unsigned int *val);
 int serdes_reg_write(struct serdes *serdes, unsigned int reg, unsigned int val);
@@ -442,20 +471,24 @@ int serdes_multi_reg_write(struct serdes *serdes, const struct reg_sequence *reg
 int serdes_i2c_set_sequence(struct serdes *serdes);
 
 int serdes_device_init(struct serdes *serdes);
-int serdes_set_pinctrl_default(struct serdes *serdes);
+int serdes_set_pinctrl_init(struct serdes *serdes);
 int serdes_set_pinctrl_sleep(struct serdes *serdes);
 int serdes_device_suspend(struct serdes *serdes);
 int serdes_device_resume(struct serdes *serdes);
-void serdes_device_poweroff(struct serdes *serdes);
-int serdes_device_shutdown(struct serdes *serdes);
+int serdes_device_poweron(struct serdes *serdes);
+int serdes_device_poweroff(struct serdes *serdes);
+
 int serdes_irq_init(struct serdes *serdes);
-void serdes_irq_exit(struct serdes *serdes);
 
 void serdes_dev_dbg(enum serdes_log_category category, const char *format, ...);
 void serdes_debugfs_init(void);
 void serdes_debugfs_exit(void);
 void serdes_create_debugfs(struct serdes *serdes);
 void serdes_destroy_debugfs(struct serdes *serdes);
+int serdes_set_i2c_address(struct serdes *serdes, u32 reg_use, int link);
+void serdes_route_bind(const struct of_device_id *match);
+void serdes_route_unbind(void);
+int serdes_get_route_mode(struct device_node *node, u32 *mode);
 
 extern struct serdes_chip_data serdes_bu18tl82_data;
 extern struct serdes_chip_data serdes_bu18rl82_data;

@@ -11,6 +11,7 @@
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/pm_wakeup.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/usb/tcpci.h>
@@ -33,6 +34,7 @@ struct husb311_chip {
 	struct regulator *vbus;
 	struct mutex lock; /* lock for sharing chip states */
 	struct delayed_work pm_work;
+	struct wakeup_source *ws; /* keep wakeup during tcpm reset */
 	bool vbus_on;
 	bool charge_on;
 	bool suspended;
@@ -243,6 +245,11 @@ static int husb311_check_revision(struct i2c_client *i2c)
 	return 0;
 }
 
+static void husb311_wakeup_source_destroy(void *data)
+{
+	wakeup_source_unregister((struct wakeup_source *)(data));
+}
+
 static int husb311_probe(struct i2c_client *client,
 			 const struct i2c_device_id *i2c_id)
 {
@@ -269,6 +276,15 @@ static int husb311_probe(struct i2c_client *client,
 
 	mutex_init(&chip->lock);
 	INIT_DELAYED_WORK(&chip->pm_work, husb311_pm_work);
+
+	chip->ws = wakeup_source_register(chip->dev, "husb311");
+	if (!chip->ws)
+		return -ENOMEM;
+
+	ret = devm_add_action_or_reset(chip->dev, husb311_wakeup_source_destroy,
+				       chip->ws);
+	if (ret)
+		return ret;
 
 	chip->vbus = devm_regulator_get_optional(chip->dev, "vbus");
 	if (IS_ERR(chip->vbus)) {
@@ -331,10 +347,12 @@ static int husb311_pm_suspend(struct device *dev)
 	struct husb311_chip *chip = dev->driver_data;
 	struct i2c_client *client = to_i2c_client(dev);
 
-	if (device_may_wakeup(dev) && (!chip->vbus_on || chip->wakeup))
+	disable_irq(client->irq);
+
+	if (device_may_wakeup(dev) && (!chip->vbus_on || chip->wakeup)) {
+		dev_dbg(chip->dev, "enable irq wake\n");
 		enable_irq_wake(client->irq);
-	else
-		disable_irq(client->irq);
+	}
 
 	if (!chip->suspended) {
 		chip->suspended = 1;
@@ -390,10 +408,12 @@ static int husb311_pm_resume(struct device *dev)
 	int ret = 0;
 	u8 filter;
 
-	if (device_may_wakeup(dev) && (!chip->vbus_on || chip->wakeup))
+	if (device_may_wakeup(dev) && irqd_is_wakeup_set(irq_get_irq_data(client->irq))) {
+		dev_dbg(chip->dev, "disable irq wake\n");
 		disable_irq_wake(client->irq);
-	else
-		enable_irq(client->irq);
+	}
+
+	enable_irq(client->irq);
 
 	/*
 	 * When the power of husb311 is lost or i2c read failed in PM S/R
@@ -411,7 +431,9 @@ static int husb311_pm_resume(struct device *dev)
 			return ret;
 		}
 
+		dev_info(chip->dev, "Keep wakeup for 2 seconds during TCPM reset\n");
 		tcpm_tcpc_reset(tcpci_get_tcpm_port(chip->tcpci));
+		__pm_wakeup_event(chip->ws, 2000);
 	}
 
 	return 0;

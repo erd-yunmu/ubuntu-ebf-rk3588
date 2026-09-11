@@ -615,7 +615,7 @@ static const struct ov5647_mode ov5647_modes[] = {
 			.width		= 2560,
 			.height		= 1920,
 		},
-		.pixel_rate	= 55000000,
+		.pixel_rate	= 58333000,
 		.hts		= 1852,
 		.vts		= 0x1f8,
 		.link_freq_index = 3,
@@ -1437,6 +1437,8 @@ static int ov5647_init_controls(struct ov5647 *sensor, struct device *dev)
 
 	v4l2_ctrl_handler_init(&sensor->ctrls, 8);
 
+	sensor->ctrls.lock = &sensor->lock;
+
 	sensor->link_freq = v4l2_ctrl_new_int_menu(&sensor->ctrls, NULL, V4L2_CID_LINK_FREQ,
 				      ARRAY_SIZE(link_freq_menu_items) - 1, 0, link_freq_menu_items);
 
@@ -1598,14 +1600,14 @@ static int ov5647_probe(struct i2c_client *client,
 
 	sensor->mode = OV5647_DEFAULT_MODE;
 
-	ret = ov5647_init_controls(sensor, dev);
-	if (ret)
-		goto mutex_destroy;
-
 	sd = &sensor->sd;
 	v4l2_i2c_subdev_init(sd, client, &ov5647_subdev_ops);
 	sd->internal_ops = &ov5647_subdev_internal_ops;
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
+
+	ret = ov5647_init_controls(sensor, dev);
+	if (ret)
+		goto mutex_destroy;
 
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
 	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;

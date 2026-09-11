@@ -475,9 +475,7 @@ struct module {
 #endif
 #ifdef CONFIG_DEBUG_INFO_BTF_MODULES
 	unsigned int btf_data_size;
-	unsigned int btf_base_data_size;
 	void *btf_data;
-	void *btf_base_data;
 #endif
 #ifdef CONFIG_JUMP_LABEL
 	struct jump_entry *jump_entries;
@@ -536,6 +534,11 @@ struct module {
 	void (*exit)(void);
 
 	atomic_t refcnt;
+#endif
+
+#ifdef CONFIG_MITIGATION_ITS
+	int its_num_pages;
+	void **its_page_array;
 #endif
 
 #ifdef CONFIG_CONSTRUCTORS
@@ -652,6 +655,15 @@ static inline void __module_get(struct module *module)
 	struct module *__mod = (mod);		\
 	__mod ? __mod->name : "kernel";		\
 })
+
+static inline const unsigned char *module_buildid(struct module *mod)
+{
+#ifdef CONFIG_STACKTRACE_BUILD_ID
+	return mod->build_id;
+#else
+	return NULL;
+#endif
+}
 
 /* Dereference module function descriptor */
 void *dereference_module_function_descriptor(struct module *mod, void *ptr);

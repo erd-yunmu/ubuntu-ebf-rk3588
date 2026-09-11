@@ -8,6 +8,7 @@
 
 #include "rk3588-nvr-demo.dtsi"
 #include "rk3588-android.dtsi"
+#include "rk-stb-ir-keymap.dtsi"
 
 / {
 	model = "Rockchip RK3588 NVR DEMO LP4 V10 Android Board";
@@ -54,7 +55,7 @@
 	status = "disabled";
 };
 
-&hdptxphy_hdmi1 {
+&hdptxphy1 {
 	status = "disabled";
 };
 

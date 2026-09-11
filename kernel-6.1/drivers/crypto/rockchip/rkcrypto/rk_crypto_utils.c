@@ -185,6 +185,47 @@ exit:
 	return total > len ? len : total;
 }
 
+/**
+ * rk_crypto_sg_walk_nents - move sg cursor(s) forward by @nents entries
+ * @sg_src: in/out source scatterlist cursor
+ * @sg_dst: in/out destination (NULL for hash / src-only path)
+ * @nents: how many sg entries the previous dma segment covered (e.g. map_nents)
+ * @warn_on_lack: use dev_warn instead of dev_err on short chain
+ *
+ * After a multi-LLI DMA chunk, the next chunk starts at a later sg entry;
+ * this walks @nents links. When @sg_dst is NULL, only @sg_src is advanced.
+ */
+int rk_crypto_sg_walk_nents(struct scatterlist **sg_src, struct scatterlist **sg_dst,
+			    unsigned int nents, struct device *dev)
+{
+	unsigned int i;
+	struct scatterlist *src = *sg_src;
+	struct scatterlist *dst = sg_dst ? *sg_dst : NULL;
+
+	for (i = 0; i < nents; i++) {
+		if (sg_is_last(src)) {
+			dev_err(dev, "[%s:%d] Lack of data\n", __func__, __LINE__);
+			return -ENOMEM;
+		}
+		src = sg_next(src);
+
+		if (dst) {
+			if (sg_is_last(dst)) {
+				dev_err(dev, "[%s:%d] Lack of data\n", __func__, __LINE__);
+				return -ENOMEM;
+			}
+			dst = sg_next(dst);
+		}
+	}
+
+	*sg_src = src;
+
+	if (sg_dst)
+		*sg_dst = dst;
+
+	return 0;
+}
+
 int rk_crypto_hw_desc_alloc(struct device *dev, struct rk_hw_desc *hw_desc)
 {
 	u32 lli_cnt = RK_DEFAULT_LLI_CNT;
@@ -195,18 +236,20 @@ int rk_crypto_hw_desc_alloc(struct device *dev, struct rk_hw_desc *hw_desc)
 
 	memset(hw_desc, 0x00, sizeof(*hw_desc));
 
+	hw_desc->lli_ctr = dma_alloc_coherent(dev, sizeof(struct crypto_lli_desc),
+					      &hw_desc->lli_ctr_dma, GFP_KERNEL);
+	if (!hw_desc->lli_ctr)
+		return -ENOMEM;
+
 	hw_desc->lli_aad = dma_alloc_coherent(dev, sizeof(struct crypto_lli_desc),
 					      &hw_desc->lli_aad_dma, GFP_KERNEL);
 	if (!hw_desc->lli_aad)
-		return -ENOMEM;
+		goto err_free_ctr;
 
 	///TODO: cma
 	hw_desc->lli_head = dma_alloc_coherent(dev, lli_len, &hw_desc->lli_head_dma, GFP_KERNEL);
-	if (!hw_desc->lli_head) {
-		dma_free_coherent(dev, sizeof(struct crypto_lli_desc),
-				  hw_desc->lli_aad, hw_desc->lli_aad_dma);
-		return -ENOMEM;
-	}
+	if (!hw_desc->lli_head)
+		goto err_free_aad;
 
 	hw_desc->lli_tail = hw_desc->lli_head;
 	hw_desc->total    = lli_cnt;
@@ -219,6 +262,14 @@ int rk_crypto_hw_desc_alloc(struct device *dev, struct rk_hw_desc *hw_desc)
 		     (unsigned long)hw_desc->lli_head, (unsigned long)hw_desc->lli_head_dma);
 
 	return 0;
+
+err_free_aad:
+	dma_free_coherent(dev, sizeof(struct crypto_lli_desc),
+			  hw_desc->lli_aad, hw_desc->lli_aad_dma);
+err_free_ctr:
+	dma_free_coherent(dev, sizeof(struct crypto_lli_desc),
+			  hw_desc->lli_ctr, hw_desc->lli_ctr_dma);
+	return -ENOMEM;
 }
 
 void rk_crypto_hw_desc_free(struct rk_hw_desc *hw_desc)
@@ -230,6 +281,9 @@ void rk_crypto_hw_desc_free(struct rk_hw_desc *hw_desc)
 		     (unsigned long)hw_desc->dev,
 		     (unsigned long)hw_desc->total * sizeof(struct crypto_lli_desc),
 		     (unsigned long)hw_desc->lli_head, (unsigned long)hw_desc->lli_head_dma);
+
+	dma_free_coherent(hw_desc->dev, sizeof(struct crypto_lli_desc),
+			  hw_desc->lli_ctr, hw_desc->lli_ctr_dma);
 
 	dma_free_coherent(hw_desc->dev, sizeof(struct crypto_lli_desc),
 			  hw_desc->lli_aad, hw_desc->lli_aad_dma);

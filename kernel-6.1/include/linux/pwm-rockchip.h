@@ -51,6 +51,16 @@ enum rockchip_pwm_counter_input_sel {
 };
 
 /**
+ * enum rockchip_pwm_counter_mode - mode of counter
+ * @PWM_COUNTER_CONTINUOUS: get counter result while the input wave is running
+ * @PWM_COUNTER_DISCONTINUOUS: get raw counter result after the input wave stops
+ */
+enum rockchip_pwm_counter_mode {
+	PWM_COUNTER_CONTINUOUS,
+	PWM_COUNTER_DISCONTINUOUS,
+};
+
+/**
  * enum rockchip_pwm_freq_meter_input_sel - select the input src of frequency meter
  * @PWM_FREQ_METER_INPUT_FROM_IO: input from PWM IO
  * @PWM_FREQ_METER_INPUT_FROM_CRU: input from CRU
@@ -176,12 +186,15 @@ struct rockchip_pwm_biphasic_config {
 /**
  * rockchip_pwm_set_counter() - setup pwm counter mode
  * @pwm: PWM device
+ * @input_sel: select the input of counter
+ * @mode: select the mode of counter
  * @enable: enable/disable counter mode
  *
  * Returns: 0 on success or a negative error code on failure.
  */
 int rockchip_pwm_set_counter(struct pwm_device *pwm,
 			     enum rockchip_pwm_counter_input_sel input_sel,
+			     enum rockchip_pwm_counter_mode mode,
 			     bool enable);
 
 /**
@@ -241,6 +254,13 @@ int rockchip_pwm_set_biphasic(struct pwm_device *pwm, struct rockchip_pwm_biphas
  * @biphasic_res: biphasic counter result
  */
 int rockchip_pwm_get_biphasic_result(struct pwm_device *pwm, unsigned long *biphasic_res);
+
+/**
+ * rockchip_pwm_set_filter() - setup filter configuration
+ * @pwm: PWM device
+ * @filter_window_ns: filter window time in nanosecond
+ */
+int rockchip_pwm_set_filter(struct pwm_device *pwm, u64 filter_window_ns);
 #else
 static inline int rockchip_pwm_set_counter(struct pwm_device *pwm,
 					   enum rockchip_pwm_counter_input_sel input_sel,
@@ -283,6 +303,11 @@ static inline int rockchip_pwm_set_biphasic(struct pwm_device *pwm,
 
 static inline int rockchip_pwm_get_biphasic_result(struct pwm_device *pwm,
 						   unsigned long *biphasic_res)
+{
+	return 0;
+}
+
+static inline int rockchip_pwm_set_filter(struct pwm_device *pwm, u64 filter_window_ns)
 {
 	return 0;
 }

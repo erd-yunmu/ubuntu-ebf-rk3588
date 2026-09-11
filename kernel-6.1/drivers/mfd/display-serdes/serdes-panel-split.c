@@ -29,9 +29,6 @@ static int serdes_panel_split_prepare(struct drm_panel *panel)
 	if (serdes->chip_data->panel_ops && serdes->chip_data->panel_ops->prepare)
 		ret = serdes->chip_data->panel_ops->prepare(serdes);
 
-	serdes_set_pinctrl_sleep(serdes);
-	serdes_set_pinctrl_default(serdes);
-
 	SERDES_DBG_MFD("%s: %s\n", __func__, serdes->chip_data->name);
 
 	return ret;
@@ -58,6 +55,9 @@ static int serdes_panel_split_enable(struct drm_panel *panel)
 	struct serdes_panel_split *serdes_panel_split = to_serdes_panel_split(panel);
 	struct serdes *serdes = serdes_panel_split->parent;
 	int ret = 0;
+
+	serdes_set_pinctrl_sleep(serdes);
+	serdes_set_pinctrl_init(serdes);
 
 	if (serdes->chip_data->panel_ops && serdes->chip_data->panel_ops->enable)
 		ret = serdes->chip_data->panel_ops->enable(serdes);
@@ -91,7 +91,7 @@ static int serdes_panel_split_get_modes(struct drm_panel *panel,
 	struct serdes_panel_split *serdes_panel_split = to_serdes_panel_split(panel);
 	struct serdes *serdes = serdes_panel_split->parent;
 	struct drm_display_mode *mode;
-	u32 bus_format = MEDIA_BUS_FMT_RGB888_1X24;
+	u32 bus_format = serdes_panel_split->bus_format;
 	int ret = 1;
 
 	connector->display_info.width_mm = serdes_panel_split->width_mm;	//323; //346;
@@ -140,10 +140,9 @@ static int serdes_panel_split_parse_dt(struct serdes_panel_split *serdes_panel_s
 	struct display_timing dt;
 	struct videomode vm;
 	int ret, len;
+	unsigned int val = 0;
 	unsigned int panel_size[2] = {320, 180};
-	unsigned int link_rate_count_ssc[3] = {DP_LINK_BW_2_7, 4, 0};
-
-	//pr_info("%s: node=%s\n", __func__, dev->of_node->name);
+	unsigned int link_rate_count_ssc[3] = {0};
 
 	serdes_panel_split->width_mm = panel_size[0];
 	serdes_panel_split->height_mm = panel_size[1];
@@ -157,6 +156,11 @@ static int serdes_panel_split_parse_dt(struct serdes_panel_split *serdes_panel_s
 			serdes_panel_split->height_mm = panel_size[1];
 		}
 	}
+
+	if (!of_property_read_u32(dev->of_node, "bus-format", &val))
+		serdes_panel_split->bus_format = val;
+	else
+		serdes_panel_split->bus_format = MEDIA_BUS_FMT_RGB888_1X24;
 
 	if (of_find_property(dev->of_node, "rate-count-ssc", &len)) {
 		len /= sizeof(unsigned int);
@@ -262,7 +266,7 @@ static struct platform_driver serdes_panel_split_driver = {
 		.of_match_table = of_match_ptr(serdes_panel_split_of_match),
 	},
 	.probe = serdes_panel_split_probe,
-	.remove = serdes_panel_split_remove,
+	.remove = (void *)serdes_panel_split_remove,
 };
 
 static int __init serdes_panel_split_init(void)

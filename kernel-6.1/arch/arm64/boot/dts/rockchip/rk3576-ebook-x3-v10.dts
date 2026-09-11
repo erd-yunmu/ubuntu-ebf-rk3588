@@ -16,7 +16,7 @@
 #include <dt-bindings/usb/pd.h>
 #include "rk3576.dtsi"
 #include "rk3576-android.dtsi"
-#include "rk3576-eink.dtsi"
+#include "rk3576-ebook.dtsi"
 
 / {
 	model = "Rockchip RK3576 EBOOK X3 V10 Board";
@@ -208,6 +208,7 @@
 
 	wireless_bluetooth: wireless-bluetooth {
 		compatible = "bluetooth-platdata";
+		bt_port = "/dev/ttyS4";
 		clocks = <&hym8563>;
 		clock-names = "ext_clock";
 		uart_rts_gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_LOW>;

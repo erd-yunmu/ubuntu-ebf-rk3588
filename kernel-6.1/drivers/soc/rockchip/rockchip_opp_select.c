@@ -561,17 +561,12 @@ static int rockchip_get_leakage_version(int *version)
 static int rockchip_get_leakage_v1(struct device *dev, struct device_node *np,
 				   char *lkg_name, int *leakage)
 {
-	struct nvmem_cell *cell;
 	int ret = 0;
 	u8 value = 0;
 
-	cell = of_nvmem_cell_get(np, "leakage");
-	if (IS_ERR(cell)) {
+	ret = rockchip_nvmem_cell_read_u8(np, "leakage", &value);
+	if (ret)
 		ret = rockchip_nvmem_cell_read_u8(np, lkg_name, &value);
-	} else {
-		nvmem_cell_put(cell);
-		ret = rockchip_nvmem_cell_read_u8(np, "leakage", &value);
-	}
 	if (ret)
 		dev_err(dev, "Failed to get %s\n", lkg_name);
 	else
@@ -668,19 +663,19 @@ static void rockchip_of_get_lkg_sel(struct device *dev, struct device_node *np,
 		ret = rockchip_get_leakage_v1(dev, np, lkg_name, &leakage);
 		if (ret)
 			return;
-		dev_info(dev, "leakage=%d\n", leakage);
+		dev_info(dev, "idc=%d\n", leakage);
 		break;
 	case LEAKAGE_V2:
 		ret = rockchip_get_leakage_v2(dev, np, lkg_name, &leakage);
 		if (ret)
 			return;
-		dev_info(dev, "leakage=%d\n", leakage);
+		dev_info(dev, "idc=%d\n", leakage);
 		break;
 	case LEAKAGE_V3:
 		ret = rockchip_get_leakage_v3(dev, np, lkg_name, &leakage);
 		if (ret)
 			return;
-		dev_info(dev, "leakage=%d.%d\n", leakage / 1000,
+		dev_info(dev, "idc=%d.%d\n", leakage / 1000,
 			 leakage % 1000);
 		break;
 	default:
@@ -698,7 +693,7 @@ static void rockchip_of_get_lkg_sel(struct device *dev, struct device_node *np,
 		sprintf(name, "rockchip,leakage-voltage-sel");
 	ret = rockchip_get_sel(np, name, leakage, volt_sel);
 	if (!ret)
-		dev_info(dev, "leakage-volt-sel=%d\n", *volt_sel);
+		dev_info(dev, "idc-volt-sel=%d\n", *volt_sel);
 
 next:
 	if (!scale_sel)
@@ -712,7 +707,7 @@ next:
 		sprintf(name, "rockchip,leakage-scaling-sel");
 	ret = rockchip_get_sel(np, name, leakage, scale_sel);
 	if (!ret)
-		dev_info(dev, "leakage-scale=%d\n", *scale_sel);
+		dev_info(dev, "idc-scale=%d\n", *scale_sel);
 }
 
 static unsigned long rockchip_pvtpll_get_rate(struct rockchip_opp_info *info)
@@ -1411,10 +1406,10 @@ static void rockchip_init_pvtpll_table(struct device *dev,
 			 "rockchip,pvtpll-table-B%d", info->bin);
 		prop = of_find_property(np, prop_name, NULL);
 	}
-	if (!prop)
+	if (!prop) {
 		sprintf(prop_name, "rockchip,pvtpll-table");
-
-	prop = of_find_property(np, prop_name, NULL);
+		prop = of_find_property(np, prop_name, NULL);
+	}
 	if (!prop)
 		goto out;
 

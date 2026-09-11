@@ -18,6 +18,7 @@
 #include <linux/soc/rockchip/rockchip_decompress.h>
 #include <linux/dma-mapping.h>
 #include <linux/pm_runtime.h>
+#include <linux/atomic.h>
 
 #define DECOM_CTRL		0x0
 #define DECOM_ENR		0x4
@@ -100,10 +101,21 @@ static DECLARE_WAIT_QUEUE_HEAD(g_decom_wait);
 static bool g_decom_complete;
 static bool g_decom_noblocking;
 static u64 g_decom_data_len;
+static atomic_t g_decom_clk_state = ATOMIC_INIT(0);
 
 void __init wait_initrd_hw_decom_done(void)
 {
 	wait_event(g_decom_wait, g_decom_complete);
+}
+
+static void rk_decom_disable_clk_atomic(struct rk_decom *rk_dec)
+{
+	if (!rk_dec)
+		return;
+
+	 /* Close clk only when g_decom_clk_state == 1 */
+	if (atomic_xchg(&g_decom_clk_state, 0) == 1)
+		clk_bulk_disable_unprepare(rk_dec->num_clocks, rk_dec->clocks);
 }
 
 int rk_decom_wait_done(u32 timeout, u64 *decom_len)
@@ -115,9 +127,7 @@ int rk_decom_wait_done(u32 timeout, u64 *decom_len)
 
 	ret = wait_event_timeout(g_decom_wait, g_decom_complete, timeout * HZ);
 	if (!ret) {
-		if (g_decom)
-			clk_bulk_disable_unprepare(g_decom->num_clocks, g_decom->clocks);
-
+		rk_decom_disable_clk_atomic(g_decom);
 		return -ETIMEDOUT;
 	}
 
@@ -190,6 +200,8 @@ int rk_decom_start(u32 mode, phys_addr_t src, phys_addr_t dst, u32 dst_max_size)
 		ret = -EINVAL;
 		goto error;
 	}
+
+	atomic_set(&g_decom_clk_state, 1);
 
 	writel(src, g_decom->regs + DECOM_RADDR);
 	writel(dst, g_decom->regs + DECOM_WADDR);
@@ -275,8 +287,7 @@ static irqreturn_t rk_decom_irq_thread(int irq, void *priv)
 			free_reserved_area(start, end, -1, "ramdisk gzip archive");
 			rk_dec->mem_start = 0;
 		}
-
-		clk_bulk_disable_unprepare(rk_dec->num_clocks, rk_dec->clocks);
+		rk_decom_disable_clk_atomic(rk_dec);
 	}
 
 #endif
@@ -484,24 +495,27 @@ static int __init rockchip_decom_probe(struct platform_device *pdev)
 	}
 
 	mem = of_parse_phandle(np, "memory-region", 0);
-	if (!mem) {
-		dev_err(dev, "missing \"memory-region\" property\n");
-#ifndef CONFIG_ROCKCHIP_HW_DECOMPRESS_TEST
+	if (mem) {
+		ret = of_address_to_resource(mem, 0, &reg);
+		of_node_put(mem);
+		if (ret) {
+			dev_err(dev, "invalid \"memory-region\" property\n");
+			return -ENODEV;
+		}
+
+		rk_dec->mem_start = reg.start;
+		rk_dec->mem_size = resource_size(&reg);
+		dev_info(dev, "Using reserved memory region: start=0x%pa, size=0x%zx\n",
+			 &rk_dec->mem_start, rk_dec->mem_size);
+	} else {
+#ifdef CONFIG_ROCKCHIP_HW_DECOMPRESS_TEST
 		return -ENODEV;
 #endif
+		/* For user-space usage, memory-region is optional */
+		rk_dec->mem_start = 0;
+		rk_dec->mem_size = 0;
+		dev_info(dev, "No memory-region specified, user-space memory management\n");
 	}
-
-	ret = of_address_to_resource(mem, 0, &reg);
-	of_node_put(mem);
-	if (ret) {
-		dev_err(dev, "missing \"reg\" property\n");
-#ifndef CONFIG_ROCKCHIP_HW_DECOMPRESS_TEST
-		return -ENODEV;
-#endif
-	}
-
-	rk_dec->mem_start = reg.start;
-	rk_dec->mem_size = resource_size(&reg);
 
 	rk_dec->num_clocks = devm_clk_bulk_get_all(dev, &rk_dec->clocks);
 	if (rk_dec->num_clocks < 0) {
@@ -513,7 +527,7 @@ static int __init rockchip_decom_probe(struct platform_device *pdev)
 	rk_dec->regs = devm_ioremap_resource(dev, res);
 	if (IS_ERR(rk_dec->regs)) {
 		ret = PTR_ERR(rk_dec->regs);
-		goto disable_clk;
+		return ret;
 	}
 
 	dev_set_drvdata(dev, rk_dec);
@@ -533,7 +547,7 @@ static int __init rockchip_decom_probe(struct platform_device *pdev)
 					dev_name(dev), rk_dec);
 	if (ret < 0) {
 		dev_err(dev, "failed to attach decompress irq\n");
-		goto disable_clk;
+		return ret;
 	}
 
 #ifdef CONFIG_ROCKCHIP_HW_DECOMPRESS_TEST
@@ -551,11 +565,6 @@ static int __init rockchip_decom_probe(struct platform_device *pdev)
 	pm_runtime_get_sync(dev);
 #endif
 	return 0;
-
-disable_clk:
-	clk_bulk_disable_unprepare(rk_dec->num_clocks, rk_dec->clocks);
-
-	return ret;
 }
 
 #ifndef CONFIG_ROCKCHIP_THUNDER_BOOT

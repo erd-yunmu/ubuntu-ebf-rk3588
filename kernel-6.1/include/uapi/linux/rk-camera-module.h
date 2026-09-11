@@ -229,6 +229,63 @@
 #define RKMODULE_SET_CMPS_MODE       \
 	_IOW('V', BASE_VIDIOC_PRIVATE + 55, __u32)
 
+#define RKMODULE_GET_ERROR_INFO       \
+	_IOR('V', BASE_VIDIOC_PRIVATE + 56, struct rkmodule_error_info)
+
+#define RKMODULE_SET_EXPAND_SINGLE_MODE       \
+	_IOW('V', BASE_VIDIOC_PRIVATE + 57, __u32)
+
+#define RKMODULE_SET_LENC  \
+	_IOW('V', BASE_VIDIOC_PRIVATE + 58, struct rkmodule_lenc_gain)
+
+#define RKMODULE_GET_LENC_INFO  \
+	_IOR('V', BASE_VIDIOC_PRIVATE + 59, struct rkmodule_lenc_info)
+
+#define RKMODULE_SET_REG_SETTING  \
+	_IOW('V', BASE_VIDIOC_PRIVATE + 60, struct rkmodule_reg_setting)
+
+#define RKMODULE_SET_BAYER_MODE       \
+	_IOW('V', BASE_VIDIOC_PRIVATE + 61, struct rkmodule_bayer_param)
+
+#define RKMODULE_GET_HDR_COMPR_SINGLE_FRAME_INFO  \
+	_IOR('V', BASE_VIDIOC_PRIVATE + 62, struct rkmodule_hdr_compr_single_frame_info)
+
+#define RKMODULE_SET_CHANNEL_POWER	\
+	_IOW('V', BASE_VIDIOC_PRIVATE + 63, struct rkmodule_channel_power)
+
+#define RKMODULE_SET_CHANNEL_STREAM	\
+	_IOW('x', 0, struct rkmodule_channel_stream)
+
+#define RKMODULE_SET_DES_LINK	\
+	_IOW('x', 1, __u32)
+
+#define RKMODULE_GET_MATCH_ID	\
+	_IOR('x', 2, __u32)
+
+#define RKMODULE_GET_IRFPA_INFO	\
+	_IOR('x', 3, struct rkmodule_irfpa_info)
+
+#define RKMODULE_GET_HDR_COMPR_PARAM	\
+	_IOR('x', 4, struct rkmodule_hdr_compr)
+
+#define RKMODULE_SET_REGISTER_GROUP       \
+	_IOW('x', 5, struct rkmodule_reg_group)
+
+#define RKMODULE_GET_MERGE_WGT_CURVE       \
+	_IOR('x', 6, struct rkmodule_mge_oewgt)
+
+#define RKMODULE_GET_LCG_LOFIC_RATIO \
+	_IOR('x', 7, struct rkmodule_dcg_ratio)
+
+#define RKMODULE_GET_LOFIC_VS_RATIO \
+	_IOR('x', 8, struct rkmodule_dcg_ratio)
+
+#define RKMODULE_REG_LIST_MAX (16)
+struct rkmodule_reg_struct {
+	__u32 reg_addr;
+	__u32 reg_val;
+};
+
 struct rkmodule_i2cdev_info {
 	__u8 slave_addr;
 } __attribute__ ((packed));
@@ -266,6 +323,15 @@ struct rkmodule_reg {
 	__u64 preg_value;
 	__u64 preg_addr_bytes;
 	__u64 preg_value_bytes;
+} __attribute__ ((packed));
+
+enum rkmodule_reg_group_type {
+	RKMODULE_REG_GROUP_MERGE,
+};
+
+struct rkmodule_reg_group {
+	__u32 type;
+	struct rkmodule_reg reg_group;
 } __attribute__ ((packed));
 
 /**
@@ -448,13 +514,13 @@ struct rkmodule_lsc_cfg {
  * NO_HDR: linear mode
  * HDR_X2: hdr two frame or line mode
  * HDR_X3: hdr three or line mode
- * HDR_COMPR: linearised and compressed data for hdr
+ * HDR_CIS_MERGE: HDR merge by CIS,both compressed and uncompressed
  */
 enum rkmodule_hdr_mode {
 	NO_HDR = 0,
 	HDR_X2 = 5,
 	HDR_X3 = 6,
-	HDR_COMPR,
+	HDR_CIS_MERGE,
 };
 
 #define HDR_COMPR_POINT_MAX 32
@@ -534,6 +600,8 @@ enum exp_mode_e {
 	EXP_HDR3_DCG_VS,
 	EXP_HDR3_DCG_SPD,
 	EXP_HDR3_STA,
+	EXP_HDR3_DCG_LOFIC,
+	EXP_HDR3_LCG_LOFIC_VS,
 };
 
 struct rkmodule_hdr_cfg {
@@ -846,6 +914,7 @@ enum rkmodule_capture_mode {
 	RKMODULE_ONE_CH_TO_MULTI_ISP,
 	RKMODULE_MULTI_CH_TO_MULTI_ISP,
 	RKMODULE_MULTI_CH_COMBINE_SQUARE,
+	RKMODULE_QUADBAYER_TO_DUAL_PIPE,
 };
 
 struct rkmodule_multi_dev_info {
@@ -856,9 +925,16 @@ struct rkmodule_multi_dev_info {
 	__u32 reserved[8];
 };
 
+enum rkmodule_one_to_multi_exp_mode {
+	RKMODULE_ONE_TO_MULT_EXP_SWITCH,
+	RKMODULE_ONE_TO_MULT_EXP_SINGLE,
+};
+
 struct rkmodule_one_to_multi_info {
 	__u32 isp_num;
 	__u32 frame_pattern[RKMODULE_MULTI_DEV_NUM];
+	__u32 exp_mode;
+	__u32 exp_main_id;
 };
 
 struct rkmodule_multi_combine_info {
@@ -929,6 +1005,11 @@ struct rkmodule_exp_info {
 	__u32 reserved[6];
 } __attribute__ ((packed));
 
+/*
+ * At most four entries per RKMODULE_SET_WB_GAIN / SET_BLC; enum lists five
+ * rkmodule_wb_type / rkmodule_blc_type values for different pipelines, not
+ * five simultaneous slots in one transfer.
+ */
 #define RKMODULE_MAX_WB_GAIN_GROUP (4)
 
 enum rkmodule_wb_type {
@@ -936,6 +1017,7 @@ enum rkmodule_wb_type {
 	RKMODULE_LCG_WB_GAIN,
 	RKMODULE_SPD_WB_GAIN,
 	RKMODULE_VS_WB_GAIN,
+	RKMODULE_LOFIC_WB_GAIN,
 };
 
 struct rkmodule_wb_gain {
@@ -958,12 +1040,19 @@ enum rkmodule_blc_type {
 	RKMODULE_LCG_BLC,
 	RKMODULE_SPD_BLC,
 	RKMODULE_VS_BLC,
+	RKMODULE_LOFIC_BLC,
 };
 
 struct rkmodule_blc_group {
+	__u32 enable;
 	__u32 group_num;
 	enum rkmodule_blc_type blc_type[RKMODULE_MAX_BLC_GROUP];
 	__u32 blc[RKMODULE_MAX_BLC_GROUP];
+	__u32 bkdg_sw_en;
+	__u32 dgbk2bkdg_thred;
+	__u32 bkdg2dgbk_thred;
+	__u32 reg_num;
+	struct rkmodule_reg_struct reg_list[RKMODULE_REG_LIST_MAX];
 };
 
 enum rkmodule_bayer_mode {
@@ -986,5 +1075,142 @@ enum rkmodule_cmps_mode {
 	CMPS_LOW_BIT_WIDTH_MODE,
 	CMPS_HIGH_BIT_WIDTH_MODE,
 };
+
+struct rkmodule_error_info {
+	__u32 err_code;
+	__u8 detail[256];
+};
+
+enum rkmodule_expand_single_mode {
+	EXPAND_SINGLE_LCG,
+	EXPAND_SINGLE_HCG,
+	EXPAND_SINGLE_VS,
+	EXPAND_SINGLE_SPD,
+	EXPAND_SINGLE_LOFIC,
+};
+
+#define RKMODULE_MAX_LENC_GROUP (4)
+
+struct rkmodule_lenc_gain {
+	__u32 g[RKMODULE_LSCDATA_LEN];
+	__u32 b[RKMODULE_LSCDATA_LEN];
+	__u32 r[RKMODULE_LSCDATA_LEN];
+};
+
+struct rkmodule_lenc_data {
+	__u16 rgain;
+	__u16 bgain;
+	struct rkmodule_lenc_gain lenc_gain;
+};
+
+struct rkmodule_lenc_inf {
+	__u32 flag;
+	__u32 group_num;
+	__u32 lenc_gain_len;
+	struct rkmodule_lenc_data lenc_data[RKMODULE_MAX_LENC_GROUP];
+};
+
+struct rkmodule_lenc_info {
+	__u32 bit_width;
+	__u32 grid_num;
+	__u32 reserved[8];
+};
+
+enum rkmodule_binning_mode {
+	BAYER_BINNING_2X2,
+	BAYER_SKIP_2X2,
+	QBC_BINNING_2X2,
+};
+
+struct rkmodule_reg_setting {
+	__u32 setting_id;
+	__u32 binning_mode;
+	__u32 reg_num;
+	struct rkmodule_reg_struct reg_list[RKMODULE_REG_LIST_MAX];
+};
+
+struct rkmodule_bayer_param {
+	__u32 bayer_mode;
+	__u32 reg_num;
+	struct rkmodule_reg_struct reg_list[RKMODULE_REG_LIST_MAX];
+};
+
+struct rkmodule_hdr_compr_single_frame_info {
+	__u32 single_bitwidth;
+	__u32 reserved[8];
+};
+
+struct rkmodule_channel_power {
+	__u32 channel;
+	__u32 enable;
+};
+
+struct rkmodule_channel_stream {
+	__u32 channel;
+	__u32 enable;
+};
+
+enum rkmodule_irfpa_raw_mode {
+	IRFPA_RAW_14BITS_IO,
+	IRFPA_RAW_8BITS_IO,
+	IRFPA_RAW_7BITS_IO,
+};
+
+struct rkmodule_irfpa_info {
+	__u32 irfpa_en;
+	__u32 gray_dec_en;
+	__u32 raw14_mode;
+	__u32 reserved[8];
+};
+
+#define RKMODULE_MAX_WGT_CURVE_NUM (2)
+
+struct rkmodule_mge_wgtcurve {
+	__u16 idx[17];
+	__u16 val[17];
+};
+
+struct rkmodule_mge_oewgt {
+	__u16 wgtcurve_num;
+	struct rkmodule_mge_wgtcurve wgtcurve[RKMODULE_MAX_WGT_CURVE_NUM];
+};
+
+#define MAX_FLOAT_WINDOW       8
+enum rkmodule_pdaf_win_mode {
+	FIXED_GRID_WIN_16_12,
+	FIXED_GRID_WIN_8_6,
+	FLOAT_WINDOW,
+};
+
+struct rkmodule_pdaf_win_t {
+	__u16 x_sta;
+	__u16 y_sta;
+	__u16 x_end;
+	__u16 y_end;
+} __attribute__((packed));
+
+struct rkmodule_pdaf_float_win_t {
+	__u32 win_num;
+	struct rkmodule_pdaf_win_t win[MAX_FLOAT_WINDOW];
+} __attribute__((packed));
+
+struct rkmodule_pdaf_fixed_grid_win_t {
+	__u16 area_x_offset;
+	__u16 area_y_offset;
+	__u16 area_width;
+	__u16 area_height;
+} __attribute__((packed));
+
+struct rkmodule_pdaf_win_cfg_t {
+	__u32 win_mode;
+	struct rkmodule_pdaf_float_win_t float_win;
+	struct rkmodule_pdaf_fixed_grid_win_t fixed_win;
+} __attribute__((packed));
+
+#define RKMODULE_GET_PDAF_WIN_CFG  \
+	_IOR('P', BASE_VIDIOC_PRIVATE + 0, struct rkmodule_pdaf_win_cfg_t)
+
+#define RKMODULE_SET_PDAF_WIN_CFG      \
+	_IOW('P', BASE_VIDIOC_PRIVATE + 1, struct rkmodule_pdaf_win_cfg_t)
 
 #endif /* _UAPI_RKMODULE_CAMERA_H */

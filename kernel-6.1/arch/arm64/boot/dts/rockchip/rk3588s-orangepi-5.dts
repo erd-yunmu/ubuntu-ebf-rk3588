@@ -330,7 +330,7 @@
 
 /* Fix tty terminal out of screen, and most dclk of resolutions was not supported in hdmiphy clock from parent clock by default */
 &display_subsystem {
-	clocks = <&hdptxphy_hdmi0>;
+	clocks = <&hdptxphy0>;
 	clock-names = "hdmi0_phy_pll";
 };
 
@@ -389,7 +389,7 @@
 	status = "okay";
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
 	status = "okay";
 };
 

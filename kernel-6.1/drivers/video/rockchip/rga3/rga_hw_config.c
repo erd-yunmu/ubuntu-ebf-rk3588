@@ -11,7 +11,7 @@
 /* RGA 1Word = 4Byte */
 #define WORD_TO_BYTE(w) ((w) * 4)
 
-const uint32_t rga3_input_raster_format[] = {
+static const uint32_t rga3_input_raster_format[] = {
 	RGA_FORMAT_RGBA_8888,
 	RGA_FORMAT_BGRA_8888,
 	RGA_FORMAT_RGBX_8888,
@@ -38,7 +38,7 @@ const uint32_t rga3_input_raster_format[] = {
 	RGA_FORMAT_XBGR_8888,
 };
 
-const uint32_t rga3_output_raster_format[] = {
+static const uint32_t rga3_output_raster_format[] = {
 	RGA_FORMAT_RGBA_8888,
 	RGA_FORMAT_BGRA_8888,
 	RGA_FORMAT_RGBX_8888,
@@ -61,7 +61,7 @@ const uint32_t rga3_output_raster_format[] = {
 	RGA_FORMAT_YCrCb_422_SP_10B,
 };
 
-const uint32_t rga3_fbcd_format[] = {
+static const uint32_t rga3_fbcd_format[] = {
 	RGA_FORMAT_RGBA_8888,
 	RGA_FORMAT_BGRA_8888,
 	RGA_FORMAT_RGBX_8888,
@@ -84,7 +84,7 @@ const uint32_t rga3_fbcd_format[] = {
 	RGA_FORMAT_YCrCb_422_SP_10B,
 };
 
-const uint32_t rga3_fbce_format[] = {
+static const uint32_t rga3_fbce_format[] = {
 	RGA_FORMAT_RGBA_8888,
 	RGA_FORMAT_BGRA_8888,
 	RGA_FORMAT_RGBX_8888,
@@ -103,7 +103,7 @@ const uint32_t rga3_fbce_format[] = {
 	RGA_FORMAT_YCrCb_422_SP_10B,
 };
 
-const uint32_t rga3_tile_format[] = {
+static const uint32_t rga3_tile_format[] = {
 	RGA_FORMAT_YCbCr_422_SP,
 	RGA_FORMAT_YCbCr_420_SP,
 	RGA_FORMAT_YCrCb_422_SP,
@@ -114,7 +114,7 @@ const uint32_t rga3_tile_format[] = {
 	RGA_FORMAT_YCrCb_422_SP_10B,
 };
 
-const uint32_t rga2e_input_raster_format[] = {
+static const uint32_t rga2e_input_raster_format[] = {
 	RGA_FORMAT_RGBA_8888,
 	RGA_FORMAT_RGBX_8888,
 	RGA_FORMAT_BGRA_8888,
@@ -154,7 +154,7 @@ const uint32_t rga2e_input_raster_format[] = {
 	RGA_FORMAT_ABGR_4444,
 };
 
-const uint32_t rga2e_output_raster_format[] = {
+static const uint32_t rga2e_output_raster_format[] = {
 	RGA_FORMAT_RGBA_8888,
 	RGA_FORMAT_RGBX_8888,
 	RGA_FORMAT_BGRA_8888,
@@ -195,7 +195,7 @@ const uint32_t rga2e_output_raster_format[] = {
 	RGA_FORMAT_ABGR_4444,
 };
 
-const uint32_t rga2p_input_raster_format[] = {
+static const uint32_t rga2p_input_raster_format[] = {
 	RGA_FORMAT_RGBA_8888,
 	RGA_FORMAT_RGBX_8888,
 	RGA_FORMAT_BGRA_8888,
@@ -239,7 +239,55 @@ const uint32_t rga2p_input_raster_format[] = {
 	RGA_FORMAT_YCrCb_444_SP,
 };
 
-const uint32_t rga2p_input1_raster_format[] = {
+static const uint32_t rga2p_v2_input_raster_format[] = {
+	RGA_FORMAT_RGBA_8888,
+	RGA_FORMAT_RGBX_8888,
+	RGA_FORMAT_BGRA_8888,
+	RGA_FORMAT_BGRX_8888,
+	RGA_FORMAT_RGB_888,
+	RGA_FORMAT_BGR_888,
+	RGA_FORMAT_RGB_565,
+	RGA_FORMAT_BGR_565,
+	RGA_FORMAT_RGBA_5551,
+	RGA_FORMAT_BGRA_5551,
+	RGA_FORMAT_RGBA_4444,
+	RGA_FORMAT_BGRA_4444,
+	RGA_FORMAT_YCbCr_422_P,
+	RGA_FORMAT_YCbCr_420_P,
+	RGA_FORMAT_YCrCb_422_P,
+	RGA_FORMAT_YCrCb_420_P,
+	RGA_FORMAT_YCbCr_422_SP,
+	RGA_FORMAT_YCbCr_420_SP,
+	RGA_FORMAT_YCrCb_422_SP,
+	RGA_FORMAT_YCrCb_420_SP,
+	RGA_FORMAT_YVYU_422,
+	RGA_FORMAT_VYUY_422,
+	RGA_FORMAT_YUYV_422,
+	RGA_FORMAT_UYVY_422,
+	RGA_FORMAT_YCbCr_420_SP_10B,
+	RGA_FORMAT_YCrCb_420_SP_10B,
+	RGA_FORMAT_YCbCr_422_SP_10B,
+	RGA_FORMAT_YCrCb_422_SP_10B,
+	RGA_FORMAT_YCbCr_400,
+	RGA_FORMAT_XRGB_8888,
+	RGA_FORMAT_XBGR_8888,
+	RGA_FORMAT_BPP1,
+	RGA_FORMAT_BPP2,
+	RGA_FORMAT_BPP4,
+	RGA_FORMAT_BPP8,
+	RGA_FORMAT_ARGB_8888,
+	RGA_FORMAT_ARGB_5551,
+	RGA_FORMAT_ARGB_4444,
+	RGA_FORMAT_ABGR_8888,
+	RGA_FORMAT_ABGR_5551,
+	RGA_FORMAT_ABGR_4444,
+	RGA_FORMAT_RGBA_2BPP,
+	RGA_FORMAT_A8,
+	RGA_FORMAT_YCbCr_444_SP,
+	RGA_FORMAT_YCrCb_444_SP,
+};
+
+static const uint32_t rga2p_input1_raster_format[] = {
 	RGA_FORMAT_RGBA_8888,
 	RGA_FORMAT_BGRA_8888,
 	RGA_FORMAT_RGBX_8888,
@@ -259,7 +307,31 @@ const uint32_t rga2p_input1_raster_format[] = {
 	RGA_FORMAT_A8,
 };
 
-const uint32_t rga2p_output_raster_format[] = {
+static const uint32_t rga2p_v2_input1_raster_format[] = {
+	RGA_FORMAT_RGBA_8888,
+	RGA_FORMAT_BGRA_8888,
+	RGA_FORMAT_RGBX_8888,
+	RGA_FORMAT_BGRX_8888,
+	RGA_FORMAT_RGBA_5551,
+	RGA_FORMAT_BGRA_5551,
+	RGA_FORMAT_RGBA_4444,
+	RGA_FORMAT_BGRA_4444,
+	RGA_FORMAT_XRGB_8888,
+	RGA_FORMAT_XBGR_8888,
+	RGA_FORMAT_ARGB_8888,
+	RGA_FORMAT_ABGR_8888,
+	RGA_FORMAT_ARGB_5551,
+	RGA_FORMAT_ABGR_5551,
+	RGA_FORMAT_ARGB_4444,
+	RGA_FORMAT_ABGR_4444,
+	RGA_FORMAT_RGB_888,
+	RGA_FORMAT_BGR_888,
+	RGA_FORMAT_RGB_565,
+	RGA_FORMAT_BGR_565,
+	RGA_FORMAT_A8,
+};
+
+static const uint32_t rga2p_output_raster_format[] = {
 	RGA_FORMAT_RGBA_8888,
 	RGA_FORMAT_RGBX_8888,
 	RGA_FORMAT_BGRA_8888,
@@ -307,7 +379,7 @@ const uint32_t rga2p_output_raster_format[] = {
 	RGA_FORMAT_YCrCb_444_SP,
 };
 
-const uint32_t rga2p_tile4x4_format[] = {
+static const uint32_t rga2p_tile4x4_format[] = {
 	RGA_FORMAT_YCbCr_400,
 	RGA_FORMAT_YCbCr_420_SP,
 	RGA_FORMAT_YCrCb_420_SP,
@@ -321,7 +393,7 @@ const uint32_t rga2p_tile4x4_format[] = {
 	RGA_FORMAT_YCrCb_422_SP_10B,
 };
 
-const uint32_t rga2p_rkfbc64x4_format[] = {
+static const uint32_t rga2p_rkfbc64x4_format[] = {
 	RGA_FORMAT_YCbCr_400,
 	RGA_FORMAT_YCbCr_420_SP,
 	RGA_FORMAT_YCrCb_420_SP,
@@ -335,7 +407,7 @@ const uint32_t rga2p_rkfbc64x4_format[] = {
 	RGA_FORMAT_YCrCb_422_SP_10B,
 };
 
-const uint32_t rga2p_afbc32x8_format[] = {
+static const uint32_t rga2p_afbc32x8_format[] = {
 	RGA_FORMAT_RGBA_8888,
 	RGA_FORMAT_BGRA_8888,
 	RGA_FORMAT_RGBX_8888,
@@ -348,7 +420,60 @@ const uint32_t rga2p_afbc32x8_format[] = {
 	RGA_FORMAT_BGR_888,
 };
 
-const struct rga_win_data rga3_win_data[] = {
+static const uint32_t rga2p_v2_afbc32x8_input_format[] = {
+	RGA_FORMAT_RGBA_8888,
+	RGA_FORMAT_BGRA_8888,
+	RGA_FORMAT_RGBX_8888,
+	RGA_FORMAT_BGRX_8888,
+	RGA_FORMAT_XRGB_8888,
+	RGA_FORMAT_XBGR_8888,
+	RGA_FORMAT_ARGB_8888,
+	RGA_FORMAT_ABGR_8888,
+	RGA_FORMAT_RGB_888,
+	RGA_FORMAT_BGR_888,
+	RGA_FORMAT_YCbCr_420_SP,
+	RGA_FORMAT_YCrCb_420_SP,
+	RGA_FORMAT_YCbCr_422_SP,
+	RGA_FORMAT_YCrCb_422_SP,
+	RGA_FORMAT_YCbCr_420_SP_10B,
+	RGA_FORMAT_YCrCb_420_SP_10B,
+	RGA_FORMAT_YCbCr_422_SP_10B,
+	RGA_FORMAT_YCrCb_422_SP_10B,
+};
+
+static const uint32_t rga2p_v2_afbc32x8_output_format[] = {
+	RGA_FORMAT_RGBA_8888,
+	RGA_FORMAT_BGRA_8888,
+	RGA_FORMAT_RGBX_8888,
+	RGA_FORMAT_BGRX_8888,
+	RGA_FORMAT_XRGB_8888,
+	RGA_FORMAT_XBGR_8888,
+	RGA_FORMAT_ARGB_8888,
+	RGA_FORMAT_ABGR_8888,
+	RGA_FORMAT_RGBA_1010102,
+	RGA_FORMAT_BGRA_1010102,
+	RGA_FORMAT_ARGB_2101010,
+	RGA_FORMAT_ABGR_2101010,
+	RGA_FORMAT_RGBX_1010102,
+	RGA_FORMAT_BGRX_1010102,
+	RGA_FORMAT_XRGB_2101010,
+	RGA_FORMAT_XBGR_2101010,
+	RGA_FORMAT_RGB_888,
+	RGA_FORMAT_BGR_888,
+	RGA_FORMAT_RGB_565,
+	RGA_FORMAT_BGR_565,
+	RGA_FORMAT_YCbCr_420_SP,
+	RGA_FORMAT_YCrCb_420_SP,
+	RGA_FORMAT_YCbCr_422_SP,
+	RGA_FORMAT_YCrCb_422_SP,
+	RGA_FORMAT_YCbCr_420_SP_10B,
+	RGA_FORMAT_YCrCb_420_SP_10B,
+	RGA_FORMAT_YCbCr_422_SP_10B,
+	RGA_FORMAT_YCrCb_422_SP_10B,
+	RGA_FORMAT_YUV_101010,
+};
+
+static const struct rga_win_data rga3_win_data[] = {
 	{
 		.name = "rga3-win0",
 		.formats[RGA_RASTER_INDEX] = rga3_input_raster_format,
@@ -395,7 +520,7 @@ const struct rga_win_data rga3_win_data[] = {
 	},
 };
 
-const struct rga_win_data rga2e_win_data[] = {
+static const struct rga_win_data rga2e_win_data[] = {
 	{
 		.name = "rga2e-src0",
 		.formats[RGA_RASTER_INDEX] = rga2e_input_raster_format,
@@ -430,7 +555,7 @@ const struct rga_win_data rga2e_win_data[] = {
 	},
 };
 
-const struct rga_win_data rga2e_3506_win_data[] = {
+static const struct rga_win_data rga2e_3506_win_data[] = {
 	{
 		.name = "rga2e-src0",
 		.formats[RGA_RASTER_INDEX] = rga2e_input_raster_format,
@@ -465,7 +590,7 @@ const struct rga_win_data rga2e_3506_win_data[] = {
 	},
 };
 
-const struct rga_win_data rga2p_win_data[] = {
+static const struct rga_win_data rga2p_win_data[] = {
 	{
 		.name = "rga2p-src0",
 		.formats[RGA_RASTER_INDEX] = rga2p_input_raster_format,
@@ -508,7 +633,7 @@ const struct rga_win_data rga2p_win_data[] = {
 	},
 };
 
-const struct rga_win_data rga2p_non_fbc_win_data[] = {
+static const struct rga_win_data rga2p_non_fbc_win_data[] = {
 	{
 		.name = "rga2p-src0",
 		.formats[RGA_RASTER_INDEX] = rga2p_input_raster_format,
@@ -545,7 +670,91 @@ const struct rga_win_data rga2p_non_fbc_win_data[] = {
 	},
 };
 
-const struct rga_win_data rga2p_lite_win_data[] = {
+static const struct rga_win_data rga2p_v2_3572_win_data[] = {
+	{
+		.name = "rga2p-src0",
+		.formats[RGA_RASTER_INDEX] = rga2p_v2_input_raster_format,
+		.formats_count[RGA_RASTER_INDEX] = ARRAY_SIZE(rga2p_v2_input_raster_format),
+		.formats[RGA_RKFBC64x4_INDEX] = rga2p_rkfbc64x4_format,
+		.formats_count[RGA_RKFBC64x4_INDEX] = ARRAY_SIZE(rga2p_rkfbc64x4_format),
+		.formats[RGA_AFBC32x8_INDEX] = rga2p_v2_afbc32x8_input_format,
+		.formats_count[RGA_AFBC32x8_INDEX] = ARRAY_SIZE(rga2p_v2_afbc32x8_input_format),
+		.supported_rotations = RGA_MODE_ROTATE_MASK,
+		.scale_up_mode = RGA_SCALE_UP_BIC,
+		.scale_down_mode = RGA_SCALE_DOWN_AVG,
+		.rd_mode = RGA_RASTER_MODE | RGA_RKFBC_MODE | RGA_AFBC32x8_MODE,
+
+	},
+
+	{
+		.name = "rga2p-src1",
+		.formats[RGA_RASTER_INDEX] = rga2p_v2_input1_raster_format,
+		.formats_count[RGA_RASTER_INDEX] = ARRAY_SIZE(rga2p_v2_input1_raster_format),
+		.formats[RGA_AFBC32x8_INDEX] = rga2p_afbc32x8_format,
+		.formats_count[RGA_AFBC32x8_INDEX] = ARRAY_SIZE(rga2p_afbc32x8_format),
+		.supported_rotations = RGA_MODE_ROTATE_MASK,
+		.scale_up_mode = RGA_SCALE_UP_BIC,
+		.scale_down_mode = RGA_SCALE_DOWN_AVG,
+		.rd_mode = RGA_RASTER_MODE | RGA_AFBC32x8_MODE,
+
+	},
+
+	{
+		.name = "rga2p-dst",
+		.formats[RGA_RASTER_INDEX] = rga2p_output_raster_format,
+		.formats_count[RGA_RASTER_INDEX] = ARRAY_SIZE(rga2p_output_raster_format),
+		.formats[RGA_AFBC32x8_INDEX] = rga2p_v2_afbc32x8_output_format,
+		.formats_count[RGA_AFBC32x8_INDEX] = ARRAY_SIZE(rga2p_v2_afbc32x8_output_format),
+		.supported_rotations = 0,
+		.scale_up_mode = RGA_SCALE_UP_NONE,
+		.scale_down_mode = RGA_SCALE_DOWN_NONE,
+		.rd_mode = RGA_RASTER_MODE | RGA_AFBC32x8_MODE,
+
+	},
+};
+
+static const struct rga_win_data rga2p_v2_win_data[] = {
+	{
+		.name = "rga2p-src0",
+		.formats[RGA_RASTER_INDEX] = rga2p_v2_input_raster_format,
+		.formats_count[RGA_RASTER_INDEX] = ARRAY_SIZE(rga2p_v2_input_raster_format),
+		.formats[RGA_RKFBC64x4_INDEX] = rga2p_rkfbc64x4_format,
+		.formats_count[RGA_RKFBC64x4_INDEX] = ARRAY_SIZE(rga2p_rkfbc64x4_format),
+		.formats[RGA_AFBC32x8_INDEX] = rga2p_v2_afbc32x8_input_format,
+		.formats_count[RGA_AFBC32x8_INDEX] = ARRAY_SIZE(rga2p_v2_afbc32x8_input_format),
+		.supported_rotations = RGA_MODE_ROTATE_MASK,
+		.scale_up_mode = RGA_SCALE_UP_BIC,
+		.scale_down_mode = RGA_SCALE_DOWN_AVG,
+		.rd_mode = RGA_RASTER_MODE | RGA_RKFBC_MODE | RGA_AFBC32x8_MODE,
+
+	},
+
+	{
+		.name = "rga2p-src1",
+		.formats[RGA_RASTER_INDEX] = rga2p_v2_input1_raster_format,
+		.formats_count[RGA_RASTER_INDEX] = ARRAY_SIZE(rga2p_v2_input1_raster_format),
+		.supported_rotations = RGA_MODE_ROTATE_MASK,
+		.scale_up_mode = RGA_SCALE_UP_BIC,
+		.scale_down_mode = RGA_SCALE_DOWN_AVG,
+		.rd_mode = RGA_RASTER_MODE,
+
+	},
+
+	{
+		.name = "rga2p-dst",
+		.formats[RGA_RASTER_INDEX] = rga2p_output_raster_format,
+		.formats_count[RGA_RASTER_INDEX] = ARRAY_SIZE(rga2p_output_raster_format),
+		.formats[RGA_AFBC32x8_INDEX] = rga2p_v2_afbc32x8_output_format,
+		.formats_count[RGA_AFBC32x8_INDEX] = ARRAY_SIZE(rga2p_v2_afbc32x8_output_format),
+		.supported_rotations = 0,
+		.scale_up_mode = RGA_SCALE_UP_NONE,
+		.scale_down_mode = RGA_SCALE_DOWN_NONE,
+		.rd_mode = RGA_RASTER_MODE | RGA_AFBC32x8_MODE,
+
+	},
+};
+
+static const struct rga_win_data rga2p_lite_win_data[] = {
 	{
 		.name = "rga2e-src0",
 		.formats[RGA_RASTER_INDEX] = rga2e_input_raster_format,
@@ -589,6 +798,8 @@ const struct rga_hw_data rga3_data = {
 	.csc_y2r_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
 			RGA_MODE_CSC_BT709 | RGA_MODE_CSC_BT2020,
 	.mmu = RGA_IOMMU,
+
+	.cmd_reg_size = 48, //0x100:0x1bc
 };
 
 const struct rga_hw_data rga2e_data = {
@@ -613,6 +824,8 @@ const struct rga_hw_data rga2e_data = {
 	.csc_y2r_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
 			RGA_MODE_CSC_BT709,
 	.mmu = RGA_MMU,
+
+	.cmd_reg_size = 32, //0x100:0x17c
 };
 
 const struct rga_hw_data rga2e_1106_data = {
@@ -639,6 +852,8 @@ const struct rga_hw_data rga2e_1106_data = {
 	.csc_y2r_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
 			RGA_MODE_CSC_BT709,
 	.mmu = RGA_NONE_MMU,
+
+	.cmd_reg_size = 32, //0x100:0x17c
 };
 
 const struct rga_hw_data rga2e_3506_data = {
@@ -663,6 +878,8 @@ const struct rga_hw_data rga2e_3506_data = {
 	.csc_y2r_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
 			RGA_MODE_CSC_BT709,
 	.mmu = RGA_NONE_MMU,
+
+	.cmd_reg_size = 32, //0x100:0x17c
 };
 
 const struct rga_hw_data rga2e_iommu_data = {
@@ -689,6 +906,8 @@ const struct rga_hw_data rga2e_iommu_data = {
 	.csc_y2r_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
 			RGA_MODE_CSC_BT709,
 	.mmu = RGA_IOMMU,
+
+	.cmd_reg_size = 32, //0x100:0x17c
 };
 
 const struct rga_hw_data rga2p_iommu_data = {
@@ -715,6 +934,8 @@ const struct rga_hw_data rga2p_iommu_data = {
 	.csc_y2r_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
 			RGA_MODE_CSC_BT709,
 	.mmu = RGA_IOMMU,
+
+	.cmd_reg_size = 32, //0x100:0x17c
 };
 
 const struct rga_hw_data rga2p_lite_1103b_data = {
@@ -739,6 +960,8 @@ const struct rga_hw_data rga2p_lite_1103b_data = {
 	.csc_y2r_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
 			RGA_MODE_CSC_BT709,
 	.mmu = RGA_NONE_MMU,
+
+	.cmd_reg_size = 32, //0x100:0x17c
 };
 
 const struct rga_hw_data rga2p_iommu_non_fbc_data = {
@@ -765,4 +988,65 @@ const struct rga_hw_data rga2p_iommu_non_fbc_data = {
 	.csc_y2r_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
 			RGA_MODE_CSC_BT709,
 	.mmu = RGA_IOMMU,
+
+	.cmd_reg_size = 32, //0x100:0x17c
+};
+
+//rk3538
+const struct rga_hw_data rga2p_iommu_rk3538_data = {
+	.version = 1,
+	.input_range = {{2, 2}, {8192, 8192}},
+	.output_range = {{2, 2}, {8192, 8192}},
+
+	.win = rga2p_v2_win_data,
+	.win_size = ARRAY_SIZE(rga2p_v2_win_data),
+	/* 1 << factor mean real factor */
+	.max_upscale_factor = 4,
+	.max_downscale_factor = 4,
+
+	.byte_stride_align = 4,
+	.max_byte_stride = WORD_TO_BYTE(8192),
+
+	.feature = RGA_COLOR_FILL | RGA_COLOR_PALETTE |
+		   RGA_COLOR_KEY | RGA_DITHER |
+		   RGA_YIN_YOUT | RGA_YUV_HDS | RGA_YUV_VDS |
+		   RGA_OSD | RGA_PRE_INTR | RGA_FULL_CSC_10BIT |
+		   RGA_SECURE_ACCESS,
+	.csc_r2y_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
+			RGA_MODE_CSC_BT709,
+	.csc_y2r_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
+			RGA_MODE_CSC_BT709,
+	.mmu = RGA_IOMMU,
+
+	.cmd_reg_size = 32, //0x100:0x17c
+};
+
+//RK3572
+const struct rga_hw_data rga2p_iommu_rk3572_data = {
+	.version = 1,
+	.input_range = {{2, 2}, {8192, 8192}},
+	.output_range = {{2, 2}, {8192, 8192}},
+
+	.win = rga2p_v2_3572_win_data,
+	.win_size = ARRAY_SIZE(rga2p_v2_3572_win_data),
+	/* 1 << factor mean real factor */
+	.max_upscale_factor = 4,
+	.max_downscale_factor = 4,
+
+	.byte_stride_align = 4,
+	.max_byte_stride = WORD_TO_BYTE(8192),
+
+	.feature = RGA_COLOR_FILL | RGA_COLOR_PALETTE |
+		   RGA_COLOR_KEY | RGA_ROP_CALCULATE |
+		   RGA_NN_QUANTIZE | RGA_DITHER | RGA_MOSAIC |
+		   RGA_YIN_YOUT | RGA_YUV_HDS | RGA_YUV_VDS |
+		   RGA_OSD | RGA_PRE_INTR | RGA_FULL_CSC_10BIT |
+		   RGA_SECURE_ACCESS | RGA_CFA,
+	.csc_r2y_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
+			RGA_MODE_CSC_BT709,
+	.csc_y2r_mode = RGA_MODE_CSC_BT601L | RGA_MODE_CSC_BT601F |
+			RGA_MODE_CSC_BT709,
+	.mmu = RGA_IOMMU,
+
+	.cmd_reg_size = 32, //0x100:0x17c
 };

@@ -88,7 +88,6 @@
 
 &edp {
 	force-hpd;
-	support-psr;
 	status = "okay";
 
 	ports {
@@ -120,10 +119,6 @@
 
 &hdptxphy {
 	status = "okay";
-};
-
-&hdptxphy_hdmi {
-	status = "disabled";
 };
 
 &route_dsi {

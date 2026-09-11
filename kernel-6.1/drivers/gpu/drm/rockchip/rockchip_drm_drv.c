@@ -6,6 +6,7 @@
  * based on exynos_drm_drv.c
  */
 
+#include <linux/bitops.h>
 #include <linux/dma-buf-cache.h>
 #include <linux/dma-mapping.h>
 #include <linux/genalloc.h>
@@ -77,6 +78,502 @@ static const struct drm_driver rockchip_drm_driver;
 
 static unsigned int drm_debug;
 module_param_named(debug, drm_debug, int, 0600);
+
+static const u16 tfr_vrefresh_table[TFR_MAX] = {
+	[TFR_QMSVRR_INACTIVE] = 0,
+	[TFR_23P97] = 2397,
+	[TFR_24] = 2400,
+	[TFR_25] = 2500,
+	[TFR_29P97] = 2997,
+	[TFR_30] = 3000,
+	[TFR_47P95] = 4795,
+	[TFR_48] = 4800,
+	[TFR_50] = 5000,
+	[TFR_59P94] = 5994,
+	[TFR_60] = 6000,
+	[TFR_100] = 10000,
+	[TFR_119P88] = 11988,
+	[TFR_120] = 12000,
+};
+
+/* BRR 720p60hz */
+static const struct mvrr_const_val const_hdmi720p60_6000 = {
+	.vrefresh_khz = 6000,
+	.vtotal_fixed = 750,
+};
+
+/*
+ * @vrefresh_khz:	qms-vrr target refresh rate is 59.94Hz
+ * @vtotal_fixed:	When switch to target refresh rate, vtotal is 750
+ * @bit_len:		frac_array's bit length
+ * @frac_array:		Sources may also alternate between two sequential values
+ *			of actual vtotal to better approximate the target refresh
+ *			rate when target vtotal is fractional. For this example,
+ *			the source vtotal would vary between 750 and 751.
+ *			The value in frac_array indicates the order in which the
+ *			vtotal changes during this process. Each bit of 0 indicates
+ *			that the current frame vtotal is 750, and each bit of 1
+ *			indicates that the current frame vtotal is 751.
+ *			Take 0x3f(00111111B) as an example, it represents a vtotal
+ *			of 750 for the first and second frames, and 751 for the
+ *			remaining six frames. 0xe3 and 0xfe also have the same meaning.
+ *			The current frac_array represents the value of vtotal for 24
+ *			consecutive frames.
+ */
+static const struct mvrr_const_val const_hdmi720p60_5994 = {
+	.vrefresh_khz = 5994,
+	.vtotal_fixed = 750, /* 0.75 */
+	.bit_len = 24,
+	.frac_array = {0x3f, 0xe3, 0xfe},
+};
+
+static const struct mvrr_const_val const_hdmi720p60_5000 = {
+	.vrefresh_khz = 5000,
+	.vtotal_fixed = 900,
+};
+
+static const struct mvrr_const_val const_hdmi720p60_4800 = {
+	.vrefresh_khz = 4800,
+	.vtotal_fixed = 937, /* 0.5 */
+	.bit_len = 8,
+	.frac_array = {0x3c},
+};
+
+static const struct mvrr_const_val const_hdmi720p60_4795 = {
+	.vrefresh_khz = 4795,
+	.vtotal_fixed = 938, /* 0.4375 */
+	.bit_len = 16,
+	.frac_array = {0x1e, 0x0e},
+};
+
+static const struct mvrr_const_val const_hdmi720p60_3000 = {
+	.vrefresh_khz = 3000,
+	.vtotal_fixed = 1500,
+};
+
+static const struct mvrr_const_val const_hdmi720p60_2997 = {
+	.vrefresh_khz = 2997,
+	.vtotal_fixed = 1501, /* 0.5 */
+	.bit_len = 56,
+	.frac_array = {0x1f, 0xe0, 0x3f, 0x80, 0xfe, 0x03, 0xf8},
+};
+
+static const struct mvrr_const_val const_hdmi720p60_2500 = {
+	.vrefresh_khz = 2500,
+	.vtotal_fixed = 1800,
+};
+
+static const struct mvrr_const_val const_hdmi720p60_2400 = {
+	.vrefresh_khz = 2400,
+	.vtotal_fixed = 1875,
+};
+
+static const struct mvrr_const_val const_hdmi720p60_2397 = {
+	.vrefresh_khz = 2397,
+	.vtotal_fixed = 1876, /* 0.875 */
+	.bit_len = 40,
+	.frac_array = {0x1f, 0xff, 0xff, 0xff, 0xfc},
+};
+
+/* BRR 720p120hz */
+static const struct mvrr_const_val const_hdmi720p120_12000 = {
+	.vrefresh_khz = 12000,
+	.vtotal_fixed = 750,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_11988 = {
+	.vrefresh_khz = 11988,
+	.vtotal_fixed = 750, /* 0.75 */
+	.bit_len = 24,
+	.frac_array = {0x3f, 0xe3, 0xfe},
+};
+
+static const struct mvrr_const_val const_hdmi720p120_10000 = {
+	.vrefresh_khz = 10000,
+	.vtotal_fixed = 900,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_6000 = {
+	.vrefresh_khz = 6000,
+	.vtotal_fixed = 1500,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_5994 = {
+	.vrefresh_khz = 5994,
+	.vtotal_fixed = 1501, /* 0.5 */
+	.bit_len = 56,
+	.frac_array = {0x0f, 0xe0, 0x3f, 0x80, 0xfe, 0x03, 0xf8},
+};
+
+static const struct mvrr_const_val const_hdmi720p120_5000 = {
+	.vrefresh_khz = 5000,
+	.vtotal_fixed = 1800,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_4800 = {
+	.vrefresh_khz = 4800,
+	.vtotal_fixed = 1875,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_4795 = {
+	.vrefresh_khz = 4795,
+	.vtotal_fixed = 1876, /* 0.875 */
+	.bit_len = 40,
+	.frac_array = {0x1f, 0xff, 0xff, 0xff, 0xfc},
+};
+
+static const struct mvrr_const_val const_hdmi720p120_3000 = {
+	.vrefresh_khz = 3000,
+	.vtotal_fixed = 3000,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_2997 = {
+	.vrefresh_khz = 2997,
+	.vtotal_fixed = 3003,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_2500 = {
+	.vrefresh_khz = 2500,
+	.vtotal_fixed = 3600,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_2400 = {
+	.vrefresh_khz = 2400,
+	.vtotal_fixed = 3750,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_2397 = {
+	.vrefresh_khz = 2397,
+	.vtotal_fixed = 3753, /* 0.75 */
+	.bit_len = 88,
+	.frac_array = {
+		0x03, 0xff, 0xff, 0xff, 0xfe, 0x00, 0x3f, 0xff, 0xff, 0xff, 0xe0
+	},
+};
+
+/* BRR 1080p60hz */
+static const struct mvrr_const_val const_hdmi1080p60_6000 = {
+	.vrefresh_khz = 6000,
+	.vtotal_fixed = 1125,
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_5994 = {
+	.vrefresh_khz = 5994,
+	.vtotal_fixed = 1126, /* 0.125 */
+	.bit_len = 24,
+	.frac_array = {0x00, 0x38, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_5000 = {
+	.vrefresh_khz = 5000,
+	.vtotal_fixed = 1350,
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_4800 = {
+	.vrefresh_khz = 4800,
+	.vtotal_fixed = 1406, /* 0.25 */
+	.bit_len = 16,
+	.frac_array = {0x03, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_4795 = {
+	.vrefresh_khz = 4795,
+	.vtotal_fixed = 1407, /* 0.65625 */
+	.bit_len = 32,
+	.frac_array = {0x1f, 0xf1, 0x7f, 0xf0},
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_3000 = {
+	.vrefresh_khz = 3000,
+	.vtotal_fixed = 2250,
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_2997 = {
+	.vrefresh_khz = 2997,
+	.vtotal_fixed = 2252, /* 0.25 */
+	.bit_len = 56,
+	.frac_array = {0x00, 0x3f, 0x80, 0x00, 0x03, 0xf8, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_2500 = {
+	.vrefresh_khz = 2500,
+	.vtotal_fixed = 2700,
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_2400 = {
+	.vrefresh_khz = 2400,
+	.vtotal_fixed = 2812, /* 0.5 */
+	.bit_len = 24,
+	.frac_array = {0x03, 0xff, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_2397 = {
+	.vrefresh_khz = 2397,
+	.vtotal_fixed = 2815, /* 0.3125 */
+	.bit_len = 128,
+	.frac_array = {
+		0x00, 0x7f, 0x80, 0x00, 0x3f, 0xc0, 0x00, 0x0f,
+		0xf0, 0x00, 0x07, 0xf8, 0x00, 0x01, 0xfe, 0x00,
+	},
+};
+
+/* BRR 1080p120hz */
+static const struct mvrr_const_val const_hdmi1080p120_12000 = {
+	.vrefresh_khz = 12000,
+	.vtotal_fixed = 1125,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_11988 = {
+	.vrefresh_khz = 11988,
+	.vtotal_fixed = 1126, /* 0.125 */
+	.bit_len = 24,
+	.frac_array = {0x00, 0x38, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_10000 = {
+	.vrefresh_khz = 10000,
+	.vtotal_fixed = 1350,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_6000 = {
+	.vrefresh_khz = 6000,
+	.vtotal_fixed = 2250,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_5994 = {
+	.vrefresh_khz = 5994,
+	.vtotal_fixed = 2252, /* 0.25 */
+	.bit_len = 56,
+	.frac_array = {0x00, 0x3f, 0x80, 0x00, 0x03, 0xf8, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_5000 = {
+	.vrefresh_khz = 5000,
+	.vtotal_fixed = 2700,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_4800 = {
+	.vrefresh_khz = 4800,
+	.vtotal_fixed = 2812, /* 0.5 */
+	.bit_len = 24,
+	.frac_array = {0x03, 0xff, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_4795 = {
+	.vrefresh_khz = 4795,
+	.vtotal_fixed = 2812, /* 0.3125 */
+	.bit_len = 48,
+	.frac_array = {0x00, 0x3f, 0x80, 0x00, 0x3f, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_3000 = {
+	.vrefresh_khz = 3000,
+	.vtotal_fixed = 4500,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_2997 = {
+	.vrefresh_khz = 2997,
+	.vtotal_fixed = 4504, /* 0.5 */
+	.bit_len = 32,
+	.frac_array = {0x00, 0xff, 0xff, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_2500 = {
+	.vrefresh_khz = 2500,
+	.vtotal_fixed = 5400,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_2400 = {
+	.vrefresh_khz = 2400,
+	.vtotal_fixed = 5625,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_2397 = {
+	.vrefresh_khz = 2397,
+	.vtotal_fixed = 5630, /* 0.625 */
+	.bit_len = 48,
+	.frac_array = {0x00, 0x7f, 0xff, 0xff, 0xfe, 0x00},
+};
+
+/* BRR 2160p60hz */
+static const struct mvrr_const_val const_hdmi2160p60_6000 = {
+	.vrefresh_khz = 6000,
+	.vtotal_fixed = 2250,
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_5994 = {
+	.vrefresh_khz = 5994,
+	.vtotal_fixed = 2252, /* 0.25 */
+	.bit_len = 56,
+	.frac_array = {0x00, 0x3f, 0x80, 0x00, 0x03, 0xf8, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_5000 = {
+	.vrefresh_khz = 5000,
+	.vtotal_fixed = 2700,
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_4800 = {
+	.vrefresh_khz = 4800,
+	.vtotal_fixed = 2812, /* 0.5 */
+	.bit_len = 24,
+	.frac_array = {0x03, 0xff, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_4795 = {
+	.vrefresh_khz = 4795,
+	.vtotal_fixed = 2815, /* 0.3125 */
+	.bit_len = 48,
+	.frac_array = {0x00, 0x3f, 0x80, 0x00, 0x3f, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_3000 = {
+	.vrefresh_khz = 3000,
+	.vtotal_fixed = 4500,
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_2997 = {
+	.vrefresh_khz = 2997,
+	.vtotal_fixed = 4504, /* 0.5 */
+	.bit_len = 32,
+	.frac_array = {0x00, 0xff, 0xff, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_2500 = {
+	.vrefresh_khz = 2500,
+	.vtotal_fixed = 5400,
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_2400 = {
+	.vrefresh_khz = 2400,
+	.vtotal_fixed = 5625,
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_2397 = {
+	.vrefresh_khz = 2397,
+	.vtotal_fixed = 5630, /* 0.625 */
+	.bit_len = 48,
+	.frac_array = {0x00, 0x3f, 0xff, 0xff, 0xff, 0x00},
+};
+
+const struct mvrr_const_st const_hdmi1080p60_val = {
+	.brr_vic = HDMI_16_1920x1080P60_16x9,
+	.val = {
+		&const_hdmi1080p60_6000,
+		&const_hdmi1080p60_5994,
+		&const_hdmi1080p60_5000,
+		&const_hdmi1080p60_4800,
+		&const_hdmi1080p60_4795,
+		&const_hdmi1080p60_3000,
+		&const_hdmi1080p60_2997,
+		&const_hdmi1080p60_2500,
+		&const_hdmi1080p60_2400,
+		&const_hdmi1080p60_2397,
+		NULL,
+	},
+};
+
+const struct mvrr_const_st const_hdmi1080p120_val = {
+	.brr_vic = HDMI_63_1920x1080P120_16x9,
+	.val = {
+		&const_hdmi1080p120_12000,
+		&const_hdmi1080p120_11988,
+		&const_hdmi1080p120_10000,
+		&const_hdmi1080p120_6000,
+		&const_hdmi1080p120_5994,
+		&const_hdmi1080p120_5000,
+		&const_hdmi1080p120_4800,
+		&const_hdmi1080p120_4795,
+		&const_hdmi1080p120_3000,
+		&const_hdmi1080p120_2997,
+		&const_hdmi1080p120_2500,
+		&const_hdmi1080p120_2400,
+		&const_hdmi1080p120_2397,
+		NULL,
+	},
+};
+
+const struct mvrr_const_st const_hdmi720p60_val = {
+	.brr_vic = HDMI_4_1280x720P60_16x9,
+	.val = {
+		&const_hdmi720p60_6000,
+		&const_hdmi720p60_5994,
+		&const_hdmi720p60_5000,
+		&const_hdmi720p60_4800,
+		&const_hdmi720p60_4795,
+		&const_hdmi720p60_3000,
+		&const_hdmi720p60_2997,
+		&const_hdmi720p60_2500,
+		&const_hdmi720p60_2400,
+		&const_hdmi720p60_2397,
+		NULL,
+	},
+};
+
+const struct mvrr_const_st const_hdmi720p120_val = {
+	.brr_vic = HDMI_47_1280x720P120_16x9,
+	.val = {
+		&const_hdmi720p120_12000,
+		&const_hdmi720p120_11988,
+		&const_hdmi720p120_10000,
+		&const_hdmi720p120_6000,
+		&const_hdmi720p120_5994,
+		&const_hdmi720p120_5000,
+		&const_hdmi720p120_4800,
+		&const_hdmi720p120_4795,
+		&const_hdmi720p120_3000,
+		&const_hdmi720p120_2997,
+		&const_hdmi720p120_2500,
+		&const_hdmi720p120_2400,
+		&const_hdmi720p120_2397,
+		NULL,
+	},
+};
+
+const struct mvrr_const_st const_hdmi2160p60_val = {
+	.brr_vic = HDMI_97_3840x2160P60_16x9,
+	.val = {
+		&const_hdmi2160p60_6000,
+		&const_hdmi2160p60_5994,
+		&const_hdmi2160p60_5000,
+		&const_hdmi2160p60_4800,
+		&const_hdmi2160p60_4795,
+		&const_hdmi2160p60_3000,
+		&const_hdmi2160p60_2997,
+		&const_hdmi2160p60_2500,
+		&const_hdmi2160p60_2400,
+		&const_hdmi2160p60_2397,
+		NULL,
+	},
+};
+
+/* The vtotal parameters of 4096x2160p60hz are the same as 3840x2160p60hz */
+const struct mvrr_const_st const_hdmismpte60_val = {
+	.brr_vic = HDMI_102_4096x2160P60_256x135,
+	.val = {
+		&const_hdmi2160p60_6000,
+		&const_hdmi2160p60_5994,
+		&const_hdmi2160p60_5000,
+		&const_hdmi2160p60_4800,
+		&const_hdmi2160p60_4795,
+		&const_hdmi2160p60_3000,
+		&const_hdmi2160p60_2997,
+		&const_hdmi2160p60_2500,
+		&const_hdmi2160p60_2400,
+		&const_hdmi2160p60_2397,
+		NULL,
+	},
+};
+
+const struct mvrr_const_st *qms_const[] = {
+	&const_hdmi1080p60_val,
+	&const_hdmi1080p120_val,
+	&const_hdmi2160p60_val,
+	&const_hdmi720p60_val,
+	&const_hdmi720p120_val,
+	&const_hdmismpte60_val,
+	NULL,
+};
 
 static inline bool rockchip_drm_debug_enabled(enum rockchip_drm_debug_category category)
 {
@@ -291,10 +788,6 @@ EXPORT_SYMBOL(drm_mode_convert_to_origin_mode);
 
 uint32_t rockchip_drm_get_bpp(const struct drm_format_info *info)
 {
-	/* use whatever a driver has set */
-	if (info->cpp[0])
-		return info->cpp[0] * 8;
-
 	switch (info->format) {
 	case DRM_FORMAT_YUV420_8BIT:
 		return 12;
@@ -303,11 +796,8 @@ uint32_t rockchip_drm_get_bpp(const struct drm_format_info *info)
 	case DRM_FORMAT_VUY101010:
 		return 30;
 	default:
-		break;
+		return drm_format_info_bpp(info, 0);
 	}
-
-	/* all attempts failed */
-	return 0;
 }
 EXPORT_SYMBOL(rockchip_drm_get_bpp);
 
@@ -382,7 +872,7 @@ void rockchip_connector_update_vfp_for_vrr(struct drm_crtc *crtc, struct drm_dis
 
 	mutex_lock(&rockchip_drm_sub_dev_lock);
 	list_for_each_entry(sub_dev, &rockchip_drm_sub_dev_list, list) {
-		if (sub_dev->connector->state->crtc == crtc) {
+		if (sub_dev->connector && sub_dev->connector->state->crtc == crtc) {
 			if (sub_dev->update_vfp_for_vrr)
 				sub_dev->update_vfp_for_vrr(sub_dev->connector, mode, vfp);
 		}
@@ -432,7 +922,7 @@ int rockchip_drm_get_sub_dev_type(void)
 
 	mutex_lock(&rockchip_drm_sub_dev_lock);
 	list_for_each_entry(sub_dev, &rockchip_drm_sub_dev_list, list) {
-		if (sub_dev->connector->encoder) {
+		if (sub_dev->connector && sub_dev->connector->encoder) {
 			connector_type = sub_dev->connector->connector_type;
 			break;
 		}
@@ -451,7 +941,8 @@ u32 rockchip_drm_get_scan_line_time_ns(void)
 
 	mutex_lock(&rockchip_drm_sub_dev_lock);
 	list_for_each_entry(sub_dev, &rockchip_drm_sub_dev_list, list) {
-		if (sub_dev->connector->encoder && sub_dev->connector->state->crtc) {
+		if (sub_dev->connector && sub_dev->connector->encoder &&
+		    sub_dev->connector->state->crtc) {
 			mode = &sub_dev->connector->state->crtc->state->adjusted_mode;
 			linedur_ns  = div_u64((u64) mode->crtc_htotal * 1000000, mode->crtc_clock);
 			break;
@@ -666,6 +1157,27 @@ static bool cea_db_is_hdmi_forum_scdb(const u8 *db)
 		cea_db_payload_len(db) >= 7;
 }
 
+#define HDRVIVID_VSVDB_OUI		0x047503
+
+static bool cea_db_is_hdmi_hdrvivid_block(const u8 *db)
+{
+	unsigned int oui;
+
+	if (cea_db_tag(db) != CTA_DB_EXTENDED_TAG)
+		return false;
+
+	if (cea_db_payload_len(db) < 14)
+		return false;
+
+	/* check ext tag flag */
+	if (db[1] != 0x01)
+		return false;
+
+	oui = db[4] << 16 | db[3] << 8 | db[2];
+
+	return oui == HDRVIVID_VSVDB_OUI;
+}
+
 static int
 cea_db_offsets(const u8 *cea, int *start, int *end)
 {
@@ -708,24 +1220,25 @@ cea_db_offsets(const u8 *cea, int *start, int *end)
 	return 0;
 }
 
-static u8 *find_edid_extension(const struct edid *edid,
-			       int ext_id, int *ext_index)
+static
+u8 *find_edid_extension(const struct edid *edid, int ext_id, int ext_block_num, int *ext_index)
 {
+	struct edid;
 	u8 *edid_ext = NULL;
 	int i;
 
 	/* No EDID or EDID extensions */
-	if (edid == NULL || edid->extensions == 0)
+	if (edid == NULL)
 		return NULL;
 
 	/* Find CEA extension */
-	for (i = *ext_index; i < edid->extensions; i++) {
+	for (i = *ext_index; i < ext_block_num; i++) {
 		edid_ext = (u8 *)edid + EDID_LENGTH * (i + 1);
 		if (edid_ext[0] == ext_id)
 			break;
 	}
 
-	if (i >= edid->extensions)
+	if (i >= ext_block_num)
 		return NULL;
 
 	*ext_index = i + 1;
@@ -759,11 +1272,10 @@ static int validate_displayid(u8 *displayid, int length, int idx)
 	return 0;
 }
 
-static u8 *find_displayid_extension(const struct edid *edid,
-				    int *length, int *idx,
-				    int *ext_index)
+static u8 *find_displayid_extension(const struct edid *edid, int *length, int *idx,
+				    int ext_block_num, int *ext_index)
 {
-	u8 *displayid = find_edid_extension(edid, 0x70, ext_index);
+	u8 *displayid = find_edid_extension(edid, 0x70, ext_block_num, ext_index);
 	struct displayid_header *base;
 	int ret;
 
@@ -784,26 +1296,26 @@ static u8 *find_displayid_extension(const struct edid *edid,
 	return displayid;
 }
 
-static u8 *find_cea_extension(const struct edid *edid)
+static u8 *find_cea_extension(const struct edid *edid, int ext_block_num, int ext_index)
 {
 	int length, idx;
 	struct displayid_block *block;
 	u8 *cea;
 	u8 *displayid;
-	int ext_index;
 
-	/* Look for a top level CEA extension block */
-	/* FIXME: make callers iterate through multiple CEA ext blocks? */
-	ext_index = 0;
-	cea = find_edid_extension(edid, 0x02, &ext_index);
+	cea = find_edid_extension(edid, 0x02, ext_block_num, &ext_index);
 	if (cea)
 		return cea;
 
 	/* CEA blocks can also be found embedded in a DisplayID block */
-	ext_index = 0;
+	if (ext_index >= ext_block_num)
+		ext_index = 0;
+	else
+		return NULL;
+
 	for (;;) {
-		displayid = find_displayid_extension(edid, &length, &idx,
-						     &ext_index);
+		displayid = find_displayid_extension(edid, &length, &idx, ext_block_num,
+					  &ext_index);
 		if (!displayid)
 			return NULL;
 
@@ -819,27 +1331,62 @@ static u8 *find_cea_extension(const struct edid *edid)
 
 #define EDID_CEA_YCRCB422	(1 << 4)
 
-int rockchip_drm_get_yuv422_format(struct drm_connector *connector,
-				   const struct edid *edid)
+int rockchip_drm_get_yuv422_format(struct drm_connector *connector, const struct edid *edid,
+				   int ext_block_num)
 {
 	struct drm_display_info *info;
 	const u8 *edid_ext;
+	int ext_index;
 
 	if (!connector || !edid)
 		return -EINVAL;
 
 	info = &connector->display_info;
 
-	edid_ext = find_cea_extension(edid);
-	if (!edid_ext)
-		return -EINVAL;
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
 
-	if (edid_ext[3] & EDID_CEA_YCRCB422)
-		info->color_formats |= DRM_COLOR_FORMAT_YCBCR422;
+		if (edid_ext[3] & EDID_CEA_YCRCB422)
+			info->color_formats |= DRM_COLOR_FORMAT_YCBCR422;
+	}
 
 	return 0;
 }
 EXPORT_SYMBOL(rockchip_drm_get_yuv422_format);
+
+int rockchip_drm_parse_hdrvivid(void *sink_data, const struct edid *edid, int ext_block_num)
+{
+	const u8 *edid_ext;
+	int i, start, end, ext_index;
+
+	if (!sink_data || !edid)
+		return -EINVAL;
+
+	memset(sink_data, 0, HDRVIVID_VSVDB_LEN);
+
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
+
+		if (cea_db_offsets(edid_ext, &start, &end))
+			return -EINVAL;
+
+		for_each_cea_db(edid_ext, i, start, end) {
+			const u8 *db = &edid_ext[i];
+
+			if (cea_db_is_hdmi_hdrvivid_block(db)) {
+				memcpy(sink_data, db, HDRVIVID_VSVDB_LEN);
+				break;
+			}
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(rockchip_drm_parse_hdrvivid);
 
 static
 void get_max_frl_rate(int max_frl_rate, u8 *max_lanes, u8 *max_rate_per_lane)
@@ -891,7 +1438,16 @@ void get_max_frl_rate(int max_frl_rate, u8 *max_lanes, u8 *max_rate_per_lane)
 #define EDID_DSC_TOTAL_CHUNK_KBYTES	0x3f
 #define EDID_MAX_FRL_RATE_MASK		0xf0
 
-/* Sink Capability Data Structure, for compatibility with linux version < linux kernel 6.1 */
+#define DRM_EDID_FAPA_START		(1 << 0)
+#define DRM_EDID_ALLM			(1 << 1)
+#define DRM_EDID_FVA			(1 << 2)
+#define DRM_EDID_QMS			(1 << 6)
+#define DRM_EDID_VRR_MIN_MASK		0x3f
+#define DRM_EDID_VRR_MAX_UPPER_MASK	0xc0
+#define DRM_EDID_QMS_TFR_MIN		(1 << 4)
+#define DRM_EDID_QMS_TFR_MAX		(1 << 5)
+
+/* Sink Capability Data Structure */
 static void parse_hdmi_forum_scds(struct rockchip_drm_hdmi21_data *hdmi21_data, const u8 *hf_scds)
 {
 	if (hf_scds[7]) {
@@ -899,9 +1455,9 @@ static void parse_hdmi_forum_scds(struct rockchip_drm_hdmi21_data *hdmi21_data, 
 		u8 dsc_max_frl_rate;
 		u8 dsc_max_slices;
 
-		DRM_DEBUG_KMS("hdmi_21 sink detected. parsing edid\n");
 		max_frl_rate = (hf_scds[7] & DRM_EDID_MAX_FRL_RATE_MASK) >> 4;
-		hdmi21_data->allm_supported = hf_scds[8] & DRM_EDID_ALLM;
+		if (max_frl_rate)
+			DRM_DEBUG_KMS("hdmi21 FRL detected. parsing edid....\n");
 		get_max_frl_rate(max_frl_rate, &hdmi21_data->max_lanes,
 				 &hdmi21_data->max_frl_rate_per_lane);
 		hdmi21_data->dsc_cap.v_1p2 = hf_scds[11] & DRM_EDID_DSC_1P2;
@@ -963,6 +1519,27 @@ static void parse_hdmi_forum_scds(struct rockchip_drm_hdmi21_data *hdmi21_data, 
 			}
 		}
 	}
+
+	/* parse additional bytes */
+	if (cea_db_payload_len(hf_scds) >= 9) {
+		hdmi21_data->allm_supported = hf_scds[8] & DRM_EDID_ALLM;
+		hdmi21_data->vrr_cap.qms = hf_scds[8] & DRM_EDID_QMS;
+		hdmi21_data->vrr_cap.fva = hf_scds[8] & DRM_EDID_FVA;
+		hdmi21_data->vrr_cap.m_delta = hf_scds[8] & DRM_EDID_MDELTA;
+		hdmi21_data->vrr_cap.negm_vrr = hf_scds[8] & DRM_EDID_CNMVRR;
+		hdmi21_data->vrr_cap.cinema_vrr = hf_scds[8] & DRM_EDID_CINEMA_VRR;
+	}
+
+	if (cea_db_payload_len(hf_scds) >= 11) {
+		hdmi21_data->vrr_cap.vrr_min = hf_scds[9] & DRM_EDID_VRR_MIN_MASK;
+		hdmi21_data->vrr_cap.vrr_max =
+			(hf_scds[9] & DRM_EDID_VRR_MAX_UPPER_MASK) << 2 | hf_scds[10];
+	}
+
+	if (cea_db_payload_len(hf_scds) >= 12) {
+		hdmi21_data->vrr_cap.qms_tfr_min = hf_scds[11] & DRM_EDID_QMS_TFR_MIN;
+		hdmi21_data->vrr_cap.qms_tfr_max = hf_scds[11] & DRM_EDID_QMS_TFR_MAX;
+	}
 }
 
 static
@@ -978,56 +1555,60 @@ int parse_dovi_block(u8 *sink_data, const u8 *dovi_db)
 }
 
 int rockchip_drm_parse_cea_ext(struct rockchip_drm_hdmi21_data *hdmi21_data,
-			       const struct edid *edid)
+			       const struct edid *edid, int ext_block_num)
 {
 	const u8 *edid_ext;
-	int i, start, end;
+	int i, start, end, ext_index;
 
 	if (!hdmi21_data || !edid)
 		return -EINVAL;
 
-	edid_ext = find_cea_extension(edid);
-	if (!edid_ext)
-		return -EINVAL;
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
 
-	if (cea_db_offsets(edid_ext, &start, &end))
-		return -EINVAL;
+		if (cea_db_offsets(edid_ext, &start, &end))
+			return -EINVAL;
 
-	for_each_cea_db(edid_ext, i, start, end) {
-		const u8 *db = &edid_ext[i];
+		for_each_cea_db(edid_ext, i, start, end) {
+			const u8 *db = &edid_ext[i];
 
-		if (cea_db_is_hdmi_forum_vsdb(db) || cea_db_is_hdmi_forum_scdb(db))
-			parse_hdmi_forum_scds(hdmi21_data, db);
+			if (cea_db_is_hdmi_forum_vsdb(db) || cea_db_is_hdmi_forum_scdb(db))
+				parse_hdmi_forum_scds(hdmi21_data, db);
+		}
 	}
 
 	return 0;
 }
 EXPORT_SYMBOL(rockchip_drm_parse_cea_ext);
 
-int rockchip_drm_parse_dovi(u8 *sink_data, const struct edid *edid)
+int rockchip_drm_parse_dovi(u8 *sink_data, const struct edid *edid, int ext_block_num)
 {
 	const u8 *edid_ext;
-	int i, start, end, ret;
+	int i, start, end, ret, ext_index;
 
 	if (!sink_data || !edid)
 		return -EINVAL;
 
 	memset(sink_data, 0, DOVI_VSDB_LEN);
 
-	edid_ext = find_cea_extension(edid);
-	if (!edid_ext)
-		return -EINVAL;
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
 
-	if (cea_db_offsets(edid_ext, &start, &end))
-		return -EINVAL;
+		if (cea_db_offsets(edid_ext, &start, &end))
+			return -EINVAL;
 
-	for_each_cea_db(edid_ext, i, start, end) {
-		const u8 *db = &edid_ext[i];
+		for_each_cea_db(edid_ext, i, start, end) {
+			const u8 *db = &edid_ext[i];
 
-		if (cea_db_is_hdmi_dovi_block(db)) {
-			ret = parse_dovi_block(sink_data, db);
-			if (ret)
-				return ret;
+			if (cea_db_is_hdmi_dovi_block(db)) {
+				ret = parse_dovi_block(sink_data, db);
+				if (ret)
+					return ret;
+			}
 		}
 	}
 
@@ -1050,29 +1631,48 @@ static bool cea_db_is_hdmi_colorimetry_data_block(const u8 *db)
 }
 
 int
-rockchip_drm_parse_colorimetry_data_block(u8 *colorimetry, const struct edid *edid)
+rockchip_drm_parse_colorimetry_data_block(u32 *colorimetry, const struct edid *edid,
+					  int ext_block_num)
 {
 	const u8 *edid_ext;
-	int i, start, end;
+	int i, start, end, ext_index;
 
 	if (!colorimetry || !edid)
 		return -EINVAL;
 
 	*colorimetry = 0;
 
-	edid_ext = find_cea_extension(edid);
-	if (!edid_ext)
-		return -EINVAL;
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
 
-	if (cea_db_offsets(edid_ext, &start, &end))
-		return -EINVAL;
+		if (cea_db_offsets(edid_ext, &start, &end))
+			return -EINVAL;
 
-	for_each_cea_db(edid_ext, i, start, end) {
-		const u8 *db = &edid_ext[i];
+		for_each_cea_db(edid_ext, i, start, end) {
+			const u8 *db = &edid_ext[i];
 
-		if (cea_db_is_hdmi_colorimetry_data_block(db))
-			/* As per CEA 861-G spec */
-			*colorimetry = ((db[3] & (0x1 << 7)) << 1) | db[2];
+			if (cea_db_is_hdmi_colorimetry_data_block(db))
+				/* As per CEA 861-G spec */
+				*colorimetry = ((db[3] & (0x1 << 7)) << 1) | db[2];
+			else
+				continue;
+
+			*colorimetry = *colorimetry << 3;
+			*colorimetry |= BIT(DRM_MODE_COLORIMETRY_DEFAULT) |
+				BIT(DRM_MODE_COLORIMETRY_BT709_YCC) |
+				BIT(DRM_MODE_COLORIMETRY_SMPTE_170M_YCC);
+			/*
+			 * The macro definitions of BT2020_RGB and BT2020_YCC in
+			 * DRM are in the opposite order to that in EDID.
+			 * so the values of two bits need to be exchanged.
+			 */
+			if ((*colorimetry & BIT(DRM_MODE_COLORIMETRY_BT2020_RGB)) !=
+			    ((*colorimetry & BIT(DRM_MODE_COLORIMETRY_BT2020_YCC)) >> 1))
+				*colorimetry ^= (BIT(DRM_MODE_COLORIMETRY_BT2020_RGB) |
+						 BIT(DRM_MODE_COLORIMETRY_BT2020_YCC));
+		}
 	}
 
 	return 0;
@@ -1095,28 +1695,30 @@ static bool cea_db_is_hdr10_plus_block(const u8 *db)
 	return oui == HDR10_PLUS_OUI;
 }
 
-u8 rockchip_drm_parse_hdr10_plus_vsdb(const struct edid *edid)
+u8 rockchip_drm_parse_hdr10_plus_vsdb(const struct edid *edid, int ext_block_num)
 {
 	const u8 *edid_ext;
-	int i, start, end;
+	int i, ext_index, start, end;
 	u8 hdr10_plus = 0;
 
 	if (!edid)
 		return 0;
 
-	edid_ext = find_cea_extension(edid);
-	if (!edid_ext)
-		return 0;
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
 
-	if (cea_db_offsets(edid_ext, &start, &end))
-		return 0;
+		if (cea_db_offsets(edid_ext, &start, &end))
+			return 0;
 
-	for_each_cea_db(edid_ext, i, start, end) {
-		const u8 *db = &edid_ext[i];
+		for_each_cea_db(edid_ext, i, start, end) {
+			const u8 *db = &edid_ext[i];
 
-		if (cea_db_is_hdr10_plus_block(db))
-			/* As per CEA 861-G spec */
-			hdr10_plus = db[5];
+			if (cea_db_is_hdr10_plus_block(db))
+				/* As per CEA 861-G spec */
+				hdr10_plus = db[5];
+		}
 	}
 
 	return hdr10_plus;
@@ -1233,6 +1835,63 @@ void rockchip_unregister_crtc_funcs(struct drm_crtc *crtc)
 		return;
 
 	priv->crtc_funcs[pipe] = NULL;
+}
+
+u16 rockchip_hdmi_vrr_tfr_match_to_vrefresh(u8 tfr)
+{
+	if (tfr < 0 || tfr >= TFR_MAX) {
+		DRM_ERROR("qms-vrr tfr is out of range\n");
+		return 0;
+	}
+
+	return tfr_vrefresh_table[tfr];
+}
+
+const struct
+mvrr_const_val *rockchip_hdmi_vrr_get_vrrconf_mconst(enum hdmi_brr_vic brr_vic, u16 vrefresh_khz)
+{
+	const struct mvrr_const_st **table_vic = NULL;
+	const struct mvrr_const_val *const *table_val = NULL;
+
+	for (table_vic = qms_const; *table_vic; table_vic++) {
+		if ((*table_vic)->brr_vic == brr_vic) {
+			table_val = (*table_vic)->val;
+			for (; *table_val; table_val++) {
+				if ((*table_val)->vrefresh_khz == vrefresh_khz)
+					break;
+			}
+			break;
+		}
+	}
+
+	if (!table_val) {
+		DRM_ERROR("%s[%d] not find brr_vic: %d vrefresh_khz: %d\n",
+			  __func__, __LINE__, brr_vic, vrefresh_khz);
+		return NULL;
+	}
+
+	return *table_val;
+}
+
+u16 rockchip_hdmi_vrr_calc_new_vtotal(const struct mvrr_const_val *mvrr, u32 frame_cnt)
+{
+	u32 pos;
+	u16 vtotal = 0;
+
+	if (!mvrr)
+		return vtotal;
+
+	vtotal = mvrr->vtotal_fixed;
+	/* if bit_len is 0, then means there is no fraction */
+	if (!mvrr->bit_len)
+		return vtotal;
+
+	/* calculate the fraction number */
+	pos = frame_cnt % mvrr->bit_len;
+	if (mvrr->frac_array[pos / 8] & (1 << (7 - (pos % 8))))
+		vtotal++;
+
+	return vtotal;
 }
 
 /*
@@ -1492,6 +2151,12 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 					ARRAY_SIZE(split_area));
 	private->split_area_prop = prop;
 
+	prop = drm_property_create(dev, DRM_MODE_PROP_BLOB | DRM_MODE_PROP_IMMUTABLE,
+				   "MODE_INFO", 0);
+	if (!prop)
+		return -ENOMEM;
+	private->mode_info_prop = prop;
+
 	prop = drm_property_create_object(dev,
 					  DRM_MODE_PROP_ATOMIC | DRM_MODE_PROP_IMMUTABLE,
 					  "SOC_ID", DRM_MODE_OBJECT_CRTC);
@@ -1514,6 +2179,9 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 	private->cubic_lut_prop = drm_property_create(dev, DRM_MODE_PROP_BLOB, "CUBIC_LUT", 0);
 	private->cubic_lut_size_prop = drm_property_create_range(dev, DRM_MODE_PROP_IMMUTABLE,
 								 "CUBIC_LUT_SIZE", 0, UINT_MAX);
+
+	private->dimming_data_prop = drm_property_create(dev, DRM_MODE_PROP_BLOB,
+							 "DIMMING_DATA", 0);
 
 	return drm_mode_create_tv_properties(dev, 0, NULL);
 }
@@ -1627,6 +2295,13 @@ static void rockchip_gem_pool_destroy(struct drm_device *drm)
 	gen_pool_destroy(private->secure_buffer_pool);
 }
 
+static void rockchip_drm_sysfs_dev_release(struct device *dev)
+{
+	kfree(dev);
+}
+
+static void rockchip_drm_sysfs_fini(struct drm_device *drm_dev);
+
 static int rockchip_drm_sysfs_init(struct drm_device *drm_dev)
 {
 	struct rockchip_drm_private *priv = drm_dev->dev_private;
@@ -1636,14 +2311,19 @@ static int rockchip_drm_sysfs_init(struct drm_device *drm_dev)
 
 	drm_for_each_crtc(crtc, drm_dev) {
 		dev = kzalloc(sizeof(struct device), GFP_KERNEL);
-		if (!dev)
-			return -ENOMEM;
+		if (!dev) {
+			ret = -ENOMEM;
+			goto cleanup;
+		}
 
 		ret = dev_set_name(dev, "%s", crtc->name);
-		if (ret)
+		if (ret) {
+			kfree(dev);
 			goto cleanup;
+		}
 
 		dev->parent = drm_dev->primary->kdev;
+		dev->release = rockchip_drm_sysfs_dev_release;
 		ret = device_register(dev);
 		if (ret) {
 			put_device(dev);
@@ -1659,9 +2339,8 @@ static int rockchip_drm_sysfs_init(struct drm_device *drm_dev)
 	}
 
 	return 0;
-
 cleanup:
-	kfree(dev);
+	rockchip_drm_sysfs_fini(drm_dev);
 	return ret;
 }
 
@@ -1680,7 +2359,6 @@ static void rockchip_drm_sysfs_fini(struct drm_device *drm_dev)
 			if (priv->crtc_funcs[pipe] && priv->crtc_funcs[pipe]->sysfs_fini)
 				priv->crtc_funcs[pipe]->sysfs_fini(dev, crtc);
 			device_unregister(dev);
-			kfree(dev);
 			priv->sysfs_devs[pipe] = NULL;
 		}
 	}
@@ -1790,10 +2468,266 @@ static void rockchip_drm_error_event_fini(struct drm_device *drm_dev)
 	device_remove_file(drm_dev->dev, &dev_attr_error_event);
 }
 
+int rockchip_drm_panel_loader_protect(struct drm_panel *panel, bool on)
+{
+	struct rockchip_drm_sub_dev *sub_dev;
+
+	if (!panel)
+		return -EINVAL;
+
+	sub_dev = rockchip_drm_get_sub_dev(panel->dev->of_node);
+	if (sub_dev && sub_dev->loader_protect)
+		return sub_dev->loader_protect(sub_dev, on);
+
+	return 0;
+}
+EXPORT_SYMBOL(rockchip_drm_panel_loader_protect);
+
+int rockchip_drm_bus_fmt_color_depth(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_RGB888_1X24:
+	case MEDIA_BUS_FMT_YUV8_1X24:
+	case MEDIA_BUS_FMT_UYVY8_1X16:
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
+		return 8;
+
+	case MEDIA_BUS_FMT_RGB101010_1X30:
+	case MEDIA_BUS_FMT_YUV10_1X30:
+	case MEDIA_BUS_FMT_UYVY10_1X20:
+	case MEDIA_BUS_FMT_YUYV10_1X20:
+	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
+		return 10;
+
+	case MEDIA_BUS_FMT_RGB121212_1X36:
+	case MEDIA_BUS_FMT_YUV12_1X36:
+	case MEDIA_BUS_FMT_UYVY12_1X24:
+	case MEDIA_BUS_FMT_YUYV12_1X24:
+	case MEDIA_BUS_FMT_UYYVYY12_0_5X36:
+		return 12;
+
+	case MEDIA_BUS_FMT_RGB161616_1X48:
+	case MEDIA_BUS_FMT_YUV16_1X48:
+	case MEDIA_BUS_FMT_UYYVYY16_0_5X48:
+		return 16;
+
+	default:
+		return 0;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_color_depth);
+
+int rockchip_drm_bus_fmt_to_color_format(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
+	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
+	case MEDIA_BUS_FMT_UYYVYY12_0_5X36:
+	case MEDIA_BUS_FMT_UYYVYY16_0_5X48:
+		return RK_IF_FORMAT_YCBCR420;
+
+	case MEDIA_BUS_FMT_YUV8_1X24:
+	case MEDIA_BUS_FMT_YUV10_1X30:
+	case MEDIA_BUS_FMT_YUV12_1X36:
+	case MEDIA_BUS_FMT_YUV16_1X48:
+		return RK_IF_FORMAT_YCBCR444;
+
+	case MEDIA_BUS_FMT_UYVY8_1X16:
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+	case MEDIA_BUS_FMT_UYVY10_1X20:
+	case MEDIA_BUS_FMT_YUYV10_1X20:
+	case MEDIA_BUS_FMT_UYVY12_1X24:
+	case MEDIA_BUS_FMT_YVYU12_1X24:
+		return RK_IF_FORMAT_YCBCR422;
+
+	case MEDIA_BUS_FMT_RGB888_1X24:
+	case MEDIA_BUS_FMT_RGB101010_1X30:
+	case MEDIA_BUS_FMT_RGB121212_1X36:
+	case MEDIA_BUS_FMT_RGB161616_1X48:
+	default:
+		return RK_IF_FORMAT_RGB;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_to_color_format);
+
+void rockchip_drm_parse_bus_format(u32 bus_format, u32 *format, u32 *colordepth)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_RGB101010_1X30:
+		*format = RK_IF_FORMAT_RGB;
+		*colordepth = 10;
+		break;
+	case MEDIA_BUS_FMT_YUV8_1X24:
+		*format = RK_IF_FORMAT_YCBCR444;
+		*colordepth = 8;
+		break;
+	case MEDIA_BUS_FMT_YUV10_1X30:
+		*format = RK_IF_FORMAT_YCBCR444;
+		*colordepth = 10;
+		break;
+	case MEDIA_BUS_FMT_UYVY10_1X20:
+	case MEDIA_BUS_FMT_YUYV10_1X20:
+		*format = RK_IF_FORMAT_YCBCR422;
+		*colordepth = 10;
+		break;
+	case MEDIA_BUS_FMT_UYVY8_1X16:
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+		*format = RK_IF_FORMAT_YCBCR422;
+		*colordepth = 8;
+		break;
+	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
+		*format = RK_IF_FORMAT_YCBCR420;
+		*colordepth = 8;
+		break;
+	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
+		*format = RK_IF_FORMAT_YCBCR420;
+		*colordepth = 10;
+		break;
+	default:
+		*format = RK_IF_FORMAT_RGB;
+		*colordepth = 8;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_parse_bus_format);
+
+bool rockchip_drm_bus_fmt_is_rgb(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_RGB888_1X24:
+	case MEDIA_BUS_FMT_RGB101010_1X30:
+	case MEDIA_BUS_FMT_RGB121212_1X36:
+	case MEDIA_BUS_FMT_RGB161616_1X48:
+		return true;
+
+	default:
+		return false;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_is_rgb);
+
+bool rockchip_drm_bus_fmt_is_yuv444(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_YUV8_1X24:
+	case MEDIA_BUS_FMT_YUV10_1X30:
+	case MEDIA_BUS_FMT_YUV12_1X36:
+	case MEDIA_BUS_FMT_YUV16_1X48:
+		return true;
+
+	default:
+		return false;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_is_yuv444);
+
+bool rockchip_drm_bus_fmt_is_yuv422(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_UYVY8_1X16:
+	case MEDIA_BUS_FMT_UYVY10_1X20:
+	case MEDIA_BUS_FMT_UYVY12_1X24:
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+	case MEDIA_BUS_FMT_YUYV10_1X20:
+	case MEDIA_BUS_FMT_YUYV12_1X24:
+		return true;
+
+	default:
+		return false;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_is_yuv422);
+
+bool rockchip_drm_bus_fmt_is_yuv420(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
+	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
+	case MEDIA_BUS_FMT_UYYVYY12_0_5X36:
+	case MEDIA_BUS_FMT_UYYVYY16_0_5X48:
+		return true;
+
+	default:
+	return false;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_is_yuv420);
+
+unsigned int rockchip_drm_hdmi_get_tmdsclock(unsigned long output_bus_format,
+					     unsigned long pixelclock)
+{
+	unsigned int tmdsclock = pixelclock;
+	unsigned int depth =
+		rockchip_drm_bus_fmt_color_depth(output_bus_format);
+
+	if (!rockchip_drm_bus_fmt_is_yuv422(output_bus_format)) {
+		switch (depth) {
+		case 16:
+			tmdsclock = pixelclock * 2;
+			break;
+		case 12:
+			tmdsclock = pixelclock * 3 / 2;
+			break;
+		case 10:
+			tmdsclock = pixelclock * 5 / 4;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return tmdsclock;
+}
+EXPORT_SYMBOL(rockchip_drm_hdmi_get_tmdsclock);
+
+int rockchip_drm_atomic_replace_property_blob_from_id(struct drm_device *dev,
+						      struct drm_property_blob **blob,
+						      uint64_t blob_id, ssize_t expected_size,
+						      ssize_t expected_elem_size, bool *replaced)
+{
+	struct drm_property_blob *new_blob = NULL;
+
+	if (blob_id != 0) {
+		new_blob = drm_property_lookup_blob(dev, blob_id);
+		if (!new_blob)
+			goto out;
+
+		if (expected_size > 0 &&
+		    new_blob->length != expected_size) {
+			drm_property_blob_put(new_blob);
+			return -EINVAL;
+		}
+		if (expected_elem_size > 0 &&
+		    new_blob->length % expected_elem_size != 0) {
+			drm_property_blob_put(new_blob);
+			return -EINVAL;
+		}
+	}
+
+out:
+	*replaced |= drm_property_replace_blob(blob, new_blob);
+	drm_property_blob_put(new_blob);
+
+	return 0;
+}
+EXPORT_SYMBOL(rockchip_drm_atomic_replace_property_blob_from_id);
+
+static void rockchip_drm_fix_encoder_possible_clones(struct drm_encoder *encoder)
+{
+	struct drm_device *drm_dev = encoder->dev;
+	struct drm_encoder *other;
+
+	drm_for_each_encoder(other, drm_dev) {
+		if (other->possible_crtcs & encoder->possible_crtcs)
+			encoder->possible_clones |= drm_encoder_mask(other);
+	}
+}
+
 static int rockchip_drm_bind(struct device *dev)
 {
 	struct drm_device *drm_dev;
 	struct rockchip_drm_private *private;
+	struct drm_encoder *encoder;
 	int ret;
 
 	/* Remove existing drivers that may own the framebuffer memory. */
@@ -1882,6 +2816,9 @@ static int rockchip_drm_bind(struct device *dev)
 	ret = drm_dev_register(drm_dev, 0);
 	if (ret)
 		goto err_kms_helper_poll_fini;
+
+	drm_for_each_encoder(encoder, drm_dev)
+		rockchip_drm_fix_encoder_possible_clones(encoder);
 
 	rockchip_drm_show_logo(drm_dev);
 
@@ -2440,6 +3377,8 @@ static int __init rockchip_drm_init(void)
 	ADD_ROCKCHIP_SUB_DRIVER(cdn_dp_driver, CONFIG_ROCKCHIP_CDN_DP);
 	ADD_ROCKCHIP_SUB_DRIVER(dw_hdmi_rockchip_pltfm_driver,
 				CONFIG_ROCKCHIP_DW_HDMI);
+	ADD_ROCKCHIP_SUB_DRIVER(dw_hdmi_qp_rockchip_pltfm_driver,
+				CONFIG_ROCKCHIP_DW_HDMI_QP);
 	ADD_ROCKCHIP_SUB_DRIVER(dw_mipi_dsi_rockchip_driver,
 				CONFIG_ROCKCHIP_DW_MIPI_DSI);
 	ADD_ROCKCHIP_SUB_DRIVER(dw_mipi_dsi2_rockchip_driver,

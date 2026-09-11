@@ -20,7 +20,6 @@
 #include <linux/of_address.h>
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
-#include <linux/pinctrl/consumer.h>
 #include <linux/pinctrl/pinconf-generic.h>
 #include <linux/platform_device.h>
 #include <linux/property.h>
@@ -34,7 +33,10 @@
 #define GPIO_TYPE_V2		(0x01000C2B)  /* GPIO Version ID 0x01000C2B */
 #define GPIO_TYPE_V2_1		(0x0101157C)  /* GPIO Version ID 0x0101157C */
 #define GPIO_TYPE_V2_2		(0x010219C8)  /* GPIO Version ID 0x010219C8 */
-#define GPIO_TYPE_V2_6		(0x01063F6E)  /* GPIO Version ID 0x01063F6E */
+#define GPIO_TYPE_V2_6		(0x010637A6)  /* GPIO Version ID 0x010637A6 */
+#define GPIO_TYPE_V2_6_1	(0x01063F6E)  /* GPIO Version ID 0x01063F6E */
+#define GPIO_TYPE_V2_6_2	(0x01064899)  /* GPIO Version ID 0x01064899 */
+#define GPIO_TYPE_V2_7		(0x01074D2E)  /* GPIO Version ID 0x01074D2E */
 
 #define GPIO_MAX_PINS	(32)
 
@@ -231,11 +233,6 @@ static int rockchip_gpio_set_direction(struct gpio_chip *chip,
 	struct rockchip_pin_bank *bank = gpiochip_get_data(chip);
 	unsigned long flags;
 	u32 data = input ? 0 : 1;
-
-	if (input)
-		pinctrl_gpio_direction_input(bank->pin_base + offset);
-	else
-		pinctrl_gpio_direction_output(bank->pin_base + offset);
 
 	raw_spin_lock_irqsave(&bank->slock, flags);
 	rockchip_gpio_writel_bit(bank, offset, data, bank->gpio_regs->port_ddr);
@@ -799,8 +796,14 @@ static void rockchip_gpio_get_ver(struct rockchip_pin_bank *bank)
 		bank->gpio_type = GPIO_TYPE_V2_2;
 		break;
 	case GPIO_TYPE_V2_6:
+	case GPIO_TYPE_V2_6_1:
+	case GPIO_TYPE_V2_6_2:
 		bank->gpio_regs = &gpio_regs_v2;
 		bank->gpio_type = GPIO_TYPE_V2_6;
+		break;
+	case GPIO_TYPE_V2_7:
+		bank->gpio_regs = &gpio_regs_v2;
+		bank->gpio_type = GPIO_TYPE_V2_7;
 		break;
 	default:
 		bank->gpio_regs = &gpio_regs_v1;

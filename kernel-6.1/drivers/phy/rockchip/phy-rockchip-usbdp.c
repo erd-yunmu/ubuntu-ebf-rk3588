@@ -78,6 +78,8 @@
 #define TRSV_LN2_MON_RX_CDR_LOCK_DONE		BIT(0)
 
 #define BIT_WRITEABLE_SHIFT			16
+#define TUNE_SEQ_PROP_NAME			"rockchip,udphy-tune-sequence"
+
 #define PHY_AUX_DP_DATA_POL_NORMAL		0
 #define PHY_AUX_DP_DATA_POL_INVERT		1
 #define PHY_LANE_MUX_USB			0
@@ -188,6 +190,10 @@ struct rockchip_udphy {
 
 	/* PHY const config */
 	const struct rockchip_udphy_cfg *cfgs;
+
+	/* PHY tune sequence from DT */
+	struct reg_sequence *tune_seqs;
+	unsigned int tune_seqs_cnt;
 };
 
 static const struct dp_tx_drv_ctrl rk3588_dp_tx_drv_ctrl_rbr_hbr[4][4] = {
@@ -782,7 +788,7 @@ static int udphy_status_check(struct rockchip_udphy *udphy)
 				dev_notice(udphy->dev, "trsv ln2 mon rx cdr lock timeout\n");
 		}
 
-		if (ret) {
+		if (ret && udphy->sw) {
 			udphy_u3_port_disable(udphy, true);
 			dev_warn(udphy->dev, "disable u3 port because udphy not ready\n");
 		}
@@ -818,6 +824,16 @@ static int udphy_init(struct rockchip_udphy *udphy)
 	if (ret) {
 		dev_err(udphy->dev, "refclk set error %d\n", ret);
 		goto assert_apb;
+	}
+
+	/* Set udphy tune sequence */
+	if (udphy->tune_seqs) {
+		ret = regmap_multi_reg_write(udphy->pma_regmap, udphy->tune_seqs,
+					     udphy->tune_seqs_cnt);
+		if (ret) {
+			dev_err(udphy->dev, "tune sequence set error %d\n", ret);
+			goto assert_apb;
+		}
 	}
 
 	/* Step 3: configure lane mux */
@@ -898,6 +914,59 @@ static int udphy_disable(struct rockchip_udphy *udphy)
 	return 0;
 }
 
+static int rk_udphy_get_tune_sequence(struct rockchip_udphy *udphy)
+{
+	struct device *dev = udphy->dev;
+	struct device_node *np = dev_of_node(dev);
+	u32 *tune_data;
+	int i, count;
+	int ret;
+
+	count = of_property_count_u32_elems(np, TUNE_SEQ_PROP_NAME);
+	if (count <= 0) {
+		dev_dbg(dev, "No tune sequence found\n");
+		return 0;
+	}
+
+	if (count % 3 != 0) {
+		dev_err(dev, "Invalid udphy-tune-sequence count %d\n", count);
+		return -EINVAL;
+	}
+
+	tune_data = kcalloc(count, sizeof(u32), GFP_KERNEL);
+	if (!tune_data)
+		return -ENOMEM;
+
+	ret = of_property_read_u32_array(np, TUNE_SEQ_PROP_NAME, tune_data, count);
+	if (ret) {
+		dev_err(dev, "Failed to read tune sequence: %d\n", ret);
+		goto out;
+	}
+
+	udphy->tune_seqs_cnt = count / 3;
+	udphy->tune_seqs = devm_kcalloc(dev, udphy->tune_seqs_cnt,
+					sizeof(*udphy->tune_seqs), GFP_KERNEL);
+	if (!udphy->tune_seqs) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	for (i = 0; i < udphy->tune_seqs_cnt; i++) {
+		udphy->tune_seqs[i].reg = tune_data[i * 3];
+		udphy->tune_seqs[i].def = tune_data[i * 3 + 1];
+		udphy->tune_seqs[i].delay_us = tune_data[i * 3 + 2];
+
+		dev_dbg(dev, "tune_seqs[%d]: 0x%04x, 0x%02x, %d\n", i,
+			udphy->tune_seqs[i].reg,
+			udphy->tune_seqs[i].def,
+			udphy->tune_seqs[i].delay_us);
+	}
+
+out:
+	kfree(tune_data);
+	return ret;
+}
+
 static int udphy_parse_lane_mux_data(struct rockchip_udphy *udphy, struct device *dev)
 {
 	struct device_node *np = dev->of_node;
@@ -945,7 +1014,6 @@ static int udphy_parse_lane_mux_data(struct rockchip_udphy *udphy, struct device
 	udphy->mode = UDPHY_MODE_DP;
 	udphy->dp_lanes = num_lanes;
 	if (num_lanes == 1 || num_lanes == 2) {
-		udphy->mode |= UDPHY_MODE_USB;
 		udphy->flip = udphy->lane_mux_sel[0] == PHY_LANE_MUX_DP ? true : false;
 	}
 
@@ -976,8 +1044,9 @@ static int udphy_get_initial_status(struct rockchip_udphy *udphy)
 	return 0;
 }
 
-static int udphy_parse_dt(struct rockchip_udphy *udphy, struct device *dev)
+static int udphy_parse_dt(struct rockchip_udphy *udphy)
 {
+	struct device *dev = udphy->dev;
 	struct device_node *np = dev->of_node;
 	enum usb_device_speed maximum_speed;
 	int ret;
@@ -1044,6 +1113,10 @@ static int udphy_parse_dt(struct rockchip_udphy *udphy, struct device *dev)
 		maximum_speed = usb_get_maximum_speed(dev);
 		udphy->hs = maximum_speed <= USB_SPEED_HIGH ? true : false;
 	}
+
+	ret = rk_udphy_get_tune_sequence(udphy);
+	if (ret)
+		return ret;
 
 	ret = udphy_clk_init(udphy, dev);
 	if (ret)
@@ -1436,7 +1509,11 @@ static int usbdp_typec_mux_set(struct typec_mux_dev *mux,
 	if (state->alt && state->alt->svid == USB_TYPEC_DP_SID) {
 		struct typec_displayport_data *data = state->data;
 
-		if (!data) {
+		if (data)
+			dev_dbg(udphy->dev, "received DP status: 0x%08x, conf: 0x%08x mode:%lu\n",
+				data->status, data->conf, state->mode);
+
+		if (!data || state->mode < TYPEC_STATE_MODAL) {
 			udphy_dp_hpd_event_trigger(udphy, false);
 		} else if (data->status & DP_STATUS_IRQ_HPD) {
 			udphy_dp_hpd_event_trigger(udphy, false);
@@ -1547,7 +1624,8 @@ static int rockchip_udphy_probe(struct platform_device *pdev)
 	if (IS_ERR(udphy->pma_regmap))
 		return PTR_ERR(udphy->pma_regmap);
 
-	ret = udphy_parse_dt(udphy, dev);
+	udphy->dev = dev;
+	ret = udphy_parse_dt(udphy);
 	if (ret)
 		return ret;
 
@@ -1556,7 +1634,6 @@ static int rockchip_udphy_probe(struct platform_device *pdev)
 		return ret;
 
 	mutex_init(&udphy->mutex);
-	udphy->dev = dev;
 	platform_set_drvdata(pdev, udphy);
 
 	if (device_property_present(dev, "orientation-switch")) {
@@ -1570,6 +1647,7 @@ static int rockchip_udphy_probe(struct platform_device *pdev)
 	}
 
 	if (device_property_present(dev, "svid")) {
+		udphy->mode |= UDPHY_MODE_DP;
 		ret = udphy_setup_typec_mux(udphy);
 		if (ret)
 			return ret;
@@ -1592,6 +1670,7 @@ static int rockchip_udphy_probe(struct platform_device *pdev)
 			phy_set_bus_width(phy, udphy->dp_lanes);
 			phy->attrs.max_link_rate = udphy_dp_get_max_link_rate(udphy, child_np);
 		} else if (of_node_name_eq(child_np, "u3-port")) {
+			udphy->mode |= UDPHY_MODE_USB;
 			phy = devm_phy_create(dev, child_np, &rockchip_u3phy_ops);
 			if (IS_ERR(phy)) {
 				dev_err(dev, "failed to create usb phy: %pOFn\n", child_np);

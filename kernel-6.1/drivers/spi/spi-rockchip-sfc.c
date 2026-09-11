@@ -26,6 +26,7 @@
 #include <linux/slab.h>
 #include <linux/spi/spi-mem.h>
 #include <linux/of_gpio.h>
+#include <linux/soc/rockchip/rockchip_thunderboot.h>
 
 /* System control */
 #define SFC_CTRL			0x0
@@ -234,6 +235,12 @@ struct rockchip_sfc {
 	struct rockchip_sfc_data *data;
 };
 
+static inline bool is_invalid_id(const u8 *id)
+{
+	return ((0xFF == id[0] && 0xFF == id[1]) ||
+		(0x00 == id[0] && 0x00 == id[1]));
+}
+
 static int rockchip_sfc_reset(struct rockchip_sfc *sfc)
 {
 	int err;
@@ -333,7 +340,7 @@ static void rockchip_sfc_irq_mask(struct rockchip_sfc *sfc, u32 mask)
 
 static int rockchip_sfc_init(struct rockchip_sfc *sfc)
 {
-	u32 reg;
+	u32 reg, i;
 
 	writel(0, sfc->regbase + SFC_CTRL);
 	writel(0xFFFFFFFF, sfc->regbase + SFC_ICLR);
@@ -344,6 +351,10 @@ static int rockchip_sfc_init(struct rockchip_sfc *sfc)
 		reg = readl(sfc->regbase + SFC_EXT_CTRL);
 		reg |= SFC_SCLK_X2_BYPASS;
 		writel(reg, sfc->regbase + SFC_EXT_CTRL);
+	}
+	for (i = 0; i < SFC_MAX_CHIPSELECT_NUM; i++) {
+		if (sfc->dll_cells[i])
+			rockchip_sfc_set_delay_lines(sfc, (u16)sfc->dll_cells[i], i);
 	}
 
 	return 0;
@@ -704,16 +715,23 @@ static void rockchip_sfc_delay_lines_tuning(struct rockchip_sfc *sfc, struct spi
 	bool dll_valid = false;
 	u8 cs = mem->spi->chip_select;
 
+	rockchip_sfc_set_delay_lines(sfc, 0, cs);
 	rockchip_sfc_clk_set_rate(sfc, SFC_DLL_THRESHOLD_RATE);
 	op.data.buf.in = &id;
 	rockchip_sfc_exec_op_bypass(sfc, mem, &op);
-	if ((0xFF == id[0] && 0xFF == id[1]) ||
-	    (0x00 == id[0] && 0x00 == id[1])) {
-		dev_dbg(sfc->dev, "no dev, dll by pass\n");
-		rockchip_sfc_clk_set_rate(sfc, sfc->speed[cs]);
-		sfc->speed[cs] = SFC_DLL_THRESHOLD_RATE;
+	if (is_invalid_id(id)) {
+		/* Some SPI Nands only support access via addr 0.*/
+		op.addr.nbytes = 1;
+		op.addr.val = 0;
+		op.addr.buswidth = 1;
+		rockchip_sfc_exec_op_bypass(sfc, mem, &op);
+		if (is_invalid_id(id)) {
+			dev_dbg(sfc->dev, "no dev, dll by pass\n");
+			rockchip_sfc_clk_set_rate(sfc, sfc->speed[cs]);
+			sfc->speed[cs] = SFC_DLL_THRESHOLD_RATE;
 
-		return;
+			return;
+		}
 	}
 
 	rockchip_sfc_clk_set_rate(sfc, sfc->speed[cs]);
@@ -932,6 +950,14 @@ static const struct rockchip_sfc_data rk3506_fspi_data = {
 	},
 };
 
+static const struct rockchip_sfc_data rk3538_fspi_data = {
+	.powergood = {
+		.valid = true,
+		.grf_offset = 0x170,
+		.bits_mask = BIT(0),
+	},
+};
+
 static const struct rockchip_sfc_data rv1126b_fspi_data = {
 	.powergood = {
 		.valid = true,
@@ -943,6 +969,7 @@ static const struct rockchip_sfc_data rv1126b_fspi_data = {
 static const struct of_device_id rockchip_sfc_dt_ids[] = {
 	{ .compatible = "rockchip,fspi",},
 	{ .compatible = "rockchip,rk3506-fspi", .data = &rk3506_fspi_data},
+	{ .compatible = "rockchip,rk3538-fspi", .data = &rk3538_fspi_data},
 	{ .compatible = "rockchip,rv1126b-fspi", .data = &rv1126b_fspi_data},
 	{ .compatible = "rockchip,sfc"},
 	{ /* sentinel */ }
@@ -1010,12 +1037,6 @@ static int rockchip_sfc_probe(struct platform_device *pdev)
 	if (sfc->max_dll_cells > SFC_DLL_CTRL0_DLL_MAX_VER5)
 		sfc->max_dll_cells = SFC_DLL_CTRL0_DLL_MAX_VER5;
 
-	ret = rockchip_sfc_get_gpio_descs(master, sfc);
-	if (ret) {
-		dev_err(&pdev->dev, "Failed to get gpio_descs\n");
-		return ret;
-	}
-
 	ret = clk_prepare_enable(sfc->hclk);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to enable ahb clk\n");
@@ -1054,13 +1075,15 @@ static int rockchip_sfc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, sfc);
 
-	if (IS_ENABLED(CONFIG_ROCKCHIP_THUNDER_BOOT)) {
-		u32 status;
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT_SFC
+	if (rk_tb_wait_ramdisk_compress_done(5000) == 0)
+		dev_err(&pdev->dev, "Wait ramdisk_c complete timeout!\n");
+#endif
 
-		if (readl_poll_timeout(sfc->regbase + SFC_SR, status,
-				       !(status & SFC_SR_IS_BUSY), 10,
-				       5000 * USEC_PER_MSEC))
-			dev_err(dev, "Wait for SFC idle timeout!\n");
+	ret = rockchip_sfc_get_gpio_descs(master, sfc);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to get gpio_descs\n");
+		goto err_irq;
 	}
 
 	ret = rockchip_sfc_init(sfc);
@@ -1161,10 +1184,14 @@ static int __maybe_unused rockchip_sfc_runtime_resume(struct device *dev)
 		return ret;
 
 	ret = clk_prepare_enable(sfc->clk);
-	if (ret < 0)
+	if (ret < 0) {
 		clk_disable_unprepare(sfc->hclk);
+		return ret;
+	}
 
-	return ret;
+	rockchip_sfc_init(sfc);
+
+	return 0;
 }
 
 static int __maybe_unused rockchip_sfc_suspend(struct device *dev)
@@ -1176,8 +1203,7 @@ static int __maybe_unused rockchip_sfc_suspend(struct device *dev)
 
 static int __maybe_unused rockchip_sfc_resume(struct device *dev)
 {
-	struct rockchip_sfc *sfc = dev_get_drvdata(dev);
-	int ret, i;
+	int ret;
 
 	ret = pm_runtime_force_resume(dev);
 	if (ret < 0)
@@ -1189,12 +1215,6 @@ static int __maybe_unused rockchip_sfc_resume(struct device *dev)
 	if (ret < 0) {
 		pm_runtime_put_noidle(dev);
 		return ret;
-	}
-
-	rockchip_sfc_init(sfc);
-	for (i = 0; i < SFC_MAX_CHIPSELECT_NUM; i++) {
-		if (sfc->dll_cells[i])
-			rockchip_sfc_set_delay_lines(sfc, (u16)sfc->dll_cells[i], i);
 	}
 
 	pm_runtime_mark_last_busy(dev);
@@ -1214,6 +1234,9 @@ static struct platform_driver rockchip_sfc_driver = {
 		.name	= "rockchip-sfc",
 		.of_match_table = rockchip_sfc_dt_ids,
 		.pm = &rockchip_sfc_pm_ops,
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+#endif
 	},
 	.probe	= rockchip_sfc_probe,
 	.remove	= rockchip_sfc_remove,

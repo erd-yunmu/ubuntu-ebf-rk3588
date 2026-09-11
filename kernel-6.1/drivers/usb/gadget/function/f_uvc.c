@@ -297,8 +297,10 @@ uvc_function_setup(struct usb_function *f, const struct usb_ctrlrequest *ctrl)
 	struct uvc_device *uvc = to_uvc(f);
 	struct v4l2_event v4l2_event;
 	struct uvc_event *uvc_event = (void *)&v4l2_event.u.data;
+#ifndef CONFIG_ARCH_ROCKCHIP
 	unsigned int interface = le16_to_cpu(ctrl->wIndex) & 0xff;
 	struct usb_ctrlrequest *mctrl;
+#endif
 
 	uvc_trace(UVC_TRACE_CONTROL,
 		  "setup request %02x %02x value %04x index %04x %04x\n",
@@ -325,6 +327,7 @@ uvc_function_setup(struct usb_function *f, const struct usb_ctrlrequest *ctrl)
 	v4l2_event.type = UVC_EVENT_SETUP;
 	memcpy(&uvc_event->req, ctrl, sizeof(uvc_event->req));
 
+#ifndef CONFIG_ARCH_ROCKCHIP
 	/* check for the interface number, fixup the interface number in
 	 * the ctrl request so the userspace doesn't have to bother with
 	 * offset and configfs parsing
@@ -333,6 +336,7 @@ uvc_function_setup(struct usb_function *f, const struct usb_ctrlrequest *ctrl)
 	mctrl->wIndex &= ~cpu_to_le16(0xff);
 	if (interface == uvc->streaming_intf)
 		mctrl->wIndex = cpu_to_le16(UVC_STRING_STREAMING_IDX);
+#endif
 
 	v4l2_event_queue(&uvc->vdev, &v4l2_event);
 
@@ -577,6 +581,12 @@ uvc_function_disconnect(struct uvc_device *uvc)
 {
 	int ret;
 
+	guard(mutex)(&uvc->lock);
+	if (uvc->func_unbound) {
+		dev_dbg(&uvc->vdev.dev, "skipping function deactivate (unbound)\n");
+		return;
+	}
+
 	if ((ret = usb_function_deactivate(&uvc->func)) < 0)
 		uvcg_info(&uvc->func, "UVC disconnect failed with %d\n", ret);
 }
@@ -595,6 +605,15 @@ static ssize_t function_name_show(struct device *dev,
 
 static DEVICE_ATTR_RO(function_name);
 
+static void uvc_vdev_release(struct video_device *vdev)
+{
+	struct uvc_device *uvc = video_get_drvdata(vdev);
+
+	/* Signal uvc_function_unbind() that the video device has been released */
+	if (uvc->vdev_release_done)
+		complete(uvc->vdev_release_done);
+}
+
 static int
 uvc_register_video(struct uvc_device *uvc)
 {
@@ -607,7 +626,7 @@ uvc_register_video(struct uvc_device *uvc)
 	uvc->vdev.v4l2_dev->dev = &cdev->gadget->dev;
 	uvc->vdev.fops = &uvc_v4l2_fops;
 	uvc->vdev.ioctl_ops = &uvc_v4l2_ioctl_ops;
-	uvc->vdev.release = video_device_release_empty;
+	uvc->vdev.release = uvc_vdev_release;
 	uvc->vdev.vfl_dir = VFL_DIR_TX;
 	uvc->vdev.lock = &uvc->video.mutex;
 	uvc->vdev.device_caps = V4L2_CAP_VIDEO_OUTPUT | V4L2_CAP_STREAMING;
@@ -809,6 +828,8 @@ uvc_function_bind(struct usb_configuration *c, struct usb_function *f)
 	int ret = -EINVAL;
 
 	uvcg_info(f, "%s()\n", __func__);
+	scoped_guard(mutex, &uvc->lock)
+		uvc->func_unbound = false;
 
 	opts = fi_to_f_uvc_opts(f->fi);
 	/* Sanity check the streaming endpoint module parameters. */
@@ -822,6 +843,10 @@ uvc_function_bind(struct usb_configuration *c, struct usb_function *f)
 		opts->streaming_maxpacket = clamp(opts->streaming_maxpacket,
 						  1U, 1024U);
 		opts->streaming_maxburst = min(opts->streaming_maxburst, 15U);
+#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+		opts->streaming_bulk_hs_maxpayload = clamp(opts->streaming_bulk_hs_maxpayload,
+							   131072U, 1048576U);
+#endif
 	}
 
 	/* For SS, wMaxPacketSize has to be 1024 if bMaxBurst is not 0 */
@@ -955,11 +980,6 @@ uvc_function_bind(struct usb_configuration *c, struct usb_function *f)
 	uvc_hs_bulk_streaming_ep.bEndpointAddress = uvc->video.ep->address;
 	uvc_ss_bulk_streaming_ep.bEndpointAddress = uvc->video.ep->address;
 
-#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
-	if (opts->device_name)
-		uvc_en_us_strings[UVC_STRING_CONTROL_IDX].s = opts->device_name;
-#endif
-
 	uvc_en_us_strings[UVC_STRING_CONTROL_IDX].s = opts->function_name;
 	us = usb_gstrings_attach(cdev, uvc_function_strings,
 				 ARRAY_SIZE(uvc_en_us_strings));
@@ -1080,15 +1100,6 @@ static void uvc_free_inst(struct usb_function_instance *f)
 	struct f_uvc_opts *opts = fi_to_f_uvc_opts(f);
 
 	mutex_destroy(&opts->lock);
-
-#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
-	if (opts->device_name_allocated) {
-		opts->device_name_allocated = false;
-		kfree(opts->device_name);
-		opts->device_name = NULL;
-	}
-#endif
-
 	kfree(opts);
 }
 
@@ -1233,12 +1244,19 @@ static void uvc_free(struct usb_function *f)
 static void uvc_function_unbind(struct usb_configuration *c,
 				struct usb_function *f)
 {
+	DECLARE_COMPLETION_ONSTACK(vdev_release_done);
 	struct usb_composite_dev *cdev = c->cdev;
 	struct uvc_device *uvc = to_uvc(f);
 	struct uvc_video *video = &uvc->video;
 	long wait_ret = 1;
+	bool connected;
 
 	uvcg_info(f, "%s()\n", __func__);
+	scoped_guard(mutex, &uvc->lock) {
+		uvc->func_unbound = true;
+		uvc->vdev_release_done = &vdev_release_done;
+		connected = uvc->func_connected;
+	}
 
 	if (video->async_wq)
 		destroy_workqueue(video->async_wq);
@@ -1249,7 +1267,7 @@ static void uvc_function_unbind(struct usb_configuration *c,
 	 * though the video device removal uevent. Allow some time for the
 	 * application to close out before things get deleted.
 	 */
-	if (uvc->func_connected) {
+	if (connected) {
 		uvcg_dbg(f, "waiting for clean disconnect\n");
 		wait_ret = wait_event_interruptible_timeout(uvc->func_connected_queue,
 				uvc->func_connected == false, msecs_to_jiffies(500));
@@ -1260,7 +1278,10 @@ static void uvc_function_unbind(struct usb_configuration *c,
 	video_unregister_device(&uvc->vdev);
 	v4l2_device_unregister(&uvc->v4l2_dev);
 
-	if (uvc->func_connected) {
+	scoped_guard(mutex, &uvc->lock)
+		connected = uvc->func_connected;
+
+	if (connected) {
 		/*
 		 * Wait for the release to occur to ensure there are no longer any
 		 * pending operations that may cause panics when resources are cleaned
@@ -1271,6 +1292,10 @@ static void uvc_function_unbind(struct usb_configuration *c,
 				uvc->func_connected == false, msecs_to_jiffies(1000));
 		uvcg_dbg(f, "done waiting for release with ret: %ld\n", wait_ret);
 	}
+
+	/* Wait for the video device to be released */
+	wait_for_completion(&vdev_release_done);
+	uvc->vdev_release_done = NULL;
 
 	usb_ep_free_request(cdev->gadget->ep0, uvc->control_req);
 	kfree(uvc->control_buf);
@@ -1290,6 +1315,8 @@ static struct usb_function *uvc_alloc(struct usb_function_instance *fi)
 		return ERR_PTR(-ENOMEM);
 
 	mutex_init(&uvc->video.mutex);
+	mutex_init(&uvc->lock);
+	uvc->func_unbound = true;
 	uvc->state = UVC_STATE_DISCONNECTED;
 	init_waitqueue_head(&uvc->func_connected_queue);
 	opts = fi_to_f_uvc_opts(fi);

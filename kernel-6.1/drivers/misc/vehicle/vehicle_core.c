@@ -36,6 +36,7 @@ struct vehicle *g_vehicle_hw;
 EXPORT_SYMBOL(g_vehicle_hw);
 static struct sock *nlsk;
 static int g_user_pid;
+unsigned int g_vehicle_debug_cnt;
 
 struct vehicle_core_drvdata {
 	const struct hw_prop_ops *prop_ops;
@@ -117,7 +118,9 @@ void vehicle_set_property(u16 prop, u8 index, u32 value, u32 param)
 {
 	char *buffer;
 
-	buffer = kmalloc(128, GFP_KERNEL);
+	buffer = kmalloc(NLMSG_SIZE, GFP_KERNEL);
+	if (!buffer)
+		return;
 	pr_debug("%s: prop %d, index %d, value %d\n", __func__, prop, index, value);
 	property_encode.value = value;
 	switch (prop) {
@@ -240,7 +243,7 @@ void vehicle_set_property(u16 prop, u8 index, u32 value, u32 param)
 
 	pb_ostream_t stream;
 
-	stream = pb_ostream_from_buffer(buffer, 128);
+	stream = pb_ostream_from_buffer(buffer, NLMSG_SIZE);
 
 	emulator_EmulatorMessage send_message = {};
 
@@ -272,7 +275,9 @@ static void netlink_rcv_msg(struct sk_buff *skb)
 	int i;
 	emulator_EmulatorMessage emulator_message;
 
-	buffer = kmalloc(128, GFP_KERNEL);
+	buffer = kmalloc(NLMSG_SIZE, GFP_KERNEL);
+	if (!buffer)
+		return;
 	if (skb->len >= nlmsg_total_size(0)) {
 		nlh = nlmsg_hdr(skb);
 		g_user_pid = nlh->nlmsg_pid;
@@ -281,6 +286,7 @@ static void netlink_rcv_msg(struct sk_buff *skb)
 		if (umsg) {
 			for (i = 0; i < len; i++)
 				pr_debug("%s raw byte %d %d\n", __func__, i, umsg[i]);
+			len = (len > NLMSG_SIZE) ? NLMSG_SIZE : len;
 			memcpy(buffer, umsg, len);
 			pb_istream_t stream = pb_istream_from_buffer(buffer, len);
 
@@ -360,6 +366,7 @@ static int vehicle_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, ddata);
 	platform_set_drvdata(pdev, g_vehicle_hw);
 
+	g_vehicle_debug_cnt = 0;
 	create_netlink_vehicle();
 	return 0;
 }

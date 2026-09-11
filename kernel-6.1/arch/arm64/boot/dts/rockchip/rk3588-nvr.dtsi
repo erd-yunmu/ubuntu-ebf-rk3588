@@ -130,7 +130,7 @@
 };
 
 &display_subsystem {
-	clocks = <&hdptxphy_hdmi0>, <&hdptxphy_hdmi1>;
+	clocks = <&hdptxphy0>, <&hdptxphy1>;
 	clock-names = "hdmi0_phy_pll", "hdmi1_phy_pll";
 };
 
@@ -305,6 +305,7 @@
 	assigned-clock-rates = <800000000>;
 	status = "okay";
 	vop-supply = <&vdd_log_s0>;
+	rockchip,extend-phy-pll-shared-mode;
 };
 
 &vop_mmu {

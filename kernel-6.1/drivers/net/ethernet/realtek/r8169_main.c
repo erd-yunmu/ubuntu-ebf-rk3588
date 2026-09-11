@@ -25,6 +25,7 @@
 #include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
 #include <linux/pm_runtime.h>
+#include <linux/of.h>
 #include <linux/bitfield.h>
 #include <linux/prefetch.h>
 #include <linux/ipv6.h>
@@ -659,6 +660,8 @@ struct rtl8169_private {
 	struct rtl_fw *rtl_fw;
 
 	u32 ocp_base;
+	u32 *led_data;
+	int led_data_count;
 };
 
 typedef void (*rtl_generic_fct)(struct rtl8169_private *tp);
@@ -2564,11 +2567,55 @@ static void rtl_wol_enable_rx(struct rtl8169_private *tp)
 		rtl_disable_rxdvgate(tp);
 }
 
-static void rtl_prepare_power_down(struct rtl8169_private *tp)
+/* Parse DT-based LED configuration for RTL8125, cache in tp.
+ * Walk up the device parent chain to find the PCIe platform
+ * device's of_node with the "realtek,led-data" property.
+ * Property format: realtek,led-data = <reg val reg val ...>;
+ */
+static void rtl8125_parse_dt_led_config(struct rtl8169_private *tp)
 {
-	if (tp->dash_enabled)
+	struct device_node *np = NULL;
+	struct device *d = &tp->pci_dev->dev;
+	int count;
+
+	while (d && !np) {
+		np = d->of_node;
+		d = d->parent;
+	}
+
+	if (!np)
 		return;
 
+	count = of_property_count_u32_elems(np, "realtek,led-data");
+	if (count < 2 || count % 2 != 0)
+		return;
+
+	tp->led_data = kmalloc_array(count, sizeof(u32), GFP_KERNEL);
+	if (!tp->led_data)
+		return;
+
+	if (of_property_read_u32_array(np, "realtek,led-data", tp->led_data, count)) {
+		kfree(tp->led_data);
+		tp->led_data = NULL;
+		return;
+	}
+	tp->led_data_count = count;
+}
+
+/* Apply cached LED register/value pairs to hardware. */
+static void rtl8125_apply_dt_led_config(struct rtl8169_private *tp)
+{
+	int i;
+
+	if (!tp->led_data)
+		return;
+
+	for (i = 0; i < tp->led_data_count; i += 2)
+		RTL_W16(tp, tp->led_data[i], (u16)tp->led_data[i + 1]);
+}
+
+static void rtl_prepare_power_down(struct rtl8169_private *tp)
+{
 	if (tp->mac_version == RTL_GIGA_MAC_VER_32 ||
 	    tp->mac_version == RTL_GIGA_MAC_VER_33)
 		rtl_ephy_write(tp, 0x19, 0xff64);
@@ -3355,7 +3402,7 @@ static void rtl_hw_start_8168h_1(struct rtl8169_private *tp)
 		r8168_mac_ocp_modify(tp, 0xd412, 0x0fff, sw_cnt_1ms_ini);
 	}
 
-	r8168_mac_ocp_modify(tp, 0xe056, 0x00f0, 0x0070);
+	r8168_mac_ocp_modify(tp, 0xe056, 0x00f0, 0x0000);
 	r8168_mac_ocp_modify(tp, 0xe052, 0x6000, 0x8008);
 	r8168_mac_ocp_modify(tp, 0xe0d6, 0x01ff, 0x017f);
 	r8168_mac_ocp_modify(tp, 0xd420, 0x0fff, 0x047f);
@@ -3469,7 +3516,7 @@ static void rtl_hw_start_8117(struct rtl8169_private *tp)
 		r8168_mac_ocp_modify(tp, 0xd412, 0x0fff, sw_cnt_1ms_ini);
 	}
 
-	r8168_mac_ocp_modify(tp, 0xe056, 0x00f0, 0x0070);
+	r8168_mac_ocp_modify(tp, 0xe056, 0x00f0, 0x0000);
 	r8168_mac_ocp_write(tp, 0xea80, 0x0003);
 	r8168_mac_ocp_modify(tp, 0xe052, 0x0000, 0x0009);
 	r8168_mac_ocp_modify(tp, 0xd420, 0x0fff, 0x047f);
@@ -3667,7 +3714,7 @@ static void rtl_hw_start_8125_common(struct rtl8169_private *tp)
 	r8168_mac_ocp_modify(tp, 0xc0b4, 0x0000, 0x000c);
 	r8168_mac_ocp_modify(tp, 0xeb6a, 0x00ff, 0x0033);
 	r8168_mac_ocp_modify(tp, 0xeb50, 0x03e0, 0x0040);
-	r8168_mac_ocp_modify(tp, 0xe056, 0x00f0, 0x0030);
+	r8168_mac_ocp_modify(tp, 0xe056, 0x00f0, 0x0000);
 	r8168_mac_ocp_modify(tp, 0xe040, 0x1000, 0x0000);
 	r8168_mac_ocp_modify(tp, 0xea1c, 0x0003, 0x0001);
 	r8168_mac_ocp_modify(tp, 0xe0c0, 0x4f0f, 0x4403);
@@ -3690,6 +3737,7 @@ static void rtl_hw_start_8125_common(struct rtl8169_private *tp)
 		rtl8125a_config_eee_mac(tp);
 
 	rtl_disable_rxdvgate(tp);
+	rtl8125_apply_dt_led_config(tp);
 }
 
 static void rtl_hw_start_8125a_2(struct rtl8169_private *tp)
@@ -4140,8 +4188,8 @@ static unsigned int rtl8125_quirk_udp_padto(struct rtl8169_private *tp,
 {
 	unsigned int padto = 0, len = skb->len;
 
-	if (rtl_is_8125(tp) && len < 128 + RTL_MIN_PATCH_LEN &&
-	    rtl_skb_is_udp(skb) && skb_transport_header_was_set(skb)) {
+	if (len < 128 + RTL_MIN_PATCH_LEN && rtl_skb_is_udp(skb) &&
+	    skb_transport_header_was_set(skb)) {
 		unsigned int trans_data_len = skb_tail_pointer(skb) -
 					      skb_transport_header(skb);
 
@@ -4165,9 +4213,15 @@ static unsigned int rtl8125_quirk_udp_padto(struct rtl8169_private *tp,
 static unsigned int rtl_quirk_packet_padto(struct rtl8169_private *tp,
 					   struct sk_buff *skb)
 {
-	unsigned int padto;
+	unsigned int padto = 0;
 
-	padto = rtl8125_quirk_udp_padto(tp, skb);
+	switch (tp->mac_version) {
+	case RTL_GIGA_MAC_VER_61 ... RTL_GIGA_MAC_VER_63:
+		padto = rtl8125_quirk_udp_padto(tp, skb);
+		break;
+	default:
+		break;
+	}
 
 	switch (tp->mac_version) {
 	case RTL_GIGA_MAC_VER_34:
@@ -4747,7 +4801,7 @@ static void rtl8169_down(struct rtl8169_private *tp)
 	rtl_disable_exit_l1(tp);
 	rtl_prepare_power_down(tp);
 
-	if (tp->dash_type != RTL_DASH_NONE)
+	if (tp->dash_type != RTL_DASH_NONE && !tp->saved_wolopts)
 		rtl8168_driver_stop(tp);
 }
 
@@ -4945,8 +4999,9 @@ static int rtl8169_resume(struct device *device)
 	if (!device_may_wakeup(tp_to_dev(tp)))
 		clk_prepare_enable(tp->clk);
 
-	/* Reportedly at least Asus X453MA truncates packets otherwise */
-	if (tp->mac_version == RTL_GIGA_MAC_VER_37)
+	/* Some chip versions may truncate packets without this initialization */
+	if (tp->mac_version == RTL_GIGA_MAC_VER_37 ||
+	    tp->mac_version == RTL_GIGA_MAC_VER_46)
 		rtl_init_rxcfg(tp);
 
 	return rtl8169_runtime_resume(device);
@@ -5020,6 +5075,8 @@ static void rtl_remove_one(struct pci_dev *pdev)
 		rtl8168_driver_stop(tp);
 
 	rtl_release_firmware(tp);
+
+	kfree(tp->led_data);
 
 	/* restore original MAC address */
 	rtl_rar_set(tp, tp->dev->perm_addr);
@@ -5151,6 +5208,7 @@ static int r8169_mdio_register(struct rtl8169_private *tp)
 	new_bus->priv = tp;
 	new_bus->parent = &pdev->dev;
 	new_bus->irq[0] = PHY_MAC_INTERRUPT;
+	new_bus->phy_mask = GENMASK(31, 1);
 	snprintf(new_bus->id, MII_BUS_ID_SIZE, "r8169-%x-%x",
 		 pci_domain_nr(pdev->bus), pci_dev_id(pdev));
 
@@ -5487,6 +5545,8 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	if (pci_dev_run_wake(pdev))
 		pm_runtime_put_sync(&pdev->dev);
+
+	rtl8125_parse_dt_led_config(tp);
 
 	return 0;
 }

@@ -172,6 +172,9 @@ int rkisp_rockit_buf_queue(struct rockit_cfg *input_rockit_cfg)
 		isprk_buf->sgt = sgt;
 		stream_cfg->rkisp_buff[i] = isprk_buf;
 		stream->buf_cnt++;
+		isprk_buf->isp_buf.index = i;
+		stream->dbuf_pool[i] = input_rockit_cfg->buf;
+		stream->is_rockit_buf = true;
 	}
 
 	if (ispdev->cap_dev.wrap_line && stream->id == RKISP_STREAM_MP) {
@@ -641,6 +644,7 @@ int rkisp_rockit_buf_free(struct rkisp_stream *stream)
 		}
 	}
 	mutex_unlock(&stream_cfg->freebuf_lock);
+	stream->is_rockit_buf = false;
 	return 0;
 }
 
@@ -655,13 +659,18 @@ void rkisp_rockit_dev_init(struct rkisp_device *dev)
 			return;
 	}
 	rockit_cfg->isp_num = dev->hw_dev->dev_num;
+	if (rockit_cfg->isp_num > ROCKIT_ISP_NUM_MAX) {
+		pr_err("%s increase ROCKIT_ISP_NUM_MAX:%d for more isp:%d\n",
+			__func__, ROCKIT_ISP_NUM_MAX, rockit_cfg->isp_num);
+		rockit_cfg->isp_num = ROCKIT_ISP_NUM_MAX;
+	}
 	for (i = 0; i < rockit_cfg->isp_num; i++) {
 		if (dev->hw_dev->isp[i]) {
 			rockit_cfg->rkisp_dev_cfg[i].isp_name =
 				dev->hw_dev->isp[i]->name;
 			rockit_cfg->rkisp_dev_cfg[i].isp_dev =
 				dev->hw_dev->isp[i];
-			for (j = 0; j < RKISP_MAX_STREAM; j++) {
+			for (j = 0; j < ROCKIT_STREAM_NUM_MAX; j++) {
 				stream_cfg = &rockit_cfg->rkisp_dev_cfg[i].rkisp_stream_cfg[j];
 				mutex_init(&stream_cfg->freebuf_lock);
 			}
@@ -808,7 +817,7 @@ void rkisp_rockit_frame_start(struct rkisp_device *dev)
 	if (rockit_cfg == NULL)
 		return;
 
-	for (i = 0; i < RKISP_MAX_STREAM; i++) {
+	for (i = 0; i < ROCKIT_STREAM_NUM_MAX; i++) {
 		if (i == RKISP_STREAM_VIR || i == RKISP_STREAM_LUMA)
 			continue;
 		stream = &dev->cap_dev.stream[i];

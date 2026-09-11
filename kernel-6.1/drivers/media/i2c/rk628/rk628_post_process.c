@@ -42,8 +42,12 @@
 /* r,g,b color temp div coef, range [-128,128] for 10bit data */
 #define PQ_CSC_TEMP_OFFSET_DIV_COEF		2
 
+#ifndef MAX
 #define	MAX(a, b)				((a) > (b) ? (a) : (b))
+#endif
+#ifndef MIN
 #define	MIN(a, b)				((a) < (b) ? (a) : (b))
+#endif
 #define	CLIP(x, min_v, max_v)			MIN(MAX(x, min_v), max_v)
 
 enum rk_pq_csc_mode {
@@ -1603,7 +1607,7 @@ static int rockchip_calc_post_csc(struct rk628 *rk628, struct post_csc_coef *csc
 	return ret;
 }
 
-static u8 rk628_csc_color_space_convert(u8 in_color_space, u8 format)
+u8 rk628_csc_color_space_convert(u8 in_color_space, u8 format)
 {
 	switch (in_color_space) {
 	case HDMIRX_XVYCC601:
@@ -1628,8 +1632,9 @@ static u8 rk628_csc_color_space_convert(u8 in_color_space, u8 format)
 		return OPTM_CS_E_UNKNOWN;
 	}
 }
+EXPORT_SYMBOL(rk628_csc_color_space_convert);
 
-static u8 rk628_get_output_color_space(struct rk628 *rk628, u8 input_color_space)
+u8 rk628_get_output_color_space(struct rk628 *rk628, u8 input_color_space)
 {
 	switch (input_color_space) {
 	case OPTM_CS_E_XV_YCC_601:
@@ -1638,7 +1643,7 @@ static u8 rk628_get_output_color_space(struct rk628 *rk628, u8 input_color_space
 		return rk628->tx_mode ? OPTM_CS_E_RGB : OPTM_CS_E_XV_YCC_709;
 	case OPTM_CS_E_XV_YCC_2020:
 	case OPTM_CS_E_RGB_2020:
-		return rk628->tx_mode ? OPTM_CS_E_RGB_2020 : OPTM_CS_E_XV_YCC_709;
+		return rk628->tx_mode ? OPTM_CS_E_RGB_2020 : OPTM_CS_E_XV_YCC_2020;
 	case OPTM_CS_E_RGB_ADOBE:
 	case OPTM_CS_E_YUV_ADOBE:
 		return rk628->tx_mode ? OPTM_CS_E_RGB_ADOBE : OPTM_CS_E_XV_YCC_709;
@@ -1646,6 +1651,7 @@ static u8 rk628_get_output_color_space(struct rk628 *rk628, u8 input_color_space
 		return OPTM_CS_E_XV_YCC_709;
 	}
 }
+EXPORT_SYMBOL(rk628_get_output_color_space);
 
 static void rk628_post_process_csc(struct rk628 *rk628,
 				bool is_input_full_range, bool is_output_full_range)

@@ -60,6 +60,8 @@
 #define RKCIF_PLANE_Y		0
 #define RKCIF_PLANE_CBCR	1
 
+#define ALIGN_ANY_SAFE(x, a) ((((x) - 1) / (a) + 1) * (a))
+
 /*
  * RK1808 support 5 channel inputs simultaneously:
  * dvp + 4 mipi virtual channels;
@@ -131,7 +133,8 @@ enum rkcif_stream_mode {
 	RKCIF_STREAM_MODE_TOISP      = 0x02,
 	RKCIF_STREAM_MODE_TOSCALE    = 0x04,
 	RKCIF_STREAM_MODE_TOISP_RDBK = 0x08,
-	RKCIF_STREAM_MODE_ROCKIT     = 0x10
+	RKCIF_STREAM_MODE_ROCKIT     = 0x10,
+	RKCIF_STREAM_MODE_TOOL       = 0x20,
 };
 
 enum rkcif_yuvaddr_state {
@@ -232,6 +235,7 @@ struct rkcif_tools_buffer {
 };
 
 extern int rkcif_debug;
+extern bool rkcif_frm_toisp_protect;
 
 /*
  * struct rkcif_sensor_info - Sensor infomations
@@ -363,6 +367,7 @@ struct rkcif_fps_stats {
  * @readout_time: one frame of readout time
  * @early_time: early time of buf send to user
  * @total_time: totaltime of readout time in hdr
+ * @rate_time: single frame interval
  */
 struct rkcif_readout_stats {
 	u64 fs_timestamp;
@@ -371,6 +376,7 @@ struct rkcif_readout_stats {
 	u64 readout_time;
 	u64 early_time;
 	u64 total_time;
+	u64 rate_time;
 };
 
 /* struct rkcif_irq_stats - take notes on irq number
@@ -397,6 +403,8 @@ struct rkcif_irq_stats {
 	u64 frm_end_cnt[RKCIF_MAX_STREAM_MIPI];
 	u64 not_active_buf_cnt[RKCIF_MAX_STREAM_MIPI];
 	u64 trig_simult_cnt[RKCIF_MAX_STREAM_MIPI];
+	u64 bus0_err;
+	u64 bus1_err;
 	u64 all_err_cnt;
 };
 
@@ -478,12 +486,16 @@ enum rkcif_capture_mode {
 struct rkcif_rx_buffer {
 	int buf_idx;
 	struct list_head list;
+	struct list_head list_tool;
 	struct list_head list_free;
 	struct rkisp_rx_buf dbufs;
 	struct rkcif_dummy_buffer dummy;
 	struct rkisp_thunderboot_shmem shmem;
 	u64 fe_timestamp;
 	bool is_init[RKCIF_MAX_DEV];
+	int use_cnt;
+	bool in_isp;
+	bool in_rx_list;
 };
 
 enum rkcif_dma_en_mode {
@@ -507,14 +519,14 @@ struct rkcif_sync_cfg {
 	u32 group;
 };
 
-enum rkcif_toisp_buf_update_state {
-	RKCIF_TOISP_BUF_ROTATE,
-	RKCIF_TOISP_BUF_THESAME,
-	RKCIF_TOISP_BUF_LOSS,
+enum rkcif_buf_update_state {
+	RKCIF_BUF_ROTATE,
+	RKCIF_BUF_THESAME,
+	RKCIF_BUF_LOSS,
 };
 
-struct rkcif_toisp_buf_state {
-	enum rkcif_toisp_buf_update_state state;
+struct rkcif_buf_state {
+	enum rkcif_buf_update_state state;
 	int check_cnt;
 	bool is_early_update;
 };
@@ -630,7 +642,7 @@ struct rkcif_stream {
 	atomic_t			buf_cnt;
 	struct completion		stop_complete;
 	struct completion		start_complete;
-	struct rkcif_toisp_buf_state	toisp_buf_state;
+	struct rkcif_buf_state		buf_state;
 	u32				skip_frame;
 	u32				cur_skip_frame;
 	int				thunderboot_skip_interval;
@@ -639,17 +651,23 @@ struct rkcif_stream {
 	struct rkcif_fence_context	fence_ctx;
 	struct rkcif_fence		*rkcif_fence;
 	struct list_head		qbuf_fence_list_head;
-	struct list_head		done_fence_list_head;
 	spinlock_t			fence_lock;
 	u32				rounding_bit;
-	int				frame_loss;
+	/* SOF arrived but FE missing (sum with fe_no_out = total loss) */
+	u64				frame_loss_fs_no_fe;
+	/* FE arrived but buffer not delivered (sum with fs_no_fe = total loss) */
+	u64				frame_loss_fe_no_out;
+	/* Buffers output to app/ISP path */
+	u64				frame_out_cnt;
 	struct kfifo			exp_kfifo;
 	struct kfifo			gain_kfifo;
 	struct kfifo			vts_kfifo;
 	struct kfifo			dcg_kfifo;
 	struct rkmodule_exp_delay	exp_delay;
 	struct rkmodule_exp_info	sensor_exp_info;
+	int				real_skip_num;
 	bool				stopping;
+	struct csi_channel_info		channel_info;
 	bool				crop_enable;
 	bool				crop_dyn_en;
 	bool				is_compact;
@@ -675,6 +693,10 @@ struct rkcif_stream {
 	bool				is_m_online_fb_res;
 	bool				is_fb_first_frame;
 	bool				is_pause_stream;
+	bool				is_force_update;
+	bool				is_hold_stream_off;
+	bool				is_single_buf_mode;
+	bool				is_detect_lack_buf;
 };
 
 struct rkcif_lvds_subdev {
@@ -818,7 +840,10 @@ struct rkcif_scale_vdev {
 	unsigned int frame_idx;
 	int scl_mode;
 	int extrac_pattern;
+	int cur_stream_mode;
 	bool stopping;
+	bool is_compact;
+	bool is_high_align;
 };
 
 static inline
@@ -870,6 +895,7 @@ struct rkcif_tools_vdev {
 	int frame_phase;
 	unsigned int frame_idx;
 	bool stopping;
+	bool is_cap_scale;
 };
 
 static inline
@@ -1052,6 +1078,7 @@ struct rkcif_device {
 	u32				early_line;
 	int				isp_runtime_max;
 	int				sensor_linetime;
+	u64				readout_ns;
 	u32				err_state;
 	struct rkcif_err_state_work	err_state_work;
 	struct rkcif_sensor_work	sensor_work;
@@ -1075,6 +1102,9 @@ struct rkcif_device {
 	u32				dvp_pin_group;
 	u32				unite_extend_pixel;
 	struct rkcif_switch_info	switch_info;
+	struct rkmodule_irfpa_info	irfpa_info;
+	int				prev_id;
+	u32				exp_mode;
 };
 
 extern struct platform_driver rkcif_plat_drv;
@@ -1204,4 +1234,13 @@ int rkcif_sensor_set_power(struct rkcif_stream *stream, int on);
 void rkcif_switch_change(struct rkcif_device *cif_dev, bool is_switch);
 
 void rkcif_update_unite_extend_pixel(struct rkcif_device *cif_dev);
+
+int rkcif_scale_do_start_stream(struct rkcif_scale_vdev *scale_vdev, enum rkcif_stream_mode mode);
+void rkcif_scale_do_stop_stream(struct rkcif_scale_vdev *scale_vdev, enum rkcif_stream_mode mode);
+int rkcif_scale_set_fmt(struct rkcif_scale_vdev *scale_vdev,
+			struct v4l2_pix_format_mplane *pixm, bool try);
+void rkcif_scale_vb2_buf_queue(struct vb2_buffer *vb);
+void rkcif_scale_vb_done_oneframe(struct rkcif_scale_vdev *scale_vdev,
+				  struct vb2_v4l2_buffer *vb_done);
+
 #endif

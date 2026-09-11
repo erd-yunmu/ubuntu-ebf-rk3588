@@ -1865,7 +1865,7 @@ static const struct vop_ctrl rv1126_ctrl_data = {
 	.bcsh_y2r_en = VOP_REG(RK3366_LIT_BCSH_CTRL, 0x1, 6),
 	.bcsh_r2y_en = VOP_REG(RK3366_LIT_BCSH_CTRL, 0x1, 7),
 	.bcsh_color_bar = VOP_REG(RK3366_LIT_BCSH_COL_BAR, 0xffffff, 0),
-	.bcsh_brightness = VOP_REG(RK3366_LIT_BCSH_BCS, 0xff, 0),
+	.bcsh_brightness = VOP_REG(RK3366_LIT_BCSH_BCS, 0x7f, 0),
 	.bcsh_contrast = VOP_REG(RK3366_LIT_BCSH_BCS, 0x1ff, 8),
 	.bcsh_sat_con = VOP_REG(RK3366_LIT_BCSH_BCS, 0x3ff, 20),
 	.bcsh_sin_hue = VOP_REG(RK3366_LIT_BCSH_H, 0x1ff, 0),
@@ -2001,7 +2001,7 @@ static const struct vop_ctrl rv1126b_ctrl_data = {
 	.bcsh_r2y_en = VOP_REG(RK3366_LIT_BCSH_CTRL, 0x1, 7),
 
 	.bcsh_color_bar = VOP_REG(RK3366_LIT_BCSH_COL_BAR, 0xffffff, 0),
-	.bcsh_brightness = VOP_REG(RK3366_LIT_BCSH_BCS, 0xff, 0),
+	.bcsh_brightness = VOP_REG(RK3366_LIT_BCSH_BCS, 0x7f, 0),
 	.bcsh_contrast = VOP_REG(RK3366_LIT_BCSH_BCS, 0x1ff, 8),
 	.bcsh_sat_con = VOP_REG(RK3366_LIT_BCSH_BCS, 0x3ff, 20),
 	.bcsh_sin_hue = VOP_REG(RK3366_LIT_BCSH_H, 0x1ff, 0),
@@ -2039,8 +2039,10 @@ static const struct vop_wb_regs rv1126b_vop_wb_regs = {
 };
 
 static const int rv1126_wb_intrs[] = {
-	VOPL_WB_UV_FIFO_FULL_INTR,
 	VOPL_WB_YRGB_FIFO_FULL_INTR,
+	VOPL_WB_UV_FIFO_FULL_INTR,
+	0,
+	0,
 	VOPL_WB_COMPLETE_INTR,
 };
 
@@ -2115,7 +2117,7 @@ static const struct vop_ctrl rv1106_ctrl_data = {
 	.bcsh_y2r_en = VOP_REG(RK3366_LIT_BCSH_CTRL, 0x1, 6),
 	.bcsh_r2y_en = VOP_REG(RK3366_LIT_BCSH_CTRL, 0x1, 7),
 	.bcsh_color_bar = VOP_REG(RK3366_LIT_BCSH_COL_BAR, 0xffffff, 0),
-	.bcsh_brightness = VOP_REG(RK3366_LIT_BCSH_BCS, 0xff, 0),
+	.bcsh_brightness = VOP_REG(RK3366_LIT_BCSH_BCS, 0x7f, 0),
 	.bcsh_contrast = VOP_REG(RK3366_LIT_BCSH_BCS, 0x1ff, 8),
 	.bcsh_sat_con = VOP_REG(RK3366_LIT_BCSH_BCS, 0x3ff, 20),
 	.bcsh_sin_hue = VOP_REG(RK3366_LIT_BCSH_H, 0x1ff, 0),
@@ -2219,7 +2221,7 @@ static const struct vop_ctrl rk3506_ctrl_data = {
 	.bcsh_r2y_en = VOP_REG(RK3366_LIT_BCSH_CTRL, 0x1, 7),
 
 	.bcsh_color_bar = VOP_REG(RK3366_LIT_BCSH_COL_BAR, 0xffffff, 0),
-	.bcsh_brightness = VOP_REG(RK3366_LIT_BCSH_BCS, 0xff, 0),
+	.bcsh_brightness = VOP_REG(RK3366_LIT_BCSH_BCS, 0x7f, 0),
 	.bcsh_contrast = VOP_REG(RK3366_LIT_BCSH_BCS, 0x1ff, 8),
 	.bcsh_sat_con = VOP_REG(RK3366_LIT_BCSH_BCS, 0x3ff, 20),
 	.bcsh_sin_hue = VOP_REG(RK3366_LIT_BCSH_H, 0x1ff, 0),
@@ -2416,8 +2418,8 @@ static const struct vop_grf_ctrl rk3576_lit_vo0_grf_ctrl = {
 };
 
 static const struct vop_grf_ctrl rk3576_lit_grf_ctrl = {
-	.grf_dclk_inv = VOP_REG(RK3576_IOC_GRF_MISC_CON8, 0x1, 9),
-	.grf_vopl_sel = VOP_REG(RK3576_IOC_GRF_MISC_CON8, 0x1, 11),
+	.grf_dclk_inv = VOP_REG(RK3576_VCCIO_IOC_MISC_CON8, 0x1, 9),
+	.grf_vopl_sel = VOP_REG(RK3576_VCCIO_IOC_MISC_CON8, 0x1, 11),
 };
 
 static const struct vop_mcu_bypass_cfg rk3576_lit_mcu_bypass_cfg = {
@@ -2443,6 +2445,89 @@ static const struct vop_data rk3576_vop_lit = {
 	.grf = &rk3576_lit_grf_ctrl,
 	.win = rk3576_lit_win_data,
 	.win_size = ARRAY_SIZE(rk3576_lit_win_data),
+	.mcu_bypass_cfg = &rk3576_lit_mcu_bypass_cfg,
+};
+
+static const int rk3572_vop_lit_intrs[] = {
+	FS_INTR,
+	DMA_FINISH_INTR,
+	LINE_FLAG_INTR,
+	LINE_FLAG1_INTR,
+	BUS_ERROR_INTR,
+	DSP_HOLD_VALID_INTR,
+	0,
+	POST_BUF_EMPTY_INTR,
+};
+
+static const struct vop_intr rk3572_lit_intr = {
+	.intrs = rk3572_vop_lit_intrs,
+	.nintrs = ARRAY_SIZE(rk3572_vop_lit_intrs),
+	.line_flag_num[0] = VOP_REG(EBC_LINE_FLAG, 0xfff, 0),
+	.line_flag_num[1] = VOP_REG(EBC_LINE_FLAG, 0xfff, 16),
+	.status = VOP_REG(EBC_VOP_INT_STATUS, 0xffff, 0),
+	.enable = VOP_REG(EBC_VOP_INT_EN, 0xffff, 0),
+	.clear = VOP_REG(EBC_VOP_INT_CLR, 0xffff, 0),
+};
+
+static const struct vop_grf_ctrl rk3572_lit_vo_grf_ctrl = {
+	.grf_edp_ch_sel = VOP_REG(RK3572_VO_GRF_SOC_CON9, 0x1, 10),
+	.grf_hdmi_ch_sel = VOP_REG(RK3572_VO_GRF_SOC_CON9, 0x1, 9),
+	.grf_mipi_ch_sel = VOP_REG(RK3572_VO_GRF_SOC_CON14, 0x1, 13),
+	.grf_hdmi_pin_pol = VOP_REG(RK3572_VO_GRF_SOC_CON11, 0x3, 9),
+	.grf_hdmi_1to4_en = VOP_REG(RK3572_VO_GRF_SOC_CON11, 0x1, 8),
+	.grf_mipi_mode = VOP_REG(RK3572_VO_GRF_SOC_CON11, 0x1, 11),
+};
+
+static const struct vop_grf_ctrl rk3572_lit_grf_ctrl = {
+	.grf_dclk_inv = VOP_REG(RK3572_IOC_GRF_GPIO3_IOC_MISC2, 0x1, 1),
+	.grf_vopl_sel = VOP_REG(RK3572_IOC_GRF_GPIO3_IOC_MISC2, 0x1, 0),
+};
+
+static const struct vop_win_phy rk3572_lit_win2_data = {
+	.data_formats = formats_win_ebc,
+	.nformats = ARRAY_SIZE(formats_win_ebc),
+
+	/*
+	 * RK3572 LITE don't need config act info. In order to
+	 * make the rdata fifo empty interrupt function to work
+	 * properly, the ebc_win_act register is use to config
+	 * the act height. Though the same height write to act
+	 * info register and dsp info register, the height real
+	 * take effect in act info register.
+	 */
+	.act_info = VOP_REG(EBC_WIN_ACT, 0xffffffff, 0),
+	.dsp_info = VOP_REG(EBC_VOP_WIN_DSP_INFO, 0xffffffff, 0),
+	.dsp_st = VOP_REG(EBC_VOP_WIN_DSP_ST, 0xffffffff, 0),
+
+	.yrgb_mst = VOP_REG(EBC_WIN_MST2, 0xffffffff, 0),
+
+	.enable = VOP_REG(EBC_WIN2_CTRL, 0x1, 0),
+
+	.interlace_read = VOP_REG(EBC_VOP_SYS_CTRL, 0x1, 3),
+	.format = VOP_REG(EBC_VOP_SYS_CTRL, 0x3, 4),
+
+	.yrgb_vir = VOP_REG(EBC_VOP_WIN_VIR, 0x1fff, 0),
+};
+
+static const struct vop_win_data rk3572_lit_win_data[] = {
+	{ .phy = NULL },
+	{ .phy = NULL },
+	{ .base = 0x00, .phy = &rk3572_lit_win2_data,
+	  .type = DRM_PLANE_TYPE_PRIMARY },
+};
+
+static const struct vop_data rk3572_vop_lit = {
+	.soc_id = 0x3572,
+	.vop_id = 0,
+	.version = VOP_VERSION(2, 0x10),
+	.max_input = {1920, 1920},
+	.max_output = {1920, 1920},
+	.ctrl = &rk3576_lit_ctrl_data,
+	.intr = &rk3572_lit_intr,
+	.vo0_grf = &rk3572_lit_vo_grf_ctrl,
+	.grf = &rk3572_lit_grf_ctrl,
+	.win = rk3572_lit_win_data,
+	.win_size = ARRAY_SIZE(rk3572_lit_win_data),
 	.mcu_bypass_cfg = &rk3576_lit_mcu_bypass_cfg,
 };
 
@@ -2510,6 +2595,10 @@ static const struct of_device_id vop_driver_dt_match[] = {
 #if IS_ENABLED(CONFIG_CPU_RK3506)
 	{ .compatible = "rockchip,rk3506-vop",
 	  .data = &rk3506_vop },
+#endif
+#if IS_ENABLED(CONFIG_CPU_RK3572)
+	{ .compatible = "rockchip,rk3572-vop-lit",
+	  .data = &rk3572_vop_lit },
 #endif
 #if IS_ENABLED(CONFIG_CPU_RK3576)
 	{ .compatible = "rockchip,rk3576-vop-lit",

@@ -101,6 +101,10 @@
 	status = "okay";
 };
 
+&display_subsystem {
+	status = "okay";
+};
+
 &dp {
 	//split-mode;
 	force-hpd;
@@ -128,11 +132,11 @@
 };
 
 &dp0_in_vp1 {
-	status = "disabled";
+	status = "okay";
 };
 
 &dp0_in_vp2 {
-	status = "okay";
+	status = "disabled";
 };
 
 &dp2lvds_backlight0 {
@@ -164,16 +168,20 @@
 	};
 };
 
+&dsi_in_vopl {
+	status = "disabled";
+};
+
 &dsi_in_vp0 {
 	status = "disabled";
 };
 
 &dsi_in_vp1 {
-	status = "okay";
+	status = "disabled";
 };
 
 &dsi_in_vp2 {
-	status = "disabled";
+	status = "okay";
 };
 
 &edp {
@@ -216,15 +224,9 @@
 	status = "disabled";
 };
 
-
 &hdptxphy {
 	status = "okay";
 };
-
-&hdptxphy_hdmi {
-	status = "disabled";
-};
-
 
 &i2c8 {
 	status = "okay";
@@ -282,62 +284,34 @@
 			0322 0024
 			//Init Default
 			0326 00E4
-			//HSYNC_WIDTH_L
-			0385 0038
-			//VSYNC_WIDTH_L
-			0386 0008
+			//HSYNC_WIDTH_L	 HSYNC=32
+			0385 0020
+			//VSYNC_WIDTH_L	 VSYNC=2
+			0386 0002
 			//HSYNC_WIDTH_H/VSYNC_WIDTH_H
 			0387 0000
-			//VFP_L
+			//VFP_L	VFP=200
 			03A5 00C8
 			//VBP_H
 			03A7 0000
-			//VFP_H/VBP_L
-			03A6 0020
-			//VRES_L
+			//VBP_L/VFP_H VBP=8
+			03A6 0080
+			//VRES_L VRES=0X02D0=720
 			03A8 00D0
 			//VRES_H
 			03A9 0002
-			//HFP_L
+			//HFP_L	 HFP=56
 			03AA 0038
 			//HBP_H
-			03AC 0002
-			//HFP_H/HBP_L
-			03AB 0000
-			//HRES_L
+			03AC 0003
+			//HBP_L/HFP_H(4bit)	HBP=56
+			03AB 0080
+			//HRES_L HRES=0X0780=1920
 			03AD 0080
 			//HRES_H
 			03AE 0007
 			//Disable FIFO/DESKEW_EN
-			03A4 00C0
-			//HSYNC_WIDTH_L
-			0395 0038
-			//VSYNC_WIDTH_L
-			0396 0008
-			//HSYNC_WIDTH_H/VSYNC_WIDTH_H
-			0397 0000
-			//VFP_L
-			03B1 00C8
-			//VBP_H
-			03B3 0000
-			//VFP_H/VBP_L
-			03B2 0020
-			//VRES_L
-			03B4 00D0
-			//VRES_H
-			03B5 0002
-			//HFP_L
-			03B6 0038
-			//HBP_H
-			03B8 0002
-			//HFP_H/HBP_L
-			03B7 0000
-			//HRES_L
-			03B9 0080
-			//HRES_H
-			03BA 0007
-			//Disable FIFO/DESKEW_EN
-			03B0 00C0
+			03A4 00C1
 			//Turn on video pipe
 			0002 0033
 			//Enable splitter mode  reset one shot
@@ -347,7 +321,7 @@
 
 		i2c8_max96789_pinctrl: i2c8-max96789-pinctrl {
 			compatible = "maxim,max96789-pinctrl";
-			pinctrl-names = "default","sleep";
+			pinctrl-names = "init","sleep";
 			pinctrl-0 = <&i2c8_max96789_pinctrl_pins>;
 			pinctrl-1 = <&i2c8_max96789_pinctrl_pins>;
 			status = "okay";
@@ -436,10 +410,9 @@
 
 		i2c8_max96752_pinctrl: i2c8-max96752-pinctrl {
 			compatible = "maxim,max96752-pinctrl";
-			pinctrl-names = "default","init","sleep";
+			pinctrl-names = "init","sleep";
 			pinctrl-0 = <&i2c8_max96752_panel_pins>;
-			pinctrl-1 = <&i2c8_max96752_panel_pins>;
-			pinctrl-2 = <&i2c8_max96752_panel_sleep_pins>;
+			pinctrl-1 = <&i2c8_max96752_panel_sleep_pins>;
 			status = "okay";
 
 			i2c8_max96752_panel_pins: panel-pins {
@@ -881,8 +854,9 @@
 
 		i2c5_max96745_pinctrl: i2c5-max96745-pinctrl {
 			compatible = "maxim,max96745-pinctrl";
-			pinctrl-names = "default";
+			pinctrl-names = "init","sleep";
 			pinctrl-0 = <&i2c5_max96745_pinctrl_pins>;
+			pinctrl-1 = <&i2c5_max96745_pinctrl_pins>;
 			status = "okay";
 
 			i2c5_max96745_pinctrl_pins: pinctrl-pins {
@@ -970,10 +944,9 @@
 			compatible = "maxim,max96752-pinctrl";
 			status = "okay";
 
-			pinctrl-names = "default","init","sleep";
+			pinctrl-names = "init","sleep";
 			pinctrl-0 = <&i2c5_max96752_panel_pins>;
-			pinctrl-1 = <&i2c5_max96752_panel_pins>;
-			pinctrl-2 = <&i2c5_max96752_panel_sleep_pins>;
+			pinctrl-1 = <&i2c5_max96752_panel_sleep_pins>;
 
 			i2c5_max96752_panel_pins: panel-pins {
 				lcd-rst-pin {
@@ -1403,11 +1376,12 @@
 
 		i2c3_max96745_pinctrl: i2c3-max96745-pinctrl {
 			compatible = "maxim,max96745-pinctrl";
-			pinctrl-names = "default";
-			pinctrl-0 = <&i2c45_max96745_pinctrl_pins>;
+			pinctrl-names = "init","sleep";
+			pinctrl-0 = <&i2c3_max96745_pinctrl_pins>;
+			pinctrl-1 = <&i2c3_max96745_pinctrl_pins>;
 			status = "okay";
 
-			i2c45_max96745_pinctrl_pins: pinctrl-pins {
+			i2c3_max96745_pinctrl_pins: pinctrl-pins {
 				i2c {
 					groups = "MAX96745_I2C";
 					function = "MAX96745_I2C";
@@ -1496,10 +1470,9 @@
 			compatible = "maxim,max96752-pinctrl";
 			status = "okay";
 
-			pinctrl-names = "default","init","sleep";
+			pinctrl-names = "init","sleep";
 			pinctrl-0 = <&i2c3_max96752_panel_pins>;
-			pinctrl-1 = <&i2c3_max96752_panel_pins>;
-			pinctrl-2 = <&i2c3_max96752_panel_sleep_pins>;
+			pinctrl-1 = <&i2c3_max96752_panel_sleep_pins>;
 
 			i2c3_max96752_panel_pins: panel-pins {
 				lcd-rst-pin {
@@ -1657,14 +1630,14 @@
 
 &route_dp0 {
 	status = "disabled";
-	connect = <&vp2_out_dp0>;
+	connect = <&vp1_out_dp0>;
 	logo,uboot = "logo2.bmp";
 	logo,kernel = "logo2.bmp";
 };
 
 &route_dsi {
-	status = "okay";
-	connect = <&vp1_out_dsi>;
+	status = "disabled";
+	connect = <&vp2_out_dsi>;
 	logo,uboot = "logo1.bmp";
 	logo,kernel = "logo1.bmp";
 };
@@ -1690,6 +1663,14 @@
 	status = "okay";
 };
 
+&vop_mmu {
+	status = "okay";
+};
+
+&vop {
+	status = "okay";
+};
+
 //edp
 &vp0 {
 	assigned-clocks = <&cru DCLK_VP0_SRC>;
@@ -1697,7 +1678,7 @@
 };
 
 //dsi
-&vp1 {
-	assigned-clocks = <&cru DCLK_VP1_SRC>;
+&vp2 {
+	assigned-clocks = <&cru DCLK_VP2_SRC>;
 	assigned-clock-parents = <&cru PLL_VPLL>;
 };

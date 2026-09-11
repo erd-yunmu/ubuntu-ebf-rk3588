@@ -15,13 +15,11 @@
 #include <drm/drm_vma_manager.h>
 
 #include <linux/genalloc.h>
-#include <linux/iommu.h>
-#include <linux/pagemap.h>
-#include <linux/vmalloc.h>
 #include <linux/rockchip/rockchip_sip.h>
 
 #include "rockchip_drm_drv.h"
 #include "rockchip_drm_gem.h"
+#include "rockchip_drm_logo.h"
 
 static u32 bank_bit_first = 12;
 static u32 bank_bit_mask = 0x7;
@@ -424,7 +422,7 @@ static int rockchip_gem_alloc_secure(struct rockchip_gem_object *rk_obj)
 err_free_pages:
 	drm_free_large(rk_obj->pages);
 err_buf_free:
-	gen_pool_free(private->secure_buffer_pool, paddr, rk_obj->base.size);
+	gen_pool_free(private->secure_buffer_pool, rk_obj->dma_handle, rk_obj->base.size);
 
 	return ret;
 }
@@ -486,7 +484,7 @@ static int rockchip_gem_alloc_buf(struct rockchip_gem_object *rk_obj,
 			if (!rk_obj->kvaddr) {
 				DRM_ERROR("failed to vmap() buffer\n");
 				ret = -ENOMEM;
-				goto err_iommu_free;
+				goto err_free;
 			}
 		}
 	}
@@ -494,7 +492,7 @@ static int rockchip_gem_alloc_buf(struct rockchip_gem_object *rk_obj,
 	if (private->domain) {
 		ret = rockchip_gem_iommu_map(rk_obj);
 		if (ret < 0)
-			goto err_free;
+			goto err_vunmap;
 	} else if (is_vop_enabled()) {
 		WARN_ON(!rk_obj->dma_handle);
 		rk_obj->dma_addr = rk_obj->dma_handle;
@@ -502,9 +500,9 @@ static int rockchip_gem_alloc_buf(struct rockchip_gem_object *rk_obj,
 
 	return 0;
 
-err_iommu_free:
-	if (private->domain)
-		rockchip_gem_iommu_unmap(rk_obj);
+err_vunmap:
+	if (rk_obj->buf_type == ROCKCHIP_GEM_BUF_TYPE_SHMEM && alloc_kmap)
+		vunmap(rk_obj->kvaddr);
 err_free:
 	if (rk_obj->buf_type == ROCKCHIP_GEM_BUF_TYPE_SECURE)
 		rockchip_gem_free_secure(rk_obj);
@@ -575,10 +573,14 @@ static int rockchip_drm_gem_object_mmap(struct drm_gem_object *obj,
 	struct rockchip_gem_object *rk_obj = to_rockchip_obj(obj);
 
 	/*
-	 * Set vm_pgoff (used as a fake buffer offset by DRM) to 0 and map the
-	 * whole buffer from the start.
+	 * Remove the fake offset used by DRM for object lookup.
+	 * This leaves the actual within-object page offset, allowing
+	 * userspace to mmap a sub-region of the buffer (e.g. via dma-buf).
+	 *
+	 * For the native DRM chardev path (e.g., /dev/dri/card0) sub-region
+	 * offsets are forbidden, so this is equivalent to setting it to 0.
 	 */
-	vma->vm_pgoff = 0;
+	vma->vm_pgoff -= drm_vma_node_start(&obj->vma_node);
 
 	/*
 	 * We allocated a struct page table for rk_obj, so clear
@@ -606,13 +608,13 @@ static int rockchip_drm_gem_object_mmap(struct drm_gem_object *obj,
 	return ret;
 }
 
-static void rockchip_gem_release_object(struct rockchip_gem_object *rk_obj)
+void rockchip_gem_release_object(struct rockchip_gem_object *rk_obj)
 {
 	drm_gem_object_release(&rk_obj->base);
 	kfree(rk_obj);
 }
 
-const struct drm_gem_object_funcs rockchip_gem_object_funcs = {
+static const struct drm_gem_object_funcs rockchip_gem_object_funcs = {
 	.free = rockchip_gem_free_object,
 	.export = rockchip_drm_gem_prime_export,
 	.get_sg_table = rockchip_gem_prime_get_sg_table,
@@ -622,7 +624,7 @@ const struct drm_gem_object_funcs rockchip_gem_object_funcs = {
 	.vm_ops = &drm_gem_dma_vm_ops,
 };
 
-static struct rockchip_gem_object *
+struct rockchip_gem_object *
 rockchip_gem_alloc_object(struct drm_device *drm, unsigned int size,
 			  unsigned int flags)
 {
@@ -736,6 +738,10 @@ void rockchip_gem_free_object(struct drm_gem_object *obj)
 		}
 		drm_free_large(rk_obj->pages);
 		rockchip_gem_destroy(obj, rk_obj->sgt);
+	} else if (rk_obj->buf_type == ROCKCHIP_GEM_BUF_TYPE_LOGO) {
+#ifndef MODULE
+		rockchip_free_loader_memory(obj->dev);
+#endif
 	} else {
 		rockchip_gem_free_buf(rk_obj);
 	}

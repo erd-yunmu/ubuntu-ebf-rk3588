@@ -825,6 +825,33 @@ static int rk628_display_route_info_parse(struct rk628 *rk628)
 	return ret;
 }
 
+static void rk628_ssc_info_parse(struct rk628 *rk628)
+{
+	rk628->ssc.enable = 0;
+
+	if (!of_property_read_bool(rk628->dev->of_node, "ssc-mod-enable"))
+		return;
+
+	if (of_property_read_bool(rk628->dev->of_node, "ssc-mod-down-spread"))
+		rk628->ssc.down_spread = true;
+	else
+		rk628->ssc.down_spread = false;
+
+	if (of_property_read_u32(rk628->dev->of_node, "ssc-mod-depth", &rk628->ssc.mod_depth) ||
+	    !rk628->ssc.mod_depth) {
+		dev_err(rk628->dev, "failed to read ssc-mod-depth\n");
+		return;
+	}
+
+	if (of_property_read_u32(rk628->dev->of_node, "ssc-mod-freq", &rk628->ssc.mod_freq) ||
+	    !rk628->ssc.mod_freq) {
+		dev_err(rk628->dev, "failed to read ssc-mod-freq\n");
+		return;
+	}
+
+	rk628->ssc.enable = SSC_CPLL;
+}
+
 static void
 rk628_display_mode_from_videomode(const struct rk628_videomode *vm,
 				  struct rk628_display_mode *dmode)
@@ -994,7 +1021,7 @@ static void rk628_show_resolution(struct seq_file *s)
 	src_vtotal = src_mode->vtotal;
 
 	/* get fps */
-	fps = src_dclk * 1000 / (src_htotal * src_vtotal);
+	fps = DIV_ROUND_CLOSEST_ULL(src_dclk * 1000, src_htotal * src_vtotal);
 
 	clk_rx_read = rk628_cru_clk_get_rate(rk628, CGU_CLK_RX_READ) / 1000;
 
@@ -1058,7 +1085,7 @@ static void rk628f_show_rgbrx_resolution(struct seq_file *s)
 	src_vtotal = val & 0xffff;
 
 	/* get fps */
-	fps = src_dclk * 1000 / (src_htotal * src_vtotal);
+	fps = DIV_ROUND_CLOSEST_ULL(src_dclk * 1000, src_htotal * src_vtotal);
 
 	clk_rx_read = rk628_cru_clk_get_rate(rk628, CGU_CLK_RX_READ) / 1000;
 
@@ -1117,7 +1144,7 @@ static void rk628_show_output_resolution(struct seq_file *s)
 	dsp_vact_end = val & 0xfff;
 
 	/* get fps */
-	fps = sclk_vop * 1000 / (dsp_vtotal * dsp_htotal);
+	fps = DIV_ROUND_CLOSEST_ULL(sclk_vop * 1000, (dsp_vtotal * dsp_htotal));
 
 	bus_format_s = rk628_get_output_bus_format_name(rk628);
 
@@ -1500,6 +1527,8 @@ rk628_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
 			dev_err(dev, "display route err\n");
 		goto destroy_pwm_wq;
 	}
+
+	rk628_ssc_info_parse(rk628);
 
 	if (!rk628_output_is_csi(rk628)) {
 		ret = rk628_display_timings_get(rk628);

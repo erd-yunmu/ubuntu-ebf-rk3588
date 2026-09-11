@@ -4,8 +4,20 @@
 #ifndef _RKVPSS_OFFLINE_H
 #define _RKVPSS_OFFLINE_H
 #define DEV_NUM_MAX 256
-#define UNITE_ENLARGE 16
-#define UNITE_LEFT_ENLARGE 16
+
+/* Unite mode enlarge pixels for different formats */
+#define UNITE_ENLARGE_YUV        16    // YUV format enlarge
+#define UNITE_ENLARGE_FBC        4     // RKFBC format enlarge
+#define UNITE_ENLARGE_TILE       4     // Tile4x4 format enlarge
+#define UNITE_ENLARGE_RGB        4     // RGB format enlarge
+
+/* Backward compatibility - only define if not already defined */
+#ifndef UNITE_ENLARGE
+#define UNITE_ENLARGE            UNITE_ENLARGE_YUV
+#endif
+#ifndef UNITE_LEFT_ENLARGE
+#define UNITE_LEFT_ENLARGE       UNITE_ENLARGE_YUV
+#endif
 
 extern char rkvpss_regfile[RKVPSS_REGFILE_LEN];
 
@@ -78,7 +90,7 @@ struct rkvpss_offline_dev {
 	struct idr file_idr;
 	struct mutex idr_lock;
 	struct mutex handle_lock;
-	bool mode_sel_en;
+	int ref_cnt;
 	bool pm_need_wait;
 };
 

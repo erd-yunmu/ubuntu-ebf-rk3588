@@ -273,10 +273,11 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c7m0_xfer>;
 
-	es8388: es8388@11 {
+	/* Audio codec: ES8388 chip, but only works with ES8323 driver */
+	es8323: es8323@11 {
 		status = "okay";
 		#sound-dai-cells = <0>;
-		compatible = "everest,es8388", "everest,es8323";
+		compatible = "everest,es8323";
 		reg = <0x11>;
 		clocks = <&mclkout_i2s0>;
 		clock-names = "mclk";
@@ -496,7 +497,7 @@
 	status = "okay";
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
 	status = "okay";
 };
 
@@ -588,7 +589,7 @@
 /* CAN */
 &can2 {
     pinctrl-names = "default";
-    pinctrl-0 = <&can2m0_pins>;
+    pinctrl-0 = <&can2m1_pins>; /* GPIO0_PD4/PD5 (pins 20,22) to avoid conflict with UART5 */
     status = "okay";
 };
 
@@ -760,7 +761,7 @@
 };
 
 &pcie2x1l1 {
-	reset-gpios = <&gpio1 RK_PA7 GPIO_ACTIVE_HIGH>;
+	reset-gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_HIGH>;
 	rockchip,init-delay-ms = <100>;
 	vpcie3v3-supply = <&vcc_3v3_pcie20>;
 	status = "okay";
@@ -859,24 +860,9 @@
 };
 
 &display_subsystem {
-	clocks = <&hdptxphy_hdmi0>;
+	clocks = <&hdptxphy0>;
 	clock-names = "hdmi0_phy_pll";
 };
-
-/* SPI */
-
-&spi0 {
-	status = "okay";
-	pinctrl-names = "default";
-	pinctrl-0 = <&spi0m3_cs0  &spi0m3_cs1 &spi0m3_pins>;
-	num-cs = <2>;
-	spi_test@0 {
-		compatible = "rockchip,spi_test_bus0_cs1";
-		reg = <0>;
-		spi-max-frequency = <5000000>;
-	};
-};
-
 
 &spi2 {
 	pinctrl-names = "default";

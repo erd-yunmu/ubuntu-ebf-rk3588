@@ -19,6 +19,7 @@ rockchipdrm-$(CONFIG_ROCKCHIP_CDN_DP) += cdn-dp-core.o cdn-dp-reg.o \
 					 cdn-dp-link-training.o
 rockchipdrm-$(CONFIG_ROCKCHIP_DRM_TVE) += rockchip_drm_tve.o
 rockchipdrm-$(CONFIG_ROCKCHIP_DW_HDMI) += dw_hdmi-rockchip.o
+rockchipdrm-$(CONFIG_ROCKCHIP_DW_HDMI_QP) += dw_hdmi_qp-rockchip.o
 rockchipdrm-$(CONFIG_ROCKCHIP_DW_MIPI_DSI) += dw-mipi-dsi-rockchip.o
 rockchipdrm-$(CONFIG_ROCKCHIP_DW_MIPI_DSI2) += dw-mipi-dsi2-rockchip.o
 rockchipdrm-$(CONFIG_ROCKCHIP_DW_DP) += dw-dp.o
@@ -33,6 +34,7 @@ obj-$(CONFIG_ROCKCHIP_PANEL_NOTIFIER) += rockchip_panel_notifier.o
 obj-$(CONFIG_ROCKCHIP_DW_HDCP2) += dw_hdcp2.o
 obj-$(CONFIG_DRM_ROCKCHIP) += rockchipdrm.o
 obj-$(CONFIG_DRM_ROCKCHIP_RK618) += rk618/
+obj-$(CONFIG_ROCKCHIP_DIMMING_PANEL) += rockchip_dimming_panel.o
 
 rockchip_aux_client-y := rockchip_dp_mst_aux_client.o rockchip_dp_mst_aux_client_helper.o
 obj-$(CONFIG_ROCKCHIP_DP_MST_AUX_CLIENT) += rockchip_aux_client.o

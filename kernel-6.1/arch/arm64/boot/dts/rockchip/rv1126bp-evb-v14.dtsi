@@ -68,16 +68,6 @@
 		vin-supply = <&vcc5v0_sys>;
 	};
 
-	wireless-bluetooth {
-		compatible = "bluetooth-platdata";
-		uart_rts_gpios = <&gpio3 RK_PA6 GPIO_ACTIVE_LOW>;
-		pinctrl-names = "default", "rts_gpio";
-		pinctrl-0 = <&uart2m0_rtsn_pins>;
-		pinctrl-1 = <&uart2_gpios>;
-		BT,power_gpio = <&gpio0 RK_PB1 GPIO_ACTIVE_HIGH>;
-		status = "okay";
-	};
-
 	wireless-wlan {
 		compatible = "wlan-platdata";
 		rockchip,grf = <&grf>;
@@ -162,8 +152,8 @@
 		pinctrl-names = "default", "pmic-sleep",
 				"pmic-power-off";
 		pinctrl-0 = <&pmic_int>;
-		pinctrl-1 = <&soc_slppin_gpio>, <&rk817_slppin_slp>;
-		pinctrl-2 = <&soc_slppin_gpio>, <&rk817_slppin_pwrdn>;
+		pinctrl-1 = <&soc_slppin_gpio>;
+		pinctrl-2 = <&soc_slppin_gpio>;
 		rockchip,system-power-controller;
 		wakeup-source;
 		#clock-cells = <1>;
@@ -184,31 +174,6 @@
 
 		pwrkey {
 			status = "okay";
-		};
-
-		pinctrl_rk8xx: pinctrl_rk8xx {
-			gpio-controller;
-			#gpio-cells = <2>;
-
-			rk817_slppin_null: rk817_slppin_null {
-				pins = "gpio_slp";
-				function = "pin_fun0";
-			};
-
-			rk817_slppin_slp: rk817_slppin_slp {
-				pins = "gpio_slp";
-				function = "pin_fun1";
-			};
-
-			rk817_slppin_pwrdn: rk817_slppin_pwrdn {
-				pins = "gpio_slp";
-				function = "pin_fun2";
-			};
-
-			rk817_slppin_rst: rk817_slppin_rst {
-				pins = "gpio_slp";
-				function = "pin_fun3";
-			};
 		};
 
 		regulators {
@@ -236,7 +201,6 @@
 				regulator-name = "vdd_arm";
 				regulator-state-mem {
 					regulator-off-in-suspend;
-					regulator-suspend-microvolt = <800000>;
 				};
 			};
 
@@ -263,15 +227,15 @@
 				};
 			};
 
-			vcc_0v8: LDO_REG1 {
+			vcc_0v9: LDO_REG1 {
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-min-microvolt = <800000>;
-				regulator-max-microvolt = <800000>;
-				regulator-name = "vcc_0v8";
+				regulator-min-microvolt = <900000>;
+				regulator-max-microvolt = <900000>;
+				regulator-name = "vcc_0v9";
 				regulator-state-mem {
 					regulator-on-in-suspend;
-					regulator-suspend-microvolt = <800000>;
+					regulator-suspend-microvolt = <900000>;
 				};
 			};
 
@@ -287,15 +251,15 @@
 				};
 			};
 
-			vdd0v8_pmu: LDO_REG3 {
+			vdd0v9_pmu: LDO_REG3 {
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-min-microvolt = <800000>;
-				regulator-max-microvolt = <800000>;
-				regulator-name = "vcc0v8_pmu";
+				regulator-min-microvolt = <900000>;
+				regulator-max-microvolt = <900000>;
+				regulator-name = "vcc0v9_pmu";
 				regulator-state-mem {
 					regulator-on-in-suspend;
-					regulator-suspend-microvolt = <800000>;
+					regulator-suspend-microvolt = <900000>;
 				};
 			};
 
@@ -352,6 +316,7 @@
 				regulator-boot-on;
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <3300000>;
+				regulator-init-microvolt = <3300000>;
 				regulator-name = "vccio_sd";
 				regulator-state-mem {
 					regulator-off-in-suspend;
@@ -494,12 +459,6 @@
 		};
 	};
 
-	wireless-bluetooth {
-		uart2_gpios: uart2-gpios {
-			rockchip,pins = <3 RK_PA6 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
-	};
-
 	wireless-wlan {
 		wifi_wake_host: wifi-wake-host {
 			rockchip,pins = <0 RK_PB2 RK_FUNC_GPIO &pcfg_pull_up>;
@@ -589,6 +548,7 @@
 	pinctrl-0 = <&sdmmc1_clk_pins &sdmmc1_cmd_pins &sdmmc1_bus4_pins>;
 	keep-power-in-suspend;
 	non-removable;
+	no-low-pwr;
 	mmc-pwrseq = <&sdio_pwrseq>;
 	sd-uhs-sdr104;
 	status = "okay";
@@ -597,7 +557,15 @@
 &uart2 {
 	status = "okay";
 	pinctrl-names = "default";
-	pinctrl-0 = <&uart2m0_xfer_pins &uart2m0_ctsn_pins>;
+	pinctrl-0 = <&uart2m0_xfer_pins &uart2m0_ctsn_pins &uart2m0_rtsn_pins>;
+	uart-has-rtscts;
+
+	bluetooth {
+		compatible = "rockchip,rk960-bt";
+		max-speed = <1500000>;
+		shutdown-gpios = <&gpio0 RK_PB1 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
 };
 
 &usb2phy_host {

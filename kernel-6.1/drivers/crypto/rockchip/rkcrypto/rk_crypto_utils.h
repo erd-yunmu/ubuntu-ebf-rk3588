@@ -29,8 +29,10 @@ struct rk_hw_desc {
 	struct crypto_lli_desc		*lli_aad;
 	struct crypto_lli_desc		*lli_head;
 	struct crypto_lli_desc		*lli_tail;
+	struct crypto_lli_desc		*lli_ctr;
 	dma_addr_t			lli_head_dma;
 	dma_addr_t			lli_aad_dma;
+	dma_addr_t			lli_ctr_dma;
 	u32				total;
 };
 
@@ -47,6 +49,9 @@ bool rk_crypto_check_align(struct scatterlist *src_sg, size_t src_nents,
 bool rk_crypto_check_dmafd(struct scatterlist *sgl, size_t nents);
 
 u64 rk_crypto_hw_desc_maxlen(struct scatterlist *sg, u64 len, u32 *max_nents);
+
+int rk_crypto_sg_walk_nents(struct scatterlist **sg_src, struct scatterlist **sg_dst,
+			    unsigned int nents, struct device *dev);
 
 int rk_crypto_hw_desc_alloc(struct device *dev, struct rk_hw_desc *hw_desc);
 
