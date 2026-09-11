@@ -36,7 +36,7 @@ export DEBIAN_FRONTEND=noninteractive
 # Debootstrap options
 arch=arm64
 release=noble
-mirror=http://mirrors.aliyun.com/ubuntu-ports/
+mirror=https://mirrors.aliyun.com/ubuntu-ports/
 chroot_dir=rootfs
 overlay_dir=../overlay
 
@@ -111,11 +111,6 @@ mount -t sysfs /sys ${chroot_dir}/sys
 mount -o bind /dev ${chroot_dir}/dev
 mount -o bind /dev/pts ${chroot_dir}/dev/pts
 
-# Package priority for ppa
-cp ${overlay_dir}/etc/apt/preferences.d/rockchip-ppa ${chroot_dir}/etc/apt/preferences.d/rockchip-ppa
-cp ${overlay_dir}/etc/apt/preferences.d/panfork-mesa-ppa ${chroot_dir}/etc/apt/preferences.d/panfork-mesa-ppa
-cp ${overlay_dir}/etc/apt/preferences.d/rockchip-multimedia-ppa ${chroot_dir}/etc/apt/preferences.d/rockchip-multimedia-ppa
-
 # Download and update packages
 cat << EOF | chroot ${chroot_dir} /bin/bash
 set -eE 
@@ -153,12 +148,6 @@ echo lubancat > /etc/hostname
 # set localtime
 ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
-# Add mesa and rockchip multimedia ppa
-if [[ ${MAINLINE} != "Y" ]]; then
-    apt-get -y update && apt-get -y install software-properties-common
-    add-apt-repository -y ppa:liujianfeng1994/rockchip-multimedia
-fi
-
 # Download and update installed packages
 apt-get -y update && apt-get -y upgrade && apt-get -y dist-upgrade
 
@@ -178,9 +167,6 @@ apt-get -y full-upgrade
 
 # Remove cryptsetup and needrestart
 apt-get -y remove cryptsetup needrestart brltty
-apt-get purge -y flash-kernel
-
-rm -rf /etc/initramfs/post-update.d/flash-kernel
 
 # Clean package cache
 apt-get -y autoremove && apt-get -y clean
@@ -198,9 +184,11 @@ mv /tmp/swapfile /swapfile
 EOF
 
 # Install arm64 deb package
-cp -r ../packages/arm64/* ${chroot_dir}/tmp
+mkdir -p ${chroot_dir}/tmp
+find ../packages/arm64/ -type f -name "*.deb" -exec cp -f {} ${chroot_dir}/tmp/ \;
+chroot ${chroot_dir} /bin/bash -c "apt install -y libglib2.0-dev libunwind-dev libdw-dev liblzma-doc"
 chroot ${chroot_dir} /bin/bash -c "dpkg -i /tmp/*.deb"
-chroot ${chroot_dir} /bin/bash -c "apt-mark hold ffmpeg"
+chroot ${chroot_dir} /bin/bash -c "apt-mark hold ffmpeg && apt -y --fix-broken install"
 rm -f ${chroot_dir}/tmp/*.deb
 
 # Customize header content
@@ -310,6 +298,13 @@ mount -t sysfs /sys ${chroot_dir}/sys
 mount -o bind /dev ${chroot_dir}/dev
 mount -o bind /dev/pts ${chroot_dir}/dev/pts
 
+# Copy Chromium RKMPP local packages into the desktop chroot
+chromium_rkmpp_package_dir=../packages/Chromium-rkmpp
+chromium_rkmpp_chroot_dir=${chroot_dir}/tmp/Chromium-rkmpp
+mkdir -p ${chromium_rkmpp_chroot_dir}
+find ${chromium_rkmpp_package_dir}/ -maxdepth 1 -type f -name "*.deb" \
+    -exec cp -f {} ${chromium_rkmpp_chroot_dir}/ \;
+
 # Download and update packages
 cat << EOF | chroot ${chroot_dir} /bin/bash
 set -eE 
@@ -317,13 +312,12 @@ trap 'echo Error: in $0 on line $LINENO' ERR
 
 # Desktop packages
 apt-get -y install ubuntu-desktop dbus-x11 xterm pulseaudio pavucontrol qtwayland5 \
-gstreamer1.0-plugins-bad gstreamer1.0-plugins-base gstreamer1.0-plugins-good mpv \
-gstreamer1.0-tools gstreamer1.0-rockchip1 chromium-browser mesa-utils libcanberra-pulse \
-librist4 librist-dev rist-tools dvb-tools ir-keytable rockchip-multimedia-config \
-libdvbv5-0 libdvbv5-dev libdvbv5-doc libv4l-0 libv4l2rds0 libv4lconvert0 libv4l-dev \
-libv4l-rkmpp qv4l2 v4l-utils libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview \
+mesa-utils libcanberra-pulse gnome-software mpv \
+librist4 librist-dev rist-tools dvb-tools ir-keytable \
+libdvbv5-0 libdvbv5-dev libdvbv5-doc libv4l-0 libv4l2rds0 libv4lconvert0 \
+libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview \
 libgl1-mesa-dev libgles2-mesa-dev libglx-mesa0 mesa-common-dev mesa-vulkan-drivers \
-gnome-software language-pack-zh-han*
+language-pack-zh-han*
 
 export LANGUAGE="zh_CN"
 export LANG="zh_CN.UTF-8"
@@ -341,17 +335,29 @@ ibus-chewing libreoffice-help-zh-cn language-pack-gnome-zh-hant \
 thunderbird-locale-zh-cn thunderbird-locale-zh-tw
 apt install -y $(check-language-support)
 
+# Install Chromium RKMPP local packages and resolve dependencies with APT
+if compgen -G "/tmp/Chromium-rkmpp/*.deb" > /dev/null; then
+    apt-get install -y /tmp/Chromium-rkmpp/*.deb
+    systemctl enable chromium-rkmpp-nodes.service
+fi
+
 # Remove cloud-init and landscape-common
 apt-get -y purge cloud-init landscape-common cryptsetup-initramfs
-
-# Chromium uses fixed paths for libv4l2.so
-ln -rsf /usr/lib/*/libv4l2.so /usr/lib/
-[ -e /usr/lib/aarch64-linux-gnu/ ] && ln -Tsf lib /usr/lib64
 
 # Clean package cache
 apt-get -y autoremove && apt-get -y clean && apt-get -y autoclean
 
 EOF
+
+# Set the default GNOME favorites and compile the system dconf database
+mkdir -p ${chroot_dir}/etc/dconf/profile ${chroot_dir}/etc/dconf/db/local.d
+cp ${overlay_dir}/etc/dconf/profile/user ${chroot_dir}/etc/dconf/profile/user
+cp ${overlay_dir}/etc/dconf/db/local.d/00-favorite-apps \
+    ${chroot_dir}/etc/dconf/db/local.d/00-favorite-apps
+chroot ${chroot_dir} /bin/bash -c "dconf update"
+
+# Remove staged Chromium RKMPP packages from the rootfs
+rm -rf ${chromium_rkmpp_chroot_dir}
 
 # Hack for GDM to restart on first HDMI hotplug
 mkdir -p ${chroot_dir}/usr/lib/scripts
@@ -411,19 +417,11 @@ cat << EOF | chroot ${chroot_dir} /bin/bash
 rm /usr/lib/systemd/user/tracker-*
 chmod -x /usr/libexec/tracker-* /usr/libexec/tracker3/* /usr/bin/tracker3
 rm -rf ~/.cache/tracker3
-apt-get purge -y flash-kernel
-rm -rf /etc/initramfs/post-update.d/flash-kernel
 EOF
 
 # Fix 24.04 audio renaming issue
 mkdir -p ${chroot_dir}/etc/wireplumber/main.lua.d/
 cp ${overlay_dir}/etc/wireplumber/main.lua.d/51-alsa-custom.lua ${chroot_dir}/etc/wireplumber/main.lua.d/51-alsa-custom.lua
-
-# Mouse lag/stutter (missed frames) in Wayland sessions
-# https://bugs.launchpad.net/ubuntu/+source/mutter/+bug/1982560
-# echo "MUTTER_DEBUG_ENABLE_ATOMIC_KMS=0" >> ${chroot_dir}/etc/environment
-# echo "MUTTER_DEBUG_FORCE_KMS_MODE=simple" >> ${chroot_dir}/etc/environment
-# echo "CLUTTER_PAINT=disable-dynamic-max-render-time" >> ${chroot_dir}/etc/environment
 
 # Update initramfs
 chroot ${chroot_dir} /bin/bash -c "update-initramfs -u"
