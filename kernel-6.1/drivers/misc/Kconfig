@@ -20,6 +20,7 @@ config CONFIG_ROCKPI_MCU
 	  Driver for ROCKPI_MCU which is used for 7 Touchscreen.
 
 source "drivers/misc/rockchip/Kconfig"
+source "drivers/misc/vehicle/Kconfig"
 
 config LT7911D_FB_NOTIFIER
 	tristate "Lontium LT7911D FB Notifier"

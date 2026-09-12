@@ -130,7 +130,7 @@ struct fw_info {
 };
 #pragma pack()
 
-struct fw_update_info update_info = {
+struct fw_update_info gt1x_update_info = {
 	.status = UPDATE_STATUS_IDLE,
 	.progress = 0,
 	.max_progress = 9,
@@ -196,7 +196,7 @@ check_fs_fail:
 }
 #endif
 
-int gt1x_i2c_write_with_readback(u16 addr, u8 *buffer, int length)
+static int gt1x_i2c_write_with_readback(u16 addr, u8 *buffer, int length)
 {
 	u8 buf[100];
 	int ret = gt1x_i2c_write(addr, buffer, length);
@@ -213,9 +213,10 @@ int gt1x_i2c_write_with_readback(u16 addr, u8 *buffer, int length)
 	return 0;
 }
 
+#if 0
 #define getU32(a) ((u32)getUint((u8 *)(a), 4))
 #define getU16(a) ((u16)getUint((u8 *)(a), 2))
-u32 getUint(u8 *buffer, int len)
+static u32 getUint(u8 *buffer, int len)
 {
 	u32 num = 0;
 	int i;
@@ -225,6 +226,7 @@ u32 getUint(u8 *buffer, int len)
 	}
 	return num;
 }
+#endif
 
 int gt1x_auto_update_proc(void *data)
 {
@@ -655,16 +657,16 @@ int gt1x_check_firmware(void)
 u8 *gt1x_get_fw_data(u32 offset, int length)
 {
 	int ret;
-	if (update_info.update_type == UPDATE_TYPE_FILE) {
-		update_info.fw_file->f_op->llseek(update_info.fw_file, offset, SEEK_SET);
-		ret = update_info.fw_file->f_op->read(update_info.fw_file, (char *)update_info.buffer, length, &update_info.fw_file->f_pos);
+	if (gt1x_update_info.update_type == UPDATE_TYPE_FILE) {
+		gt1x_update_info.fw_file->f_op->llseek(gt1x_update_info.fw_file, offset, SEEK_SET);
+		ret = gt1x_update_info.fw_file->f_op->read(gt1x_update_info.fw_file, (char *) gt1x_update_info.buffer, length, &gt1x_update_info.fw_file->f_pos);
 		if (ret < 0) {
 			GTP_ERROR("Read data error!");
 			return NULL;
 		}
-		return update_info.buffer;
+		return gt1x_update_info.buffer;
 	} else {
-		return &update_info.fw_data[offset];
+		return &gt1x_update_info.fw_data[offset];
 	}
 }
 
@@ -676,13 +678,13 @@ int gt1x_update_judge(void)
 	struct gt1x_version_info ver_info;
 	struct gt1x_version_info fw_ver_info;
 
-	fw_ver_info.mask_id = (update_info.firmware->target_mask_version[0] << 16)
-		| (update_info.firmware->target_mask_version[1] << 8)
-		| (update_info.firmware->target_mask_version[2]);
-	fw_ver_info.patch_id = (update_info.firmware->version[0] << 16)
-		| (update_info.firmware->version[1] << 8)
-		| (update_info.firmware->version[2]);
-	memcpy(fw_ver_info.product_id, update_info.firmware->pid, 4);
+	fw_ver_info.mask_id = (gt1x_update_info.firmware->target_mask_version[0] << 16)
+		| (gt1x_update_info.firmware->target_mask_version[1] << 8)
+		| (gt1x_update_info.firmware->target_mask_version[2]);
+	fw_ver_info.patch_id = (gt1x_update_info.firmware->version[0] << 16)
+		| (gt1x_update_info.firmware->version[1] << 8)
+		| (gt1x_update_info.firmware->version[2]);
+	memcpy(fw_ver_info.product_id, gt1x_update_info.firmware->pid, 4);
 	fw_ver_info.product_id[4] = 0;
 
 	/* check fw status reg */
@@ -735,7 +737,7 @@ _reset:
 		return 0;
 	}
 #if GTP_DEBUG_ON
-	if (update_info.force_update) {
+	if (gt1x_update_info.force_update) {
 		GTP_DEBUG("Debug mode, force update fw.");
 		return 0;
 	}
@@ -747,7 +749,7 @@ _reset:
 	return 0;
 }
 
-int __gt1x_hold_ss51_dsp_20(void)
+static int __gt1x_hold_ss51_dsp_20(void)
 {
 	int ret = -1;
 	int retry = 0;
@@ -1199,13 +1201,13 @@ int gt1x_error_erase(void)
 
 	gt1x_reset_guitar();
 
-	fw = gt1x_get_fw_data(update_info.firmware->subsystem[0].offset,
-			update_info.firmware->subsystem[0].length);
+	fw = gt1x_get_fw_data(gt1x_update_info.firmware->subsystem[0].offset,
+	    	          gt1x_update_info.firmware->subsystem[0].length);
 	if (!fw) {
 		GTP_ERROR("get isp fail");
 		return ERROR_FW;
 	}
-	ret = gt1x_run_ss51_isp(fw, update_info.firmware->subsystem[0].length);
+	ret = gt1x_run_ss51_isp(fw, gt1x_update_info.firmware->subsystem[0].length);
 	if (ret) {
 		GTP_ERROR("run isp fail");
 		return ERROR_PATH;
@@ -1309,7 +1311,7 @@ int gt1x_error_erase(void)
 void gt1x_leave_update_mode(void)
 {
 	GTP_DEBUG("Leave FW update mode.");
-	if (update_info.status != UPDATE_STATUS_ABORT)
+	if (gt1x_update_info.status != UPDATE_STATUS_ABORT)
 		gt1x_reset_guitar();
 #if GTP_CHARGER_SWITCH
 	gt1x_charger_switch(SWITCH_ON);
@@ -1317,7 +1319,7 @@ void gt1x_leave_update_mode(void)
 #if GTP_ESD_PROTECT
 	gt1x_esd_switch(SWITCH_ON);
 #endif
-	update_info.status = UPDATE_STATUS_IDLE;
+	gt1x_update_info.status = UPDATE_STATUS_IDLE;
 	gt1x_irq_enable();
 }
 

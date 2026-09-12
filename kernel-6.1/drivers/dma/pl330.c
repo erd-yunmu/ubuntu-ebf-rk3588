@@ -1469,7 +1469,8 @@ static int _period(struct pl330_dmac *pl330, unsigned int dry_run, u8 buf[],
 		}
 	}
 
-	off += _emit_SEV(dry_run, &buf[off], ev);
+	if (pxs->desc->txd.flags & DMA_PREP_INTERRUPT)
+		off += _emit_SEV(dry_run, &buf[off], ev);
 
 	return off;
 }
@@ -1607,7 +1608,8 @@ static int _setup_req(struct pl330_dmac *pl330, unsigned dry_run,
 
 		if (pxs->desc->last) {
 			/* DMASEV peripheral/event */
-			off += _emit_SEV(dry_run, &buf[off], thrd->ev);
+			if (pxs->desc->txd.flags & DMA_PREP_INTERRUPT)
+				off += _emit_SEV(dry_run, &buf[off], thrd->ev);
 
 			/* DMAEND */
 			off += _emit_END(dry_run, &buf[off]);
@@ -1739,7 +1741,9 @@ static int pl330_submit_req(struct pl330_thread *thrd,
 
 	if (!desc->last) {
 		desc->status = FREE;
+		spin_lock(&pl330->pool_lock);
 		list_move_tail(&desc->node, &pl330->desc_pool);
+		spin_unlock(&pl330->pool_lock);
 
 		dev_dbg(pl330->ddma.dev, "desc-%px has been merged, drop it\n", desc);
 	}
@@ -2278,6 +2282,11 @@ static void pl330_tasklet(struct tasklet_struct *t)
 
 	spin_lock_irqsave(&pch->lock, flags);
 
+	if (!pch->thread) {
+		spin_unlock_irqrestore(&pch->lock, flags);
+		return;
+	}
+
 	/* Pick up ripe tomatoes */
 	list_for_each_entry_safe(desc, _dt, &pch->work_list, node) {
 		if (desc->status == DONE) {
@@ -2324,7 +2333,10 @@ static void pl330_tasklet(struct tasklet_struct *t)
 		dmaengine_desc_get_callback(&desc->txd, &cb);
 
 		desc->status = FREE;
+
+		spin_lock(&pch->dmac->pool_lock);
 		list_move_tail(&desc->node, &pch->dmac->desc_pool);
+		spin_unlock(&pch->dmac->pool_lock);
 
 		dma_descriptor_unmap(&desc->txd);
 
@@ -2542,9 +2554,12 @@ static int pl330_terminate_all(struct dma_chan *chan)
 		dma_cookie_complete(&desc->txd);
 	}
 
+	spin_lock(&pl330->pool_lock);
 	list_splice_tail_init(&pch->submitted_list, &pl330->desc_pool);
 	list_splice_tail_init(&pch->work_list, &pl330->desc_pool);
 	list_splice_tail_init(&pch->completed_list, &pl330->desc_pool);
+	spin_unlock(&pl330->pool_lock);
+
 	spin_unlock_irqrestore(&pch->lock, flags);
 	pm_runtime_mark_last_busy(pl330->ddma.dev);
 	if (power_down)
@@ -2600,7 +2615,9 @@ static void pl330_free_chan_resources(struct dma_chan *chan)
 	pl330_release_channel(pch->thread);
 	pch->thread = NULL;
 
+	spin_lock(&pl330->pool_lock);
 	list_splice_tail_init(&pch->work_list, &pch->dmac->desc_pool);
+	spin_unlock(&pl330->pool_lock);
 
 	spin_unlock_irqrestore(&pl330->lock, flags);
 	pm_runtime_mark_last_busy(pch->dmac->ddma.dev);
@@ -2695,6 +2712,13 @@ pl330_tx_status(struct dma_chan *chan, dma_cookie_t cookie,
 			default:
 				WARN_ON(1);
 			}
+			/*
+			 * The infinitely cyclic without CPU intervention
+			 * use the single desc, so, should always return
+			 * DMA_IN_PROGRESS to match its status.
+			 */
+			if (desc->cyclic)
+				ret = DMA_IN_PROGRESS;
 			break;
 		}
 		if (desc->last)
@@ -2845,6 +2869,7 @@ static struct dma_pl330_desc *pl330_get_desc(struct dma_pl330_chan *pch)
 	/* Initialize the descriptor */
 	desc->pchan = pch;
 	desc->txd.cookie = 0;
+	desc->txd.flags = 0;
 	async_tx_ack(&desc->txd);
 
 	desc->peri = peri_id ? pch->chan.chan_id : 0;
@@ -2971,6 +2996,7 @@ static struct dma_async_tx_descriptor *pl330_prep_dma_cyclic(
 
 	desc->cyclic = true;
 	desc->num_periods = len / period_len;
+	desc->txd.flags = flags;
 
 	return &desc->txd;
 }
@@ -3034,6 +3060,7 @@ static struct dma_async_tx_descriptor *pl330_prep_interleaved_dma(
 	desc->sgl.size = size;
 	desc->sgl.src_icg = src_icg;
 	desc->sgl.dst_icg = dst_icg;
+	desc->txd.flags = flags;
 
 	if (flags & DMA_PREP_REPEAT) {
 		desc->cyclic = true;
@@ -3095,6 +3122,8 @@ pl330_prep_dma_memcpy(struct dma_chan *chan, dma_addr_t dst,
 		desc->rqcfg.brst_len = 1;
 
 	desc->bytes_requested = len;
+
+	desc->txd.flags = flags;
 
 	return &desc->txd;
 }
@@ -3179,6 +3208,7 @@ pl330_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 	}
 
 	/* Return the last desc in the chain */
+	desc->txd.flags = flg;
 	return &desc->txd;
 }
 

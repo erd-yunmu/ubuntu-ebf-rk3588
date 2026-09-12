@@ -50,30 +50,32 @@ int rga_user_memory_check(struct page **pages, u32 w, u32 h, u32 format, int fla
 	return 0;
 }
 
-int rga_set_mmu_base(struct rga_job *job, struct rga2_req *req)
+int rga_set_mmu_base(struct rga_job *job,
+		     struct rga_job_task_buffers *task_buffers,
+		     struct rga2_req *req)
 {
-	if (job->src_buffer.page_table) {
-		rga_dma_sync_flush_range(job->src_buffer.page_table,
-					 (job->src_buffer.page_table +
-					  job->src_buffer.page_count),
+	if (task_buffers->src_buffer.page_table) {
+		rga_dma_sync_flush_range(task_buffers->src_buffer.page_table,
+					 (task_buffers->src_buffer.page_table +
+					  task_buffers->src_buffer.page_count),
 					 job->scheduler);
-		req->mmu_info.src0_base_addr = virt_to_phys(job->src_buffer.page_table);
+		req->mmu_info.src0_base_addr = virt_to_phys(task_buffers->src_buffer.page_table);
 	}
 
-	if (job->src1_buffer.page_table) {
-		rga_dma_sync_flush_range(job->src1_buffer.page_table,
-					 (job->src1_buffer.page_table +
-					  job->src1_buffer.page_count),
+	if (task_buffers->src1_buffer.page_table) {
+		rga_dma_sync_flush_range(task_buffers->src1_buffer.page_table,
+					 (task_buffers->src1_buffer.page_table +
+					  task_buffers->src1_buffer.page_count),
 					 job->scheduler);
-		req->mmu_info.src1_base_addr = virt_to_phys(job->src1_buffer.page_table);
+		req->mmu_info.src1_base_addr = virt_to_phys(task_buffers->src1_buffer.page_table);
 	}
 
-	if (job->dst_buffer.page_table) {
-		rga_dma_sync_flush_range(job->dst_buffer.page_table,
-					 (job->dst_buffer.page_table +
-					  job->dst_buffer.page_count),
+	if (task_buffers->dst_buffer.page_table) {
+		rga_dma_sync_flush_range(task_buffers->dst_buffer.page_table,
+					 (task_buffers->dst_buffer.page_table +
+					  task_buffers->dst_buffer.page_count),
 					 job->scheduler);
-		req->mmu_info.dst_base_addr = virt_to_phys(job->dst_buffer.page_table);
+		req->mmu_info.dst_base_addr = virt_to_phys(task_buffers->dst_buffer.page_table);
 
 		if (((req->alpha_rop_flag & 1) == 1) && (req->bitblt_mode == 0)) {
 			req->mmu_info.src1_base_addr = req->mmu_info.dst_base_addr;
@@ -81,12 +83,12 @@ int rga_set_mmu_base(struct rga_job *job, struct rga2_req *req)
 		}
 	}
 
-	if (job->els_buffer.page_table) {
-		rga_dma_sync_flush_range(job->els_buffer.page_table,
-					 (job->els_buffer.page_table +
-					  job->els_buffer.page_count),
+	if (task_buffers->els_buffer.page_table) {
+		rga_dma_sync_flush_range(task_buffers->els_buffer.page_table,
+					 (task_buffers->els_buffer.page_table +
+					  task_buffers->els_buffer.page_count),
 					 job->scheduler);
-		req->mmu_info.els_base_addr = virt_to_phys(job->els_buffer.page_table);
+		req->mmu_info.els_base_addr = virt_to_phys(task_buffers->els_buffer.page_table);
 	}
 
 	return 0;
@@ -167,28 +169,16 @@ struct rga_mmu_base *rga_mmu_base_init(size_t size)
 	 * malloc pre scale mid buf mmu table:
 	 * size * channel_num * address_size
 	 */
-	order = get_order(size * 3 * sizeof(*mmu_base->buf_virtual));
-	if (order >= MAX_ORDER) {
-		pr_err("Can not alloc pages with order[%d] for mmu_page_table, max_order = %d\n",
-		       order, MAX_ORDER);
-		goto err_free_mmu_base;
-	}
-
-	mmu_base->buf_virtual = (uint32_t *) __get_free_pages(GFP_KERNEL | GFP_DMA32, order);
+	mmu_base->buf_virtual = (uint32_t *)rga_get_free_pages(GFP_KERNEL | GFP_DMA32,
+		&order, size * 3 * sizeof(*mmu_base->buf_virtual));
 	if (mmu_base->buf_virtual == NULL) {
 		pr_err("Can not alloc pages for mmu_page_table\n");
 		goto err_free_mmu_base;
 	}
 	mmu_base->buf_order = order;
 
-	order = get_order(size * sizeof(*mmu_base->pages));
-	if (order >= MAX_ORDER) {
-		pr_err("Can not alloc pages with order[%d] for mmu_base->pages, max_order = %d\n",
-		       order, MAX_ORDER);
-		goto err_free_buf_virtual;
-	}
-
-	mmu_base->pages = (struct page **)__get_free_pages(GFP_KERNEL | GFP_DMA32, order);
+	mmu_base->pages = (struct page **)rga_get_free_pages(GFP_KERNEL | GFP_DMA32,
+		&order, size * sizeof(*mmu_base->pages));
 	if (mmu_base->pages == NULL) {
 		pr_err("Can not alloc pages for mmu_base->pages\n");
 		goto err_free_buf_virtual;

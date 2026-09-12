@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2018 Rockchip Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -63,6 +63,9 @@
 
 /* RK817_CODEC_DDAC_SR_LMT0 */
 #define DACSRT_MASK			(0x7 << 0)
+
+/* RK817_CODEC_DADC_SR_ACL0 - ADC sample rate, same bits as DACSRT */
+#define ADCSRT_MASK			(0x7 << 0)
 
 /* RK817_CODEC_DDAC_MUTE_MIXCTL */
 #define DACMT_ENABLE			(0x1 << 0)

@@ -118,6 +118,10 @@
 	status = "okay";
 };
 
+&avsd {
+	status = "okay";
+};
+
 &cpu_l0 {
 	cpu-supply = <&vdd_cpu_lit_s0>;
 	mem-supply = <&vdd_cpu_lit_mem_s0>;
@@ -128,9 +132,21 @@
 	mem-supply = <&vdd_cpu_big0_mem_s0>;
 };
 
+&cpu_b1 {
+	cpu-supply = <&vdd_cpu_big0_s0>;
+	mem-supply = <&vdd_cpu_big0_mem_s0>;
+	#cooling-cells = <2>;
+};
+
 &cpu_b2 {
 	cpu-supply = <&vdd_cpu_big1_s0>;
 	mem-supply = <&vdd_cpu_big1_mem_s0>;
+};
+
+&cpu_b3 {
+	cpu-supply = <&vdd_cpu_big1_s0>;
+	mem-supply = <&vdd_cpu_big1_mem_s0>;
+	#cooling-cells = <2>;
 };
 
 &gpu {
@@ -383,4 +399,16 @@
 &vdd_0v75_s0 {
 	regulator-min-microvolt = <837500>;
 	regulator-max-microvolt = <837500>;
+};
+
+&vdpu {
+	status = "okay";
+};
+
+&vdpu_mmu {
+	status = "okay";
+};
+
+&vepu {
+	status = "okay";
 };

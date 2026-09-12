@@ -2,12 +2,19 @@
 /*
  * serdes-core.c  --  Device access for different serdes chips
  *
- * Copyright (c) 2023-2028 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2023-2028 Rockchip Electronics Co., Ltd.
  *
  * Author: luowei <lw@rock-chips.com>
  */
 
 #include "core.h"
+
+static unsigned long serdes_log_level;
+
+static struct dentry *serdes_debugfs_root;
+static LIST_HEAD(serdes_route_list);
+static DEFINE_MUTEX(serdes_route_lock);
+static const struct of_device_id *serdes_match;
 
 static const struct mfd_cell serdes_bu18tl82_devs[] = {
 	{
@@ -43,6 +50,21 @@ static const struct mfd_cell serdes_max96745_devs[] = {
 	{
 		.name = "serdes-bridge-split",
 		.of_compatible = "maxim,max96745-bridge-split",
+	},
+};
+
+static const struct mfd_cell serdes_max96749_devs[] = {
+	{
+		.name = "serdes-pinctrl",
+		.of_compatible = "maxim,max96749-pinctrl",
+	},
+	{
+		.name = "serdes-bridge",
+		.of_compatible = "maxim,max96749-bridge",
+	},
+	{
+		.name = "serdes-bridge-split",
+		.of_compatible = "maxim,max96749-bridge-split",
 	},
 };
 
@@ -175,6 +197,9 @@ int serdes_bulk_write(struct serdes *serdes, unsigned int reg,
 	u16 *buf = src;
 	int i, ret;
 
+	if (serdes->debug == SERDES_CLOSE_I2C_WRITE)
+		return 0;
+
 	WARN_ON(count <= 0);
 
 	mutex_lock(&serdes->io_lock);
@@ -205,6 +230,9 @@ int serdes_multi_reg_write(struct serdes *serdes, const struct reg_sequence *reg
 {
 	int i, ret;
 
+	if (serdes->debug == SERDES_CLOSE_I2C_WRITE)
+		return 0;
+
 	SERDES_DBG_I2C("%s %s %s num=%d\n", __func__, dev_name(serdes->dev),
 		       serdes->chip_data->name, num_regs);
 	ret = regmap_multi_reg_write(serdes->regmap, regs, num_regs);
@@ -229,6 +257,9 @@ int serdes_reg_write(struct serdes *serdes, unsigned int reg,
 {
 	int ret;
 
+	if (serdes->debug == SERDES_CLOSE_I2C_WRITE)
+		return 0;
+
 	ret = regmap_write(serdes->regmap, reg, val);
 	SERDES_DBG_I2C("%s %s %s Write Reg%04x %04x ret=%d\n", __func__, dev_name(serdes->dev),
 		       serdes->chip_data->name, reg, val, ret);
@@ -252,13 +283,83 @@ int serdes_set_bits(struct serdes *serdes, unsigned int reg,
 {
 	int ret;
 
-	SERDES_DBG_I2C("%s %s %s Write Reg%04x %04x) mask=%04x\n", __func__,
-		       dev_name(serdes->dev), serdes->chip_data->name, reg, val, mask);
+	if (serdes->debug == SERDES_CLOSE_I2C_WRITE)
+		return 0;
+
 	ret = regmap_update_bits(serdes->regmap, reg, mask, val);
+
+	SERDES_DBG_I2C("%s %s %s Write Reg%04x %04x) mask=%04x ret=%d\n", __func__,
+		       dev_name(serdes->dev), serdes->chip_data->name, reg, val, mask, ret);
 
 	return ret;
 }
 EXPORT_SYMBOL_GPL(serdes_set_bits);
+
+/**
+ * serdes_mfd_add: Manage serdes device resources
+ *
+ * Returns 0 on success.
+ *
+ * @dev: Pointer to parent device.
+ * @serdes_dev: Array of describing serdes child devices.
+ * @mfd_num: Number of serdes child devices to register.
+ */
+static int serdes_mfd_add(struct device *dev,
+			  const struct mfd_cell *serdes_dev, int mfd_num)
+{
+	int i, ret, num = 0;
+	const char *compatible;
+	struct mfd_cell *obj, *mfd_dev;
+	struct device_node *child = NULL;
+	int size = sizeof(struct mfd_cell);
+	struct device_node *parent_node = dev->of_node;
+
+	obj = kcalloc(mfd_num, size, GFP_KERNEL);
+	if (!obj)
+		return -ENOMEM;
+
+	for (i = 0; i < mfd_num; i++, serdes_dev++) {
+		compatible = serdes_dev->of_compatible;
+
+		for_each_available_child_of_node(parent_node, child) {
+			if (!of_device_is_compatible(child, compatible))
+				continue;
+
+			memcpy(&obj[num], serdes_dev, size);
+			num++;
+			of_node_put(child);
+			SERDES_DBG_MFD("%s: serdes child %s match\n", __func__, serdes_dev->name);
+
+			break;
+		}
+	}
+
+	if (num == 0) {
+		kfree(obj);
+		return 0;
+	}
+
+	mfd_dev = devm_kmemdup(dev, obj, num * size, GFP_KERNEL);
+	kfree(obj);
+
+	if (!mfd_dev)
+		return -ENOMEM;
+
+	ret = devm_mfd_add_devices(dev, PLATFORM_DEVID_AUTO, mfd_dev,
+				   num, NULL, 0, NULL);
+
+	if (ret != 0) {
+		dev_err(dev, "Failed to add serdes child device\n");
+		goto err;
+	}
+
+	return 0;
+
+err:
+	devm_kfree(dev, mfd_dev);
+
+	return ret;
+}
 
 /*
  * Instantiate the generic non-control parts of the device.
@@ -282,6 +383,10 @@ int serdes_device_init(struct serdes *serdes)
 	case MAXIM_ID_MAX96745:
 		serdes_devs = serdes_max96745_devs;
 		mfd_num = ARRAY_SIZE(serdes_max96745_devs);
+		break;
+	case MAXIM_ID_MAX96749:
+		serdes_devs = serdes_max96749_devs;
+		mfd_num = ARRAY_SIZE(serdes_max96749_devs);
 		break;
 	case MAXIM_ID_MAX96752:
 		serdes_devs = serdes_max96752_devs;
@@ -316,22 +421,200 @@ int serdes_device_init(struct serdes *serdes)
 		break;
 	}
 
-	ret = devm_mfd_add_devices(serdes->dev, PLATFORM_DEVID_AUTO, serdes_devs,
-				   mfd_num, NULL, 0, NULL);
-	if (ret != 0) {
-		dev_err(serdes->dev, "Failed to add serdes children\n");
+	ret = serdes_mfd_add(serdes->dev, serdes_devs, mfd_num);
+	if (!ret)
 		return ret;
-	}
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(serdes_device_init);
 
-int serdes_set_pinctrl_default(struct serdes *serdes)
+static int log_level_show(struct seq_file *m, void *data)
+{
+	seq_printf(m, "%lu\n", serdes_log_level);
+
+	return 0;
+}
+
+static int log_level_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, log_level_show, NULL);
+}
+
+static ssize_t log_level_write(struct file *file, const char __user *ubuf,
+			       size_t len, loff_t *offp)
+{
+	char buf[12];
+	unsigned long value;
+
+	if (len > sizeof(buf) - 1)
+		return -EINVAL;
+
+	if (copy_from_user(buf, ubuf, len))
+		return -EFAULT;
+
+	buf[len] = '\0';
+
+	if (kstrtoul(buf, 0, &value))
+		return -EINVAL;
+
+	serdes_log_level = value;
+
+	return len;
+}
+
+static int debug_show(struct seq_file *m, void *data)
+{
+	struct serdes *serdes = m->private;
+
+	seq_printf(m, "%d\n", serdes->debug);
+
+	return 0;
+}
+
+static int debug_open(struct inode *inode, struct file *file)
+{
+	struct serdes *serdes = inode->i_private;
+
+	return single_open(file, debug_show, serdes);
+}
+
+static ssize_t debug_write(struct file *file, const char __user *ubuf,
+			       size_t len, loff_t *offp)
+{
+	struct seq_file *m = file->private_data;
+	struct serdes *serdes = m->private;
+	char buf[12];
+
+	if (!serdes)
+		return -EINVAL;
+
+	if (len > sizeof(buf) - 1)
+		return -EINVAL;
+
+	if (copy_from_user(buf, ubuf, len))
+		return -EFAULT;
+
+	buf[len] = '\0';
+
+	if (sysfs_streq(buf, "on"))
+		serdes->debug = SERDES_OPEN_I2C_WRITE;
+	else if (sysfs_streq(buf, "off"))
+		serdes->debug = SERDES_CLOSE_I2C_WRITE;
+	else if (sysfs_streq(buf, "init")) {
+		serdes->debug = SERDES_SET_PINCTRL_INIT;
+		serdes_set_pinctrl_init(serdes);
+	} else if (sysfs_streq(buf, "sleep")) {
+		serdes->debug = SERDES_SET_PINCTRL_SLEEP;
+		serdes_set_pinctrl_sleep(serdes);
+	} else if (sysfs_streq(buf, "seq")) {
+		serdes->debug = SERDES_SET_SEQUENCE;
+		serdes_i2c_set_sequence(serdes);
+	} else
+		return -EINVAL;
+
+	return len;
+}
+
+static const struct file_operations log_level_fops = {
+	.owner = THIS_MODULE,
+	.open = log_level_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+	.write = log_level_write
+};
+
+static const struct file_operations debug_fops = {
+	.owner = THIS_MODULE,
+	.open = debug_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+	.write = debug_write
+};
+
+void serdes_create_debugfs(struct serdes *serdes)
+{
+
+	snprintf(serdes->dir_name, sizeof(serdes->dir_name), "%s-%s",
+				     dev_name(serdes->dev), serdes->chip_data->name);
+
+	serdes->debugfs_dentry = debugfs_create_dir(serdes->dir_name, serdes_debugfs_root);
+	debugfs_create_file("debug", 0664, serdes->debugfs_dentry, serdes,
+				     &debug_fops);
+}
+EXPORT_SYMBOL_GPL(serdes_create_debugfs);
+
+void serdes_destroy_debugfs(struct serdes *serdes)
+{
+	debugfs_remove_recursive(serdes->debugfs_dentry);
+}
+EXPORT_SYMBOL_GPL(serdes_destroy_debugfs);
+
+void serdes_debugfs_init(void)
+{
+	serdes_debugfs_root = debugfs_create_dir("serdes", NULL);
+
+	debugfs_create_file("log_level", 0664, serdes_debugfs_root, NULL,
+				     &log_level_fops);
+}
+EXPORT_SYMBOL_GPL(serdes_debugfs_init);
+
+void serdes_debugfs_exit(void)
+{
+	debugfs_remove_recursive(serdes_debugfs_root);
+}
+EXPORT_SYMBOL_GPL(serdes_debugfs_exit);
+
+void serdes_dev_dbg(enum serdes_log_category category, const char *format, ...)
+{
+	struct va_format vaf;
+	va_list args;
+
+	if (!unlikely(serdes_log_level & BIT(category)))
+		return;
+
+	va_start(args, format);
+	vaf.fmt = format;
+	vaf.va = &args;
+
+	pr_info("%pV", &vaf);
+
+	va_end(args);
+}
+EXPORT_SYMBOL_GPL(serdes_dev_dbg);
+
+int serdes_set_i2c_address(struct serdes *serdes, u32 reg_use, int link)
+{
+	int ret = 0;
+	struct serdes *serdes_split = serdes->g_serdes_bridge_split;
+
+	if (!serdes_split) {
+		dev_info(serdes->dev, "%s serdes_split is null\n", __func__);
+		return -EPROBE_DEFER;
+	}
+
+	if (serdes_split && serdes_split->chip_data->split_ops &&
+	    serdes_split->chip_data->split_ops->select)
+		ret = serdes_split->chip_data->split_ops->select(serdes_split, link);
+
+	if (serdes->chip_data->split_ops && serdes->chip_data->split_ops->set_i2c_addr)
+		ret = serdes->chip_data->split_ops->set_i2c_addr(serdes, reg_use, link);
+
+	if (serdes_split && serdes_split->chip_data->split_ops &&
+	    serdes_split->chip_data->split_ops->select)
+		ret = serdes_split->chip_data->split_ops->select(serdes_split, SER_SPLITTER_MODE);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(serdes_set_i2c_address);
+
+int serdes_set_pinctrl_init(struct serdes *serdes)
 {
 	int ret = 0;
 
-	if ((!IS_ERR(serdes->pinctrl_node)) && (!IS_ERR(serdes->pins_init))) {
+	if ((!IS_ERR_OR_NULL(serdes->pinctrl_node)) && (!IS_ERR_OR_NULL(serdes->pins_init))) {
 		ret = pinctrl_select_state(serdes->pinctrl_node, serdes->pins_init);
 		if (ret)
 			dev_err(serdes->dev, "could not set init pins\n");
@@ -340,13 +623,13 @@ int serdes_set_pinctrl_default(struct serdes *serdes)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(serdes_set_pinctrl_default);
+EXPORT_SYMBOL_GPL(serdes_set_pinctrl_init);
 
 int serdes_set_pinctrl_sleep(struct serdes *serdes)
 {
 	int ret = 0;
 
-	if ((!IS_ERR(serdes->pinctrl_node)) && (!IS_ERR(serdes->pins_sleep))) {
+	if ((!IS_ERR_OR_NULL(serdes->pinctrl_node)) && (!IS_ERR_OR_NULL(serdes->pins_sleep))) {
 		ret = pinctrl_select_state(serdes->pinctrl_node, serdes->pins_sleep);
 		if (ret)
 			dev_err(serdes->dev, "could not set sleep pins\n");
@@ -357,19 +640,73 @@ int serdes_set_pinctrl_sleep(struct serdes *serdes)
 }
 EXPORT_SYMBOL_GPL(serdes_set_pinctrl_sleep);
 
-int serdes_device_suspend(struct serdes *serdes)
+int serdes_device_poweron(struct serdes *serdes)
 {
 	int ret = 0;
 
-	if (!IS_ERR(serdes->vpower)) {
-		ret = regulator_disable(serdes->vpower);
-		if (ret) {
-			dev_err(serdes->dev, "fail to disable vpower regulator\n");
-			return ret;
-		}
+	if (!serdes->num_supplies)
+		return 0;
+
+	if (serdes->power_enabled)
+		return 0;
+
+	ret = regulator_bulk_enable(serdes->num_supplies, serdes->supplies);
+	if (ret < 0) {
+		dev_err(serdes->dev, "serdes %s enable %d regulators failed: %d\n",
+			serdes->chip_data->name, serdes->num_supplies, ret);
+		return ret;
 	}
 
-	return ret;
+	serdes->power_enabled = true;
+
+	SERDES_DBG_MFD("%s serdes %s power enabled\n",
+		       dev_name(serdes->dev), serdes->chip_data->name);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(serdes_device_poweron);
+
+int serdes_device_poweroff(struct serdes *serdes)
+{
+	int ret = 0;
+
+	if (!serdes->num_supplies)
+		return 0;
+
+	if (!serdes->power_enabled)
+		return 0;
+
+	ret = regulator_bulk_disable(serdes->num_supplies, serdes->supplies);
+	if (ret < 0) {
+		dev_err(serdes->dev, "serdes %s disable %d regulators failed: %d\n",
+			serdes->chip_data->name, serdes->num_supplies, ret);
+		return ret;
+	}
+
+	serdes->power_enabled = false;
+
+	SERDES_DBG_MFD("%s serdes %s power disabled\n",
+		       dev_name(serdes->dev), serdes->chip_data->name);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(serdes_device_poweroff);
+
+int serdes_device_suspend(struct serdes *serdes)
+{
+	int ret;
+
+	if (serdes->enable_gpio)
+		gpiod_direction_output(serdes->enable_gpio, 0);
+
+	ret = serdes_device_poweroff(serdes);
+	if (ret)
+		return ret;
+
+	SERDES_DBG_CHIP("%s serdes %s suspend\n",
+			dev_name(serdes->dev), serdes->chip_data->name);
+
+	return 0;
 }
 EXPORT_SYMBOL_GPL(serdes_device_suspend);
 
@@ -377,51 +714,276 @@ int serdes_device_resume(struct serdes *serdes)
 {
 	int ret = 0;
 
-	if (!IS_ERR(serdes->vpower)) {
-		ret = regulator_enable(serdes->vpower);
-		if (ret) {
-			dev_err(serdes->dev, "fail to enable vpower regulator\n");
-			return ret;
-		}
+	serdes_device_poweron(serdes);
+
+	if (serdes->chip_data->serdes_type == TYPE_SER) {
+		if (serdes->chip_data->chip_init)
+			serdes->chip_data->chip_init(serdes);
+		ret = serdes_i2c_set_sequence(serdes);
 	}
+
+	SERDES_DBG_CHIP("%s serdes %s resume\n",
+			dev_name(serdes->dev), serdes->chip_data->name);
 
 	return ret;
 }
 EXPORT_SYMBOL_GPL(serdes_device_resume);
 
-void serdes_device_poweroff(struct serdes *serdes)
+static bool serdes_node_match(struct device_node *node)
 {
-	int ret = 0;
+	struct device_node *parent;
+	const struct of_device_id *id;
+	const struct of_device_id *match = serdes_match;
 
-	if ((!IS_ERR(serdes->pinctrl_node)) && (!IS_ERR(serdes->pins_sleep))) {
-		ret = pinctrl_select_state(serdes->pinctrl_node, serdes->pins_sleep);
-		if (ret)
-			dev_err(serdes->dev, "could not set sleep pins\n");
+	if (!node || !match)
+		return false;
+
+	parent = of_get_parent(node);
+	if (parent) {
+		id = of_match_node(match, parent);
+		of_node_put(parent);
+		if (id)
+			return true;
 	}
 
-	if (!IS_ERR(serdes->vpower)) {
-		ret = regulator_disable(serdes->vpower);
-		if (ret)
-			dev_err(serdes->dev, "fail to disable vpower regulator\n");
-	}
-
+	return false;
 }
-EXPORT_SYMBOL_GPL(serdes_device_poweroff);
 
-int serdes_device_shutdown(struct serdes *serdes)
+static int serdes_node_add(struct device_node *prev_node,
+			   struct device_node *node, u32 fbd_mode)
 {
-	int ret = 0;
+	struct serdes_route_entry *entry;
 
-	if (!IS_ERR(serdes->vpower)) {
-		ret = regulator_disable(serdes->vpower);
-		if (ret) {
-			dev_err(serdes->dev, "fail to disable vpower regulator\n");
-			return ret;
+	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	if (!entry)
+		return -ENOMEM;
+
+	entry->prev_node = of_node_get(prev_node);
+	entry->node = of_node_get(node);
+	entry->fbd_mode = fbd_mode;
+
+	list_add_tail(&entry->list, &serdes_route_list);
+	SERDES_DBG_MFD("%s: prev_node=%s node=%s fbd=%d\n", __func__,
+		 of_node_full_name(prev_node), of_node_full_name(node),
+		 fbd_mode);
+
+	return 0;
+}
+
+static bool serdes_check_route(struct device_node *node, int depth)
+{
+	u32 reg;
+	bool result = false;
+	struct device_node *ports, *port;
+
+	if (!node || depth <= 0)
+		return false;
+
+	if (serdes_node_match(node))
+		return true;
+
+	ports = of_get_child_by_name(node, "ports");
+	if (!ports)
+		return false;
+
+	for_each_child_of_node(ports, port) {
+		struct device_node *next_node;
+
+		if (of_property_read_u32(port, "reg", &reg))
+			continue;
+		if (reg == 0)
+			continue;
+
+		next_node = of_graph_get_remote_node(node, reg, 0);
+		if (!next_node)
+			continue;
+
+		if (serdes_check_route(next_node, depth - 1)) {
+			result = true;
+			of_node_put(next_node);
+			of_node_put(port);
+			break;
 		}
+		of_node_put(next_node);
 	}
 
-	return ret;
+	of_node_put(ports);
+	return result;
 }
-EXPORT_SYMBOL_GPL(serdes_device_shutdown);
+
+static void serdes_route_attach(struct device_node *prev_node,
+				struct device_node *node, u32 fbd_mode, int depth)
+{
+	u32 reg;
+	struct device_node *ports, *port;
+
+	if (!node || depth <= 0)
+		return;
+
+	if (serdes_node_add(prev_node, node, fbd_mode)) {
+		pr_err("%s: serdes node %s add fail\n",
+		       __func__, of_node_full_name(node));
+		return;
+	}
+
+	ports = of_get_child_by_name(node, "ports");
+	if (!ports)
+		return;
+
+	for_each_child_of_node(ports, port) {
+		struct device_node *next_node;
+
+		if (of_property_read_u32(port, "reg", &reg))
+			continue;
+		if (reg == 0)
+			continue;
+
+		next_node = of_graph_get_remote_node(node, reg, 0);
+		if (!next_node)
+			continue;
+
+		serdes_route_attach(node, next_node, fbd_mode, depth - 1);
+		of_node_put(next_node);
+	}
+
+	of_node_put(ports);
+}
+
+void serdes_route_bind(const struct of_device_id *match)
+{
+	u32 phandle;
+	u32 fbd_mode;
+	struct device_node *route_node, *node;
+	struct device_node *conn, *conn_port, *bridge_first;
+	struct device_node *ep_node, *port_node, *port_parent_node;
+	int ret;
+
+	mutex_lock(&serdes_route_lock);
+	if (!list_empty(&serdes_route_list)) {
+		mutex_unlock(&serdes_route_lock);
+		return;
+	}
+
+	route_node = of_find_node_by_path("/display-subsystem/route");
+	if (!route_node) {
+		mutex_unlock(&serdes_route_lock);
+		return;
+	}
+
+	serdes_match = match;
+	for_each_child_of_node(route_node, node) {
+		if (of_device_is_available(node))
+			fbd_mode = SERDES_FBD_CONFIG_FROM_UBOOT;
+		else
+			fbd_mode = SERDES_FBD_CONFIG_FROM_NONE;
+
+		ret = of_property_read_u32(node, "connect", &phandle);
+		if (ret) {
+			pr_warn("%s: can't find connect node's handle\n", __func__);
+			continue;
+		}
+
+		ep_node = of_find_node_by_phandle(phandle);
+		if (!ep_node) {
+			pr_warn("%s: can't find endpoint node from phandle\n", __func__);
+			continue;
+		}
+
+		port_node = of_get_parent(ep_node);
+		if (!port_node)
+			goto put_ep;
+
+		port_parent_node = of_get_parent(port_node);
+		if (!port_parent_node)
+			goto put_port;
+
+		if (!strstr(of_node_full_name(port_parent_node), "ports"))
+			goto put_parent;
+
+		conn_port = of_graph_get_remote_port(ep_node);
+		if (!conn_port)
+			goto put_parent;
+
+		conn = of_graph_get_port_parent(conn_port);
+		if (!conn)
+			goto put_conn_port;
+
+		if (!of_device_is_available(conn))
+			goto put_conn;
+
+		bridge_first = of_graph_get_remote_node(conn, 1, 0);
+		if (!bridge_first) {
+			bridge_first = of_graph_get_remote_node(conn, 2, 0);
+			if (!bridge_first)
+				goto put_conn;
+		}
+
+		if (!serdes_check_route(bridge_first, SERDES_CHECK_DEPTH))
+			goto put_bridge_first;
+
+		serdes_route_attach(conn, bridge_first, fbd_mode, SERDES_ATTACH_DEPTH);
+put_bridge_first:
+		of_node_put(bridge_first);
+put_conn:
+		of_node_put(conn);
+put_conn_port:
+		of_node_put(conn_port);
+put_parent:
+		of_node_put(port_parent_node);
+put_port:
+		of_node_put(port_node);
+put_ep:
+		of_node_put(ep_node);
+	}
+
+	of_node_put(route_node);
+	mutex_unlock(&serdes_route_lock);
+}
+EXPORT_SYMBOL_GPL(serdes_route_bind);
+
+void serdes_route_unbind(void)
+{
+	struct serdes_route_entry *entry, *tmp;
+
+	mutex_lock(&serdes_route_lock);
+	list_for_each_entry_safe(entry, tmp, &serdes_route_list, list) {
+		of_node_put(entry->prev_node);
+		of_node_put(entry->node);
+		list_del(&entry->list);
+		kfree(entry);
+	}
+	serdes_match = NULL;
+	mutex_unlock(&serdes_route_lock);
+}
+EXPORT_SYMBOL_GPL(serdes_route_unbind);
+
+int serdes_get_route_mode(struct device_node *node, u32 *mode)
+{
+	struct serdes_route_entry *entry;
+	struct device_node *parent;
+
+	if (!node || !mode)
+		return -EINVAL;
+
+	mutex_lock(&serdes_route_lock);
+	list_for_each_entry(entry, &serdes_route_list, list) {
+		parent = of_get_parent(entry->node);
+		if (!parent)
+			continue;
+
+		if (parent == node) {
+			*mode = entry->fbd_mode;
+			of_node_put(parent);
+			mutex_unlock(&serdes_route_lock);
+			return 0;
+		}
+
+		of_node_put(parent);
+	}
+	mutex_unlock(&serdes_route_lock);
+
+	return -EINVAL;
+}
+EXPORT_SYMBOL_GPL(serdes_get_route_mode);
 
 MODULE_LICENSE("GPL");

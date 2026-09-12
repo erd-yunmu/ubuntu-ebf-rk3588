@@ -115,7 +115,7 @@
 		reset-gpios = <&gpio4 RK_PA7 GPIO_ACTIVE_HIGH>;
 		rotation = <180>;
 
-		rockchip,camera-module-index = <2>;
+		rockchip,camera-module-index = <0>;
 		rockchip,camera-module-facing = "back";
 		rockchip,camera-module-name = "ZC-OV13850R2A-V1";
 		rockchip,camera-module-lens-name = "Largan-50064B31";
@@ -148,6 +148,7 @@
 		rockchip,camera-module-facing = "back";
 		rockchip,camera-module-name = "CMK-OT2022-PX1";
 		rockchip,camera-module-lens-name = "IR0147-50IRC-8M-F20";
+		rockchip,imx415-data-lanes = <4>;
 		// NO_HDR:0 HDR_X2:5 HDR_X3:6
 		// rockchip,camera-hdr-mode = <0>;
 		port {
@@ -264,7 +265,7 @@
 		reg = <0x36>;
 		clocks = <&ext_cam_25m_clk>;
 		clock-names = "ext_cam_25m_clk";
-		pwdn-gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_LOW>;
+		pwdn-gpios = <&gpio4 RK_PB0 GPIO_ACTIVE_LOW>;
 		lens-focus = <&dcphy1_dw9714>;
 
 		port {
@@ -284,8 +285,8 @@
 		dovdd-supply= <&cam_dovdd>; /* 1.8v */
 		avdd-supply = <&cam_avdd>;  /* 2.8v */
 		dvdd-supply = <&cam_dvdd>;  /* 1.2v */
-		pwdn-gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_HIGH>;
-		reset-gpios = <&gpio1 RK_PA0 GPIO_ACTIVE_LOW>;
+		pwdn-gpios = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio4 RK_PA0 GPIO_ACTIVE_LOW>;
 		rotation = <180>;
 
 		rockchip,camera-module-index = <1>;
@@ -313,8 +314,8 @@
 		dovdd-supply= <&cam_dovdd>; /* 1.8v */
 		avdd-supply = <&cam_avdd>;  /* 2.8v */
 		dvdd-supply = <&cam_dvdd>;  /* 1.2v */
-		pwdn-gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_HIGH>;
-		reset-gpios = <&gpio1 RK_PA0 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio4 RK_PA0 GPIO_ACTIVE_HIGH>;
 		rotation = <180>;
 
 		rockchip,camera-module-index = <1>;
@@ -342,8 +343,8 @@
 		dovdd-supply= <&cam_dovdd>; /* 1.8v */
 		avdd-supply = <&cam_avdd>;  /* 2.8v */
 		dvdd-supply = <&cam_dvdd>;  /* 1.2v */
-		pwdn-gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_HIGH>;
-		reset-gpios = <&gpio1 RK_PA0 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio4 RK_PA0 GPIO_ACTIVE_HIGH>;
 		rotation = <180>;
 
 		rockchip,camera-module-index = <1>;
@@ -372,13 +373,14 @@
 		avdd-supply = <&cam_avdd>;
 		dovdd-supply = <&cam_dovdd>;
 		dvdd-supply = <&cam_dvdd>;
-		pwdn-gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_HIGH>;
-		reset-gpios = <&gpio1 RK_PA0 GPIO_ACTIVE_LOW>;
+		pwdn-gpios = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio4 RK_PA0 GPIO_ACTIVE_LOW>;
 
 		rockchip,camera-module-index = <1>;
 		rockchip,camera-module-facing = "back";
 		rockchip,camera-module-name = "CMK-OT2022-PX1";
 		rockchip,camera-module-lens-name = "IR0147-50IRC-8M-F20";
+		rockchip,imx415-data-lanes = <4>;
 		port {
 			imx415_dcphy1_out: endpoint {
 				remote-endpoint = <&dcphy1_in_imx415>;
@@ -387,7 +389,7 @@
 		};
 	};
 
-    dcphy1_gc08a8: dcphy1-gc08a8@31 {
+	dcphy1_gc08a8: dcphy1-gc08a8@31 {
 		compatible = "galaxycore,gc08a8";
 		status = "disabled";
 		reg = <0x31>;
@@ -601,10 +603,11 @@
 		pwdn-gpios = <&gpio4 RK_PA1 GPIO_ACTIVE_HIGH>;
 		reset-gpios = <&gpio4 RK_PA2 GPIO_ACTIVE_LOW>;
 
-		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-index = <2>;
 		rockchip,camera-module-facing = "back";
 		rockchip,camera-module-name = "CMK-OT2022-PX1";
 		rockchip,camera-module-lens-name = "IR0147-50IRC-8M-F20";
+		rockchip,imx415-data-lanes = <2>;
 		// NO_HDR:0 HDR_X2:5 HDR_X3:6
 		// rockchip,camera-hdr-mode = <0>;
 		port {
@@ -692,7 +695,6 @@
 			};
 		};
 	};
-
 };
 
 /* CAM3 */
@@ -705,7 +707,7 @@
 		status = "disabled";
 		compatible = "dongwoon,dw9714";
 		reg = <0xc>;
-		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-index = <3>;
 		rockchip,vcm-max-current = <100>;
 		rockchip,vcm-start-current = <0>;
 		rockchip,vcm-rated-current = <100>;
@@ -746,7 +748,7 @@
 		reset-gpios = <&gpio4 RK_PB5 GPIO_ACTIVE_LOW>;
 		rotation = <180>;
 
-		rockchip,camera-module-index = <2>;
+		rockchip,camera-module-index = <3>;
 		rockchip,camera-module-facing = "back";
 		rockchip,camera-module-name = "THDS11073";
 		rockchip,camera-module-lens-name = "Largan-40122a1";
@@ -775,7 +777,7 @@
 		reset-gpios = <&gpio4 RK_PB5 GPIO_ACTIVE_HIGH>;
 		rotation = <180>;
 
-		rockchip,camera-module-index = <2>;
+		rockchip,camera-module-index = <3>;
 		rockchip,camera-module-facing = "back";
 		rockchip,camera-module-name = "HS5885-BNSM1018-V01";
 		rockchip,camera-module-lens-name = "default";
@@ -804,7 +806,7 @@
 		reset-gpios = <&gpio4 RK_PB5 GPIO_ACTIVE_HIGH>;
 		rotation = <180>;
 
-		rockchip,camera-module-index = <2>;
+		rockchip,camera-module-index = <3>;
 		rockchip,camera-module-facing = "back";
 		rockchip,camera-module-name = "ZC-OV13850R2A-V1";
 		rockchip,camera-module-lens-name = "Largan-50064B31";
@@ -833,10 +835,11 @@
 		pwdn-gpios = <&gpio4 RK_PB4 GPIO_ACTIVE_HIGH>;
 		reset-gpios = <&gpio4 RK_PB5 GPIO_ACTIVE_LOW>;
 
-		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-index = <3>;
 		rockchip,camera-module-facing = "back";
 		rockchip,camera-module-name = "CMK-OT2022-PX1";
 		rockchip,camera-module-lens-name = "IR0147-50IRC-8M-F20";
+		rockchip,imx415-data-lanes = <2>;
 		// NO_HDR:0 HDR_X2:5 HDR_X3:6
 		// rockchip,camera-hdr-mode = <0>;
 		port {
@@ -924,9 +927,7 @@
 			};
 		};
 	};
-
 };
-
 
 &mipi_dcphy0 {
 	status = "disabled";
@@ -1221,7 +1222,6 @@
 				remote-endpoint = <&gc4653_dphy2_out>;
 				data-lanes = <1 2>;
 			};
-
 		};
 
 		port@1 {

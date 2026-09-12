@@ -336,6 +336,10 @@
 	status = "okay";
 };
 
+&avsd {
+	status = "okay";
+};
+
 &combphy0_ps {
 	status = "okay";
 };
@@ -450,11 +454,11 @@
 	pinctrl-names = "default";
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
 	status = "okay";
 };
 
-&hdptxphy_hdmi1 {
+&hdptxphy1 {
 	status = "okay";
 };
 
@@ -1069,6 +1073,10 @@
 };
 
 &vdpu_mmu {
+	status = "okay";
+};
+
+&vepu {
 	status = "okay";
 };
 

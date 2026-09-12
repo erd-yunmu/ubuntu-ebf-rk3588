@@ -297,6 +297,10 @@
 	status = "okay";
 };
 
+&avsd {
+	status = "okay";
+};
+
 /* default use sata3.0 , pcie2.0 optional*/
 &combphy0_ps {
 	status = "okay";
@@ -323,7 +327,7 @@
 };
 
 &display_subsystem {
-       clocks = <&hdptxphy_hdmi0>;
+       clocks = <&hdptxphy0>;
        clock-names = "hdmi0_phy_pll";
 };
 
@@ -379,11 +383,11 @@
 	status = "okay";
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
 	status = "okay";
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
        status = "okay";
 };
 
@@ -972,6 +976,10 @@
 };
 
 &vdpu_mmu {
+	status = "okay";
+};
+
+&vepu {
 	status = "okay";
 };
 

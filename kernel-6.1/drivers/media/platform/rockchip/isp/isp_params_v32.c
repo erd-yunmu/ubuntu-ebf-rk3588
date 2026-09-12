@@ -1085,9 +1085,9 @@ isp_rawaf_config(struct rkisp_isp_params_vdev *params_vdev,
 	struct isp2x_window win_ae;
 
 	if (dev->unite_div > ISP_UNITE_DIV1)
-		width = width / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		width = width / 2 + dev->hw_dev->unite_extend_pixel;
 	if (dev->unite_div == ISP_UNITE_DIV4)
-		height = height / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		height = height / 2 + dev->hw_dev->unite_extend_pixel;
 
 	for (i = 0; i < num_of_win; i++) {
 		h_size = arg->win[i].h_size;
@@ -1347,9 +1347,9 @@ isp_rawaelite_config(struct rkisp_isp_params_vdev *params_vdev,
 			 ISP3X_RAWAE_LITE_OFFSET, id);
 
 	if (ispdev->unite_div > ISP_UNITE_DIV1)
-		width = width / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		width = width / 2 + ispdev->hw_dev->unite_extend_pixel;
 	if (ispdev->unite_div == ISP_UNITE_DIV4)
-		height = height / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		height = height / 2 + ispdev->hw_dev->unite_extend_pixel;
 
 	h_size = arg->win.h_size;
 	v_size = arg->win.v_size;
@@ -1445,9 +1445,9 @@ isp_rawaebig_config(struct rkisp_isp_params_vdev *params_vdev,
 			 addr + ISP3X_RAWAE_BIG_OFFSET, id);
 
 	if (ispdev->unite_div > ISP_UNITE_DIV1)
-		width = width / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		width = width / 2 + ispdev->hw_dev->unite_extend_pixel;
 	if (ispdev->unite_div == ISP_UNITE_DIV4)
-		height = height / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		height = height / 2 + ispdev->hw_dev->unite_extend_pixel;
 	h_size = arg->win.h_size;
 	v_size = arg->win.v_size;
 	if (!h_size || h_size + h_offs + 1 > width)
@@ -1595,36 +1595,16 @@ isp_rawawb_config(struct rkisp_isp_params_vdev *params_vdev,
 	u32 width = out_crop->width, height = out_crop->height;
 	u32 value, val, mask, i, h_size, v_size, h_offs, v_offs;
 
+	/* bug no base on bayer pattern */
+	isp3_param_write(params_vdev, pval->r, ISP32_BLS2_A_FIXED, id);
+	isp3_param_write(params_vdev, pval->gr, ISP32_BLS2_B_FIXED, id);
+	isp3_param_write(params_vdev, pval->gb, ISP32_BLS2_C_FIXED, id);
+	isp3_param_write(params_vdev, pval->b, ISP32_BLS2_D_FIXED, id);
+
 	value = isp3_param_read(params_vdev, ISP3X_BLS_CTRL, id);
 	value &= ~ISP32_BLS_BLS2_EN;
 	if (arg->bls2_en)
 		value |= ISP32_BLS_BLS2_EN;
-	switch (params_vdev->raw_type) {
-	case RAW_BGGR:
-		isp3_param_write(params_vdev, pval->r, ISP32_BLS2_D_FIXED, id);
-		isp3_param_write(params_vdev, pval->gr, ISP32_BLS2_C_FIXED, id);
-		isp3_param_write(params_vdev, pval->gb, ISP32_BLS2_B_FIXED, id);
-		isp3_param_write(params_vdev, pval->b, ISP32_BLS2_A_FIXED, id);
-		break;
-	case RAW_GBRG:
-		isp3_param_write(params_vdev, pval->r, ISP32_BLS2_C_FIXED, id);
-		isp3_param_write(params_vdev, pval->gr, ISP32_BLS2_D_FIXED, id);
-		isp3_param_write(params_vdev, pval->gb, ISP32_BLS2_A_FIXED, id);
-		isp3_param_write(params_vdev, pval->b, ISP32_BLS2_B_FIXED, id);
-		break;
-	case RAW_GRBG:
-		isp3_param_write(params_vdev, pval->r, ISP32_BLS2_B_FIXED, id);
-		isp3_param_write(params_vdev, pval->gr, ISP32_BLS2_A_FIXED, id);
-		isp3_param_write(params_vdev, pval->gb, ISP32_BLS2_D_FIXED, id);
-		isp3_param_write(params_vdev, pval->b, ISP32_BLS2_C_FIXED, id);
-		break;
-	case RAW_RGGB:
-	default:
-		isp3_param_write(params_vdev, pval->r, ISP32_BLS2_A_FIXED, id);
-		isp3_param_write(params_vdev, pval->gr, ISP32_BLS2_B_FIXED, id);
-		isp3_param_write(params_vdev, pval->gb, ISP32_BLS2_C_FIXED, id);
-		isp3_param_write(params_vdev, pval->b, ISP32_BLS2_D_FIXED, id);
-	}
 	isp3_param_write(params_vdev, value, ISP3X_BLS_CTRL, id);
 
 	value = arg->in_overexposure_threshold << 16 |
@@ -1645,9 +1625,9 @@ isp_rawawb_config(struct rkisp_isp_params_vdev *params_vdev,
 			 ISP3X_RAWAWB_WIN_OFFS, id);
 
 	if (dev->unite_div > ISP_UNITE_DIV1)
-		width = width / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		width = width / 2 + dev->hw_dev->unite_extend_pixel;
 	if (dev->unite_div == ISP_UNITE_DIV4)
-		height = height / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		height = height / 2 + dev->hw_dev->unite_extend_pixel;
 
 	h_size = arg->h_size;
 	v_size = arg->v_size;
@@ -2330,9 +2310,9 @@ isp_rawhstlite_config(struct rkisp_isp_params_vdev *params_vdev,
 			 ISP3X_RAWHIST_LITE_OFFS, id);
 
 	if (ispdev->unite_div > ISP_UNITE_DIV1)
-		width = width / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		width = width / 2 + ispdev->hw_dev->unite_extend_pixel;
 	if (ispdev->unite_div == ISP_UNITE_DIV4)
-		height = height / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		height = height / 2 + ispdev->hw_dev->unite_extend_pixel;
 
 	h_size = arg->win.h_size;
 	v_size = arg->win.v_size;
@@ -2488,9 +2468,9 @@ isp_rawhstbig_config(struct rkisp_isp_params_vdev *params_vdev,
 			 addr + ISP3X_RAWHIST_BIG_OFFS, id);
 
 	if (dev->unite_div > ISP_UNITE_DIV1)
-		width = width / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		width = width / 2 + dev->hw_dev->unite_extend_pixel;
 	if (dev->unite_div == ISP_UNITE_DIV4)
-		height = height / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		height = height / 2 + dev->hw_dev->unite_extend_pixel;
 
 	h_size = arg->win.h_size;
 	v_size = arg->win.v_size;
@@ -3672,12 +3652,16 @@ isp_bay3d_enable(struct rkisp_isp_params_vdev *params_vdev, bool en, u32 id)
 		value = priv_val->buf_3dnr_iir.dma_addr + value * id;
 		isp3_param_write(params_vdev, value, ISP3X_MI_BAY3D_IIR_WR_BASE, id);
 		isp3_param_write(params_vdev, value, ISP3X_MI_BAY3D_IIR_RD_BASE, id);
+		isp3_param_write(params_vdev, 0, ISP3X_MI_BAY3D_IIR_WR_LENGTH, id);
+		isp3_param_write(params_vdev, 0, ISP3X_MI_BAY3D_IIR_RD_LENGTH, id);
 
 		value = priv_val->bay3d_ds_size;
 		isp3_param_write(params_vdev, value, ISP3X_MI_BAY3D_DS_WR_SIZE, id);
 		value = priv_val->buf_3dnr_ds.dma_addr + value * id;
 		isp3_param_write(params_vdev, value, ISP3X_MI_BAY3D_DS_WR_BASE, id);
 		isp3_param_write(params_vdev, value, ISP3X_MI_BAY3D_DS_RD_BASE, id);
+		isp3_param_write(params_vdev, 0, ISP3X_MI_BAY3D_DS_WR_LENGTH, id);
+		isp3_param_write(params_vdev, 0, ISP3X_MI_BAY3D_DS_RD_LENGTH, id);
 
 		value = priv_val->is_sram ?
 			ispdev->hw_dev->sram.dma_addr : priv_val->buf_3dnr_cur.dma_addr;
@@ -4433,9 +4417,9 @@ rkisp_alloc_internal_buf(struct rkisp_isp_params_vdev *params_vdev,
 		bool is_alloc;
 
 		if (dev->unite_div > ISP_UNITE_DIV1)
-			w = ALIGN(isp_sdev->in_crop.width / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL, 16);
+			w = ALIGN(isp_sdev->in_crop.width / 2 + dev->hw_dev->unite_extend_pixel, 16);
 		if (dev->unite_div == ISP_UNITE_DIV4)
-			h = ALIGN(isp_sdev->in_crop.height / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL, 16);
+			h = ALIGN(isp_sdev->in_crop.height / 2 + dev->hw_dev->unite_extend_pixel, 16);
 
 		priv_val->is_lo8x8 = (!new_params->others.bay3d_cfg.lo4x8_en &&
 				      !new_params->others.bay3d_cfg.lo4x4_en);
@@ -4940,10 +4924,11 @@ rkisp_params_first_cfg_v32(struct rkisp_isp_params_vdev *params_vdev)
 	struct rkisp_device *dev = params_vdev->dev;
 	struct rkisp_isp_params_val_v32 *priv_val = params_vdev->priv_val;
 	struct isp32_isp_params_cfg *params = params_vdev->isp32_params;
+	unsigned long flags = 0;
 	int i;
 
 	rkisp_params_check_bigmode_v32(params_vdev);
-	spin_lock(&params_vdev->config_lock);
+	spin_lock_irqsave(&params_vdev->config_lock, flags);
 	/* override the default things */
 	if (!params->module_cfg_update && !params->module_en_update)
 		dev_warn(dev->dev, "can not get first iq setting in stream on\n");
@@ -4963,7 +4948,7 @@ rkisp_params_first_cfg_v32(struct rkisp_isp_params_vdev *params_vdev)
 		__isp_isr_other_en(params_vdev, params + i, RKISP_PARAMS_ALL, i);
 		__isp_isr_meas_en(params_vdev, params + i, RKISP_PARAMS_ALL, i);
 	}
-	spin_unlock(&params_vdev->config_lock);
+	spin_unlock_irqrestore(&params_vdev->config_lock, flags);
 
 	if (dev->hw_dev->is_frm_buf && priv_val->buf_frm.mem_priv) {
 		u32 size = priv_val->buf_frm.size;
@@ -4985,7 +4970,18 @@ rkisp_params_first_cfg_v32(struct rkisp_isp_params_vdev *params_vdev)
 
 static void rkisp_save_first_param_v32(struct rkisp_isp_params_vdev *params_vdev, void *param)
 {
-	memcpy(params_vdev->isp32_params, param, params_vdev->vdev_fmt.fmt.meta.buffersize);
+	u32 size;
+
+	if (!params_vdev->dev->is_rtt_first) {
+		size = params_vdev->vdev_fmt.fmt.meta.buffersize;
+		memcpy(params_vdev->isp32_params, param, size);
+	} else {
+		/* left and right params for unit fast case */
+		size = sizeof(struct isp32_isp_params_cfg);
+		memcpy(params_vdev->isp32_params, param, size);
+		if (params_vdev->dev->unite_div == ISP_UNITE_DIV2)
+			memcpy(params_vdev->isp32_params + 1, param, size);
+	}
 	rkisp_alloc_internal_buf(params_vdev, params_vdev->isp32_params);
 }
 
@@ -5074,9 +5070,9 @@ static int rkisp_init_mesh_buf(struct rkisp_isp_params_vdev *params_vdev,
 				rkisp_free_buffer(params_vdev->dev, buf);
 			} else {
 				is_alloc = false;
-				buf->dma_fd = dma_buf_fd(buf->dbuf, O_CLOEXEC);
-				if (buf->dma_fd < 0)
+				if (rkisp_buf_get_fd(ispdev, buf, false) < 0)
 					goto err;
+				mesh_head = (struct isp2x_mesh_head *)buf->vaddr;
 			}
 		}
 		if (is_alloc) {
@@ -5087,9 +5083,9 @@ static int rkisp_init_mesh_buf(struct rkisp_isp_params_vdev *params_vdev,
 				goto err;
 			}
 			mesh_head = (struct isp2x_mesh_head *)buf->vaddr;
-			mesh_head->stat = MESH_BUF_INIT;
-			mesh_head->data_oft = ALIGN(sizeof(struct isp2x_mesh_head), 16);
 		}
+		mesh_head->stat = MESH_BUF_INIT;
+		mesh_head->data_oft = ALIGN(sizeof(struct isp2x_mesh_head), 16);
 		buf++;
 	}
 
@@ -5187,12 +5183,14 @@ rkisp_params_info2ddr_cfg_v32(struct rkisp_isp_params_vdev *params_vdev, void *a
 	for (val = 0; val < cfg->buf_cnt; val++)
 		cfg->buf_fd[val] = -1;
 
+	priv_val->buf_info_w_offs = 0;
+	priv_val->buf_info_v_offs = 0;
 	switch (cfg->owner) {
 	case RKISP_INFO2DRR_OWNER_NULL:
-		rkisp_clear_reg_cache_bits(dev, ISP3X_RAWAWB_CTRL,
-					   ISP32_RAWAWB_2DDR_PATH_EN);
-		rkisp_clear_reg_cache_bits(dev, ISP3X_GAIN_CTRL,
-					   ISP3X_GAIN_2DDR_EN);
+		for (i = 0; i < dev->unite_div; i++) {
+			rkisp_idx_clear_reg_cache_bits(dev, ISP3X_RAWAWB_CTRL, ISP32_RAWAWB_2DDR_PATH_EN, i);
+			rkisp_idx_clear_reg_cache_bits(dev, ISP3X_GAIN_CTRL, ISP3X_GAIN_2DDR_EN, i);
+		}
 		priv_val->buf_info_owner = cfg->owner;
 		return 0;
 	case RKISP_INFO2DRR_OWNER_GAIN:
@@ -5212,6 +5210,10 @@ rkisp_params_info2ddr_cfg_v32(struct rkisp_isp_params_vdev *params_vdev, void *a
 			vsize = cfg->vsize;
 		else
 			vsize = dev->isp_sdev.in_crop.height / val;
+		if (dev->unite_div == ISP_UNITE_DIV2)
+			priv_val->buf_info_w_offs = wsize / 2 - dev->hw_dev->unite_extend_pixel / 8;
+		if (dev->unite_div == ISP_UNITE_DIV4)
+			priv_val->buf_info_v_offs = (vsize / 2 - dev->hw_dev->unite_extend_pixel / val) * wsize;
 		break;
 	case RKISP_INFO2DRR_OWNER_AWB:
 		ctrl = cfg->u.awb.awb2ddr_sel ? ISP32_RAWAWB_2DDR_PATH_DS : 0;
@@ -5228,6 +5230,10 @@ rkisp_params_info2ddr_cfg_v32(struct rkisp_isp_params_vdev *params_vdev, void *a
 			vsize = cfg->vsize;
 		else
 			vsize = dev->isp_sdev.in_crop.height / val;
+		if (dev->unite_div == ISP_UNITE_DIV2)
+			priv_val->buf_info_w_offs = wsize / 2;
+		if (dev->unite_div == ISP_UNITE_DIV4)
+			priv_val->buf_info_v_offs = vsize / 2 * wsize;
 		break;
 	default:
 		dev_err(dev->dev, "%s no support owner:%d\n", __func__, cfg->owner);
@@ -5258,12 +5264,19 @@ rkisp_params_info2ddr_cfg_v32(struct rkisp_isp_params_vdev *params_vdev, void *a
 		cfg->buf_fd[i] = buf->dma_fd;
 	}
 	buf = &priv_val->buf_info[0];
-	isp3_param_write(params_vdev, buf->dma_addr, ISP3X_MI_GAIN_WR_BASE, 0);
-	isp3_param_write(params_vdev, buf->size, ISP3X_MI_GAIN_WR_SIZE, 0);
-	isp3_param_write(params_vdev, wsize, ISP3X_MI_GAIN_WR_LENGTH, 0);
+	for (i = 0; i < dev->unite_div; i++) {
+		val = buf->dma_addr;
+		if (i > ISP_UNITE_RIGHT)
+			val += priv_val->buf_info_v_offs;
+		if (i == ISP_UNITE_RIGHT || i == ISP_UNITE_RIGHT_B)
+			val += priv_val->buf_info_w_offs;
+		isp3_param_write(params_vdev, val, ISP3X_MI_GAIN_WR_BASE, i);
+		isp3_param_write(params_vdev, buf->size, ISP3X_MI_GAIN_WR_SIZE, i);
+		isp3_param_write(params_vdev, wsize, ISP3X_MI_GAIN_WR_LENGTH, i);
+		rkisp_idx_set_reg_cache_bits(dev, reg, mask, ctrl, i);
+	}
 	if (dev->hw_dev->is_single)
 		rkisp_write(dev, ISP3X_MI_WR_CTRL2, ISP3X_GAINSELF_UPD, true);
-	rkisp_set_reg_cache_bits(dev, reg, mask, ctrl);
 
 	priv_val->buf_info_idx = 0;
 	priv_val->buf_info_cnt = cfg->buf_cnt;
@@ -5372,7 +5385,8 @@ module_data_abandon(struct rkisp_isp_params_vdev *params_vdev,
 			if (priv_val->buf_ldch[id][i].vaddr &&
 			    arg->buf_fd == priv_val->buf_ldch[id][i].dma_fd) {
 				mesh_head = (struct isp2x_mesh_head *)priv_val->buf_ldch[id][i].vaddr;
-				mesh_head->stat = MESH_BUF_CHIPINUSE;
+				if (mesh_head->stat == MESH_BUF_WAIT2CHIP)
+					mesh_head->stat = MESH_BUF_INIT;
 				break;
 			}
 		}
@@ -5385,7 +5399,8 @@ module_data_abandon(struct rkisp_isp_params_vdev *params_vdev,
 			if (priv_val->buf_cac[id][i].vaddr &&
 			    arg->buf_fd == priv_val->buf_cac[id][i].dma_fd) {
 				mesh_head = (struct isp2x_mesh_head *)priv_val->buf_cac[id][i].vaddr;
-				mesh_head->stat = MESH_BUF_CHIPINUSE;
+				if (mesh_head->stat == MESH_BUF_WAIT2CHIP)
+					mesh_head->stat = MESH_BUF_INIT;
 				break;
 			}
 		}
@@ -5399,9 +5414,10 @@ rkisp_params_cfg_v32(struct rkisp_isp_params_vdev *params_vdev,
 	struct rkisp_device *dev = params_vdev->dev;
 	struct isp32_isp_params_cfg *new_params = NULL;
 	struct rkisp_buffer *cur_buf = params_vdev->cur_buf;
+	unsigned long flags = 0;
 	int i;
 
-	spin_lock(&params_vdev->config_lock);
+	spin_lock_irqsave(&params_vdev->config_lock, flags);
 	if (!params_vdev->streamon)
 		goto unlock;
 
@@ -5465,7 +5481,7 @@ rkisp_params_cfg_v32(struct rkisp_isp_params_vdev *params_vdev,
 
 unlock:
 	params_vdev->cur_buf = cur_buf;
-	spin_unlock(&params_vdev->config_lock);
+	spin_unlock_irqrestore(&params_vdev->config_lock, flags);
 }
 
 static void

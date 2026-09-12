@@ -11,7 +11,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
-#include <linux/of_gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
 #include "vehicle_ad.h"
@@ -210,7 +210,7 @@ int vehicle_generic_sensor_read(struct vehicle_ad_dev *ad, char reg)
 //	msgs[1].scl_rate = ad->i2c_rate;
 
 	ret = i2c_transfer(ad->adapter, msgs, 2);
-	if (ret)
+	if (ret < 0)
 		return ret;
 
 	return pval;
@@ -265,8 +265,8 @@ int vehicle_parse_sensor(struct vehicle_ad_dev *ad)
 	struct device *dev = ad->dev;
 	struct device_node *node = NULL;
 	struct device_node *cp = NULL;
-	enum of_gpio_flags flags;
 	const char *status = NULL;
+	struct fwnode_handle *fwnode = NULL;
 	int i;
 	int ret = 0;
 
@@ -310,25 +310,16 @@ int vehicle_parse_sensor(struct vehicle_ad_dev *ad)
 			ad->drop_frames = 0; //default drop frames;
 		}
 
-		if (of_property_read_u32(cp, "rst_active", &ad->rst_active))
-			VEHICLE_DGERR("Get %s rst_active failed!", cp->name);
+		fwnode = of_fwnode_handle(cp);
 
-		ad->reset = of_get_named_gpio_flags(cp, "reset-gpios",
-							0, &flags);
+		ad->reset_gpio = devm_fwnode_gpiod_get(dev, fwnode,
+						"reset", GPIOD_ASIS, "reset");
 
-		if (of_property_read_u32(cp, "pwr_active", &ad->pwr_active))
-			VEHICLE_DGERR("Get %s pwr_active failed!\n", cp->name);
+		ad->power_gpio = devm_fwnode_gpiod_get(dev, fwnode,
+						"power", GPIOD_ASIS, "power");
 
-		if (of_property_read_u32(cp, "pwdn_active", &ad->pwdn_active))
-			VEHICLE_DGERR("Get %s pwdn_active failed!\n", cp->name);
-
-		ad->power = of_get_named_gpio_flags(cp, "power-gpios",
-						    0, &flags);
-		ad->powerdown = of_get_named_gpio_flags(cp,
-							"powerdown-gpios",
-							0, &flags);
-		ad->reset = of_get_named_gpio_flags(cp, "reset-gpios",
-						0, &flags);
+		ad->powerdown_gpio = devm_fwnode_gpiod_get(dev, fwnode,
+						"powerdown", GPIOD_ASIS, "powerdown");
 
 		ad->xvclk = of_clk_get_by_name(cp, "xvclk");
 		if (IS_ERR(ad->xvclk)) {
@@ -378,9 +369,6 @@ int vehicle_parse_sensor(struct vehicle_ad_dev *ad)
 
 		VEHICLE_DG("%s: ad_chl=%d,,ad_addr=%x,fix_for=%d\n", ad->ad_name,
 		    ad->ad_chl, ad->i2c_add, ad->fix_format);
-		VEHICLE_DG("gpio power:%d, active:%d\n", ad->power, ad->pwr_active);
-		VEHICLE_DG("gpio powerdown:%d, active:%d\n",
-		    ad->powerdown, ad->pwdn_active);
 		break;
 	}
 

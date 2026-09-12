@@ -34,7 +34,7 @@
 	};
 
 	fragment@3 {
-		target = <&hdptxphy_hdmi1>;
+		target = <&hdptxphy1>;
 
 		__overlay__ {
 			status = "okay";
@@ -72,5 +72,12 @@
 			};
 		};
 	};
-};
 
+	fragment@7 {
+		target = <&i2s6_8ch>;
+
+		__overlay__ {
+			status = "okay";
+		};
+	};
+};

@@ -9,6 +9,18 @@
 #include <linux/pwm.h>
 
 /**
+ * enum rockchip_pwm_clk_src_sel - select the clk src of pwm
+ * @PWM_SELECT_CLK_PWM: select clk_pwm as clk src
+ * @PWM_SELECT_CLK_PWM_OSC: select clk_pwm_osc as clk src
+ * @PWM_SELECT_CLK_PWM_RC: select clk_pwm_rc as clk src
+ */
+enum rockchip_pwm_clk_src_sel {
+	PWM_SELECT_CLK_PWM,
+	PWM_SELECT_CLK_PWM_OSC,
+	PWM_SELECT_CLK_PWM_RC,
+};
+
+/**
  * enum rockchip_pwm_global_ctrl_cmd - commands for pwm global ctrl
  * @PWM_GLOBAL_CTRL_JOIN: join the global control group
  * @PWM_GLOBAL_CTRL_EXIT: exit the global control group
@@ -36,6 +48,16 @@ enum rockchip_pwm_global_ctrl_cmd {
 enum rockchip_pwm_counter_input_sel {
 	PWM_COUNTER_INPUT_FROM_IO,
 	PWM_COUNTER_INPUT_FROM_CRU,
+};
+
+/**
+ * enum rockchip_pwm_counter_mode - mode of counter
+ * @PWM_COUNTER_CONTINUOUS: get counter result while the input wave is running
+ * @PWM_COUNTER_DISCONTINUOUS: get raw counter result after the input wave stops
+ */
+enum rockchip_pwm_counter_mode {
+	PWM_COUNTER_CONTINUOUS,
+	PWM_COUNTER_DISCONTINUOUS,
 };
 
 /**
@@ -87,15 +109,16 @@ enum rockchip_pwm_wave_update_mode {
 
 /**
  * struct rockchip_pwm_wave_config - wave generator config object
- * @duty_table: the wave table config of duty
- * @period_table: the wave table config of period
+ * @wave_table: the wave table config
+ * @clk_src: the clk src selection in wave generator mode
+ * @mem_clk_src: the memory clk src selection in wave generator mode
+ * @width_mode: the width mode of wave table
+ * @update_mode: the update mode of wave generator
  * @enable: enable or disable wave generator
  * @duty_en: to update duty by duty table or not
  * @period_en: to update period by period table or not
  * @clk_rate: the dclk rate in wave generator mode
  * @rpt: the number of repeated effective periods
- * @width_mode: the width mode of wave table
- * @update_mode: the update mode of wave generator
  * @duty_max: the maximum address of duty table
  * @duty_min: the minimum address of duty table
  * @period_max: the maximum address of period table
@@ -107,15 +130,16 @@ enum rockchip_pwm_wave_update_mode {
  * @middle_hold: the time to stop at middle address
  */
 struct rockchip_pwm_wave_config {
-	struct rockchip_pwm_wave_table *duty_table;
-	struct rockchip_pwm_wave_table *period_table;
+	struct rockchip_pwm_wave_table *wave_table;
+	enum rockchip_pwm_clk_src_sel clk_src;
+	enum rockchip_pwm_clk_src_sel mem_clk_src;
+	enum rockchip_pwm_wave_table_width_mode width_mode;
+	enum rockchip_pwm_wave_update_mode update_mode;
 	bool enable;
 	bool duty_en;
 	bool period_en;
 	unsigned long clk_rate;
 	u16 rpt;
-	u32 width_mode;
-	u32 update_mode;
 	u32 duty_max;
 	u32 duty_min;
 	u32 period_max;
@@ -162,12 +186,15 @@ struct rockchip_pwm_biphasic_config {
 /**
  * rockchip_pwm_set_counter() - setup pwm counter mode
  * @pwm: PWM device
+ * @input_sel: select the input of counter
+ * @mode: select the mode of counter
  * @enable: enable/disable counter mode
  *
  * Returns: 0 on success or a negative error code on failure.
  */
 int rockchip_pwm_set_counter(struct pwm_device *pwm,
 			     enum rockchip_pwm_counter_input_sel input_sel,
+			     enum rockchip_pwm_counter_mode mode,
 			     bool enable);
 
 /**
@@ -227,6 +254,13 @@ int rockchip_pwm_set_biphasic(struct pwm_device *pwm, struct rockchip_pwm_biphas
  * @biphasic_res: biphasic counter result
  */
 int rockchip_pwm_get_biphasic_result(struct pwm_device *pwm, unsigned long *biphasic_res);
+
+/**
+ * rockchip_pwm_set_filter() - setup filter configuration
+ * @pwm: PWM device
+ * @filter_window_ns: filter window time in nanosecond
+ */
+int rockchip_pwm_set_filter(struct pwm_device *pwm, u64 filter_window_ns);
 #else
 static inline int rockchip_pwm_set_counter(struct pwm_device *pwm,
 					   enum rockchip_pwm_counter_input_sel input_sel,
@@ -269,6 +303,11 @@ static inline int rockchip_pwm_set_biphasic(struct pwm_device *pwm,
 
 static inline int rockchip_pwm_get_biphasic_result(struct pwm_device *pwm,
 						   unsigned long *biphasic_res)
+{
+	return 0;
+}
+
+static inline int rockchip_pwm_set_filter(struct pwm_device *pwm, u64 filter_window_ns)
 {
 	return 0;
 }

@@ -85,11 +85,12 @@ static enum drm_gpu_sched_stat amdgpu_job_timedout(struct drm_sched_job *s_job)
 exit:
 	adev->job_hang = false;
 	drm_dev_exit(idx);
-	return DRM_GPU_SCHED_STAT_NOMINAL;
+	return DRM_GPU_SCHED_STAT_RESET;
 }
 
-int amdgpu_job_alloc(struct amdgpu_device *adev, unsigned num_ibs,
-		     struct amdgpu_job **job, struct amdgpu_vm *vm)
+int amdgpu_job_alloc(struct amdgpu_device *adev, struct amdgpu_vm *vm,
+		     struct drm_sched_entity *entity, void *owner,
+		     unsigned int num_ibs, struct amdgpu_job **job)
 {
 	if (num_ibs == 0)
 		return -EINVAL;
@@ -110,25 +111,30 @@ int amdgpu_job_alloc(struct amdgpu_device *adev, unsigned num_ibs,
 	(*job)->vram_lost_counter = atomic_read(&adev->vram_lost_counter);
 	(*job)->vm_pd_addr = AMDGPU_BO_INVALID_OFFSET;
 
-	return 0;
+	if (!entity)
+		return 0;
 
 	return drm_sched_job_init(&(*job)->base, entity, 1, owner);
 }
 
-int amdgpu_job_alloc_with_ib(struct amdgpu_device *adev, unsigned size,
-		enum amdgpu_ib_pool_type pool_type,
-		struct amdgpu_job **job)
+int amdgpu_job_alloc_with_ib(struct amdgpu_device *adev,
+			     struct drm_sched_entity *entity, void *owner,
+			     size_t size, enum amdgpu_ib_pool_type pool_type,
+			     struct amdgpu_job **job)
 {
 	int r;
 
-	r = amdgpu_job_alloc(adev, 1, job, NULL);
+	r = amdgpu_job_alloc(adev, NULL, entity, owner, 1, job);
 	if (r)
 		return r;
 
 	(*job)->num_ibs = 1;
 	r = amdgpu_ib_get(adev, NULL, size, pool_type, &(*job)->ibs[0]);
-	if (r)
+	if (r) {
+		if (entity)
+			drm_sched_job_cleanup(&(*job)->base);
 		kfree(*job);
+	}
 
 	return r;
 }
@@ -152,7 +158,6 @@ void amdgpu_job_set_resources(struct amdgpu_job *job, struct amdgpu_bo *gds,
 
 void amdgpu_job_free_resources(struct amdgpu_job *job)
 {
-	struct amdgpu_ring *ring = to_amdgpu_ring(job->base.sched);
 	struct dma_fence *f;
 	unsigned i;
 
@@ -165,7 +170,7 @@ void amdgpu_job_free_resources(struct amdgpu_job *job)
 		f = NULL;
 
 	for (i = 0; i < job->num_ibs; ++i)
-		amdgpu_ib_free(ring->adev, &job->ibs[i], f);
+		amdgpu_ib_free(NULL, &job->ibs[i], f);
 }
 
 static void amdgpu_job_free_cb(struct drm_sched_job *s_job)
@@ -202,6 +207,9 @@ void amdgpu_job_set_gang_leader(struct amdgpu_job *job,
 
 void amdgpu_job_free(struct amdgpu_job *job)
 {
+	if (job->base.entity)
+		drm_sched_job_cleanup(&job->base);
+
 	amdgpu_job_free_resources(job);
 	amdgpu_sync_free(&job->sync);
 	amdgpu_sync_free(&job->sched_sync);
@@ -214,25 +222,16 @@ void amdgpu_job_free(struct amdgpu_job *job)
 		dma_fence_put(&job->hw_fence);
 }
 
-int amdgpu_job_submit(struct amdgpu_job *job, struct drm_sched_entity *entity,
-		      void *owner, struct dma_fence **f)
+struct dma_fence *amdgpu_job_submit(struct amdgpu_job *job)
 {
-	int r;
-
-	if (!f)
-		return -EINVAL;
-
-	r = drm_sched_job_init(&job->base, entity, owner);
-	if (r)
-		return r;
+	struct dma_fence *f;
 
 	drm_sched_job_arm(&job->base);
-
-	*f = dma_fence_get(&job->base.s_fence->finished);
+	f = dma_fence_get(&job->base.s_fence->finished);
 	amdgpu_job_free_resources(job);
 	drm_sched_entity_push_job(&job->base);
 
-	return 0;
+	return f;
 }
 
 int amdgpu_job_submit_direct(struct amdgpu_job *job, struct amdgpu_ring *ring,
@@ -261,11 +260,6 @@ amdgpu_job_prepare_job(struct drm_sched_job *sched_job,
 	int r;
 
 	fence = amdgpu_sync_get_fence(&job->sync);
-	if (fence && drm_sched_dependency_optimized(fence, s_entity)) {
-		r = amdgpu_sync_fence(&job->sched_sync, fence);
-		if (r)
-			DRM_ERROR("Error adding fence (%d)\n", r);
-	}
 
 	if (!fence && job->gang_submit)
 		fence = amdgpu_device_switch_gang(ring->adev, job->gang_submit);
@@ -304,12 +298,15 @@ static struct dma_fence *amdgpu_job_run(struct drm_sched_job *sched_job)
 		dma_fence_set_error(finished, -ECANCELED);
 
 	if (finished->error < 0) {
-		DRM_INFO("Skip scheduling IBs!\n");
+		dev_dbg(adev->dev, "Skip scheduling IBs in ring(%s)",
+			ring->name);
 	} else {
 		r = amdgpu_ib_schedule(ring, job->num_ibs, job->ibs, job,
 				       &fence);
 		if (r)
-			DRM_ERROR("Error scheduling IBs (%d)\n", r);
+			dev_err(adev->dev,
+				"Error scheduling IBs (%d) in ring(%s)", r,
+				ring->name);
 	}
 
 	job->job_run_counter++;

@@ -254,6 +254,9 @@
 
 #define XCCELA_MR4_WL_SHIFT				(5)
 #define XCCELA_MR4_WL_MASK				(0x7)
+#define XCCELA_MR4_REFRESH_SHIFT			(3)
+#define XCCELA_MR4_REFRESH_MASK				(0x3)
+#define XCCELA_MR4_0_5_REFRESH_RATE			(0x3)
 
 #define XCCELA_MR8_IO_TYPE_SHIFT			(6)
 #define XCCELA_MR8_IO_TYPE_MASK				(0x1)
@@ -435,6 +438,7 @@ int rockchip_dsmc_lb_dma_trigger_by_host(struct rockchip_dsmc *dsmc, uint32_t cs
 int rockchip_dsmc_lb_init(struct rockchip_dsmc *dsmc, uint32_t cs);
 int rockchip_dsmc_psram_reinit(struct rockchip_dsmc *dsmc, uint32_t cs);
 int rockchip_dsmc_register_lb_device(struct device *dev, uint32_t cs);
+int rockchip_dsmc_status_check(struct rockchip_dsmc_device *priv);
 int rockchip_dsmc_unregister_lb_device(struct device *dev, uint32_t cs);
 
 #endif /* __BUS_ROCKCHIP_ROCKCHIP_DSMC_HOST_H */

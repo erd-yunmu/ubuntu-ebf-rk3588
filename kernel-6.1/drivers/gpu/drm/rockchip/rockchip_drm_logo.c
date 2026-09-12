@@ -109,7 +109,7 @@ find_sub_dev_by_bridge(struct drm_device *drm_dev, struct device_node *node)
 
 	port = of_graph_get_port_by_id(np_encoder, 1);
 	if (!port) {
-		dev_err(drm_dev->dev, "can't found port point!\n");
+		dev_err(drm_dev->dev, "can't find port point!\n");
 		goto err_put_encoder;
 	}
 
@@ -117,7 +117,7 @@ find_sub_dev_by_bridge(struct drm_device *drm_dev, struct device_node *node)
 		np_connector = of_graph_get_remote_port_parent(endpoint);
 		if (!np_connector) {
 			dev_err(drm_dev->dev,
-				"can't found connector node, please init!\n");
+				"can't find connector node, please init!\n");
 			goto err_put_port;
 		}
 		if (!of_device_is_available(np_connector)) {
@@ -129,7 +129,7 @@ find_sub_dev_by_bridge(struct drm_device *drm_dev, struct device_node *node)
 		}
 	}
 	if (!np_connector) {
-		dev_err(drm_dev->dev, "can't found available connector node!\n");
+		dev_err(drm_dev->dev, "can't find available connector node!\n");
 		goto err_put_port;
 	}
 
@@ -264,9 +264,9 @@ static int init_loader_memory(struct drm_device *drm_dev)
 	start = ALIGN_DOWN(res.start, pg_size);
 	size = resource_size(&res);
 	if (!size)
-		return -ENOMEM;
+		return 0;
 	if (!IS_ALIGNED(res.start, PAGE_SIZE) || !IS_ALIGNED(size, PAGE_SIZE))
-		DRM_ERROR("Reserved logo memory should be aligned as:0x%lx, cureent is:start[%pad] size[%pad]\n",
+		DRM_ERROR("Reserved logo memory should be aligned as:0x%lx, current is:start[%pad] size[%pad]\n",
 			  PAGE_SIZE, &res.start, &size);
 	if (pg_size != PAGE_SIZE)
 		DRM_WARN("iommu page size[0x%x] isn't equal to OS page size[0x%lx]\n", pg_size, PAGE_SIZE);
@@ -311,7 +311,7 @@ static int init_loader_memory(struct drm_device *drm_dev)
 	if (!size)
 		return 0;
 	if (!IS_ALIGNED(res.start, PAGE_SIZE) || !IS_ALIGNED(size, PAGE_SIZE))
-		DRM_ERROR("Reserved drm cubic memory should be aligned as:0x%lx, cureent is:start[%pad] size[%pad]\n",
+		DRM_ERROR("Reserved drm cubic memory should be aligned as:0x%lx, current is:start[%pad] size[%pad]\n",
 			  PAGE_SIZE, &res.start, &size);
 
 	private->cubic_lut_kvaddr = phys_to_virt(start);
@@ -730,11 +730,41 @@ static void rockchip_drm_mode_fixup(struct drm_crtc_state *crtc_state,
 	const struct drm_crtc_helper_funcs *crtc_funcs;
 	struct drm_encoder *encoder = conn_state->best_encoder;
 	struct drm_crtc *crtc = crtc_state->crtc;
+	struct drm_bridge *bridge;
+	struct drm_display_info *di;
 	int ret;
 
 	ret = drm_atomic_set_mode_for_crtc(crtc_state, adj_mode);
 	if (ret)
 		return;
+
+	if (!conn_state->connector) {
+		conn_state->max_bpc = 8;
+	} else {
+		di = &conn_state->connector->display_info;
+		conn_state->max_bpc = di->bpc ? di->bpc : 8;
+	}
+	bridge = drm_bridge_chain_get_first_bridge(encoder);
+	if (bridge) {
+		/*
+		 * The drm_atomic_add_encoder_bridges() will check whether each
+		 * bridge in chain supports atomic mode or not. According to the
+		 * include/drm/drm_bridge.h, the following functions are mandatory
+		 * in atomic mode:
+		 * &drm_bridge_funcs.atomic_reset()
+		 * &drm_bridge_funcs.atomic_duplicate_state()
+		 * &drm_bridge_funcs.atomic_destroy_state()
+		 *
+		 * For some bridge drivers that have not supported atomic mode yet:
+		 * drivers/gpu/drm/bridge/sii902x.c
+		 * drivers/gpu/drm/bridge/rk630-tve.c
+		 */
+		ret = drm_atomic_add_encoder_bridges(crtc_state->state, encoder);
+		if (ret)
+			return;
+
+		drm_atomic_bridge_chain_check(bridge, crtc_state, conn_state);
+	}
 
 	encoder_funcs = encoder->helper_private;
 	if (encoder_funcs && encoder_funcs->atomic_check)
@@ -749,7 +779,8 @@ static void rockchip_drm_mode_fixup(struct drm_crtc_state *crtc_state,
 
 static int setup_initial_state(struct drm_device *drm_dev,
 			       struct drm_atomic_state *state,
-			       struct rockchip_drm_mode_set *set)
+			       struct rockchip_drm_mode_set *set,
+			       struct device_node *route)
 {
 	struct rockchip_drm_private *priv = drm_dev->dev_private;
 	struct drm_connector *connector = set->sub_dev->connector;
@@ -762,8 +793,11 @@ static int setup_initial_state(struct drm_device *drm_dev,
 	const struct drm_connector_helper_funcs *funcs;
 	int pipe = drm_crtc_index(crtc);
 	bool is_crtc_enabled = true;
+	u32 overscan_by_win_scale = 0;
 	int hdisplay, vdisplay;
 	int fb_width, fb_height;
+	int overscan_w, overscan_h;
+	int crtc_x, crtc_y, crtc_w, crtc_h;
 	int found = 0, match = 0;
 	int num_modes;
 	int ret = 0;
@@ -786,7 +820,7 @@ static int setup_initial_state(struct drm_device *drm_dev,
 		conn_state->best_encoder = rockchip_drm_connector_get_single_encoder(connector);
 
 	if (set->sub_dev->loader_protect) {
-		ret = set->sub_dev->loader_protect(conn_state->best_encoder, true);
+		ret = set->sub_dev->loader_protect(set->sub_dev, true);
 		if (ret) {
 			dev_err(drm_dev->dev,
 				"connector[%s] loader protect failed\n",
@@ -797,7 +831,7 @@ static int setup_initial_state(struct drm_device *drm_dev,
 
 	num_modes = rockchip_drm_fill_connector_modes(connector, 7680, 7680, set->force_output);
 	if (!num_modes) {
-		dev_err(drm_dev->dev, "connector[%s] can't found any modes\n",
+		dev_err(drm_dev->dev, "connector[%s] can't find any modes\n",
 			connector->name);
 		ret = -EINVAL;
 		goto error_conn;
@@ -832,7 +866,7 @@ static int setup_initial_state(struct drm_device *drm_dev,
 	if (!found) {
 		ret = -EINVAL;
 		connector->status = connector_status_disconnected;
-		dev_err(drm_dev->dev, "connector[%s] can't found any match mode\n",
+		dev_err(drm_dev->dev, "connector[%s] can't find any match mode\n",
 			connector->name);
 		DRM_INFO("%s support modes:\n\n", connector->name);
 		list_for_each_entry(mode, &connector->modes, head) {
@@ -920,6 +954,33 @@ static int setup_initial_state(struct drm_device *drm_dev,
 		primary_state->crtc_w = hdisplay;
 		primary_state->crtc_h = vdisplay;
 	}
+
+	/*
+	 * For some platforms, such as RK3576, use the win scale instead
+	 * of the post scale to configure overscan parameters, because the
+	 * sharp/post scale/split functions are mutually exclusice.
+	 */
+	of_property_read_u32(route, "overscan,win_scale", &overscan_by_win_scale);
+	if (overscan_by_win_scale) {
+		overscan_w = primary_state->crtc_w * (200 - set->left_margin * 2) / 200;
+		overscan_h = primary_state->crtc_h * (200 - set->top_margin * 2) / 200;
+
+		crtc_x = primary_state->crtc_x + overscan_w / 2;
+		crtc_y = primary_state->crtc_y + overscan_h / 2;
+		crtc_w = primary_state->crtc_w - overscan_w;
+		crtc_h = primary_state->crtc_h - overscan_h;
+
+		primary_state->crtc_x = crtc_x;
+		primary_state->crtc_y = crtc_y;
+		primary_state->crtc_w = crtc_w;
+		primary_state->crtc_h = crtc_h;
+
+		set->left_margin = 100;
+		set->right_margin = 100;
+		set->top_margin = 100;
+		set->bottom_margin = 100;
+	}
+
 	s = to_rockchip_crtc_state(crtc->state);
 	s->output_type = connector->connector_type;
 
@@ -930,7 +991,7 @@ error_crtc:
 		priv->crtc_funcs[pipe]->loader_protect(crtc, false, NULL);
 error_conn:
 	if (set->sub_dev->loader_protect)
-		set->sub_dev->loader_protect(conn_state->best_encoder, false);
+		set->sub_dev->loader_protect(set->sub_dev, false);
 
 	return ret;
 }
@@ -942,12 +1003,24 @@ static int update_state(struct drm_device *drm_dev,
 {
 	struct drm_crtc *crtc = set->crtc;
 	struct drm_connector *connector = set->sub_dev->connector;
+	struct drm_encoder *encoder;
 	struct drm_display_mode *mode = set->mode;
 	struct drm_plane_state *primary_state;
 	struct drm_crtc_state *crtc_state;
 	struct drm_connector_state *conn_state;
+	const struct drm_connector_helper_funcs *connector_helper_funcs;
 	int ret;
 	struct rockchip_crtc_state *s;
+
+	connector_helper_funcs = connector->helper_private;
+	if (!connector_helper_funcs)
+		return -ENXIO;
+	if (connector_helper_funcs->best_encoder)
+		encoder = connector_helper_funcs->best_encoder(connector);
+	else
+		encoder = rockchip_drm_connector_get_single_encoder(connector);
+	if (!encoder)
+		return -ENXIO;
 
 	crtc_state = drm_atomic_get_crtc_state(state, crtc);
 	if (IS_ERR(crtc_state))
@@ -955,6 +1028,10 @@ static int update_state(struct drm_device *drm_dev,
 	conn_state = drm_atomic_get_connector_state(state, connector);
 	if (IS_ERR(conn_state))
 		return PTR_ERR(conn_state);
+	ret = drm_atomic_add_encoder_bridges(state, encoder);
+	if (ret)
+		return ret;
+
 	s = to_rockchip_crtc_state(crtc_state);
 	s->left_margin = set->left_margin;
 	s->right_margin = set->right_margin;
@@ -973,19 +1050,8 @@ static int update_state(struct drm_device *drm_dev,
 		crtc_state->active = true;
 	} else {
 		const struct drm_encoder_helper_funcs *encoder_helper_funcs;
-		const struct drm_connector_helper_funcs *connector_helper_funcs;
-		struct drm_encoder *encoder;
 		struct drm_bridge *bridge;
 
-		connector_helper_funcs = connector->helper_private;
-		if (!connector_helper_funcs)
-			return -ENXIO;
-		if (connector_helper_funcs->best_encoder)
-			encoder = connector_helper_funcs->best_encoder(connector);
-		else
-			encoder = rockchip_drm_connector_get_single_encoder(connector);
-		if (!encoder)
-			return -ENXIO;
 		encoder_helper_funcs = encoder->helper_private;
 		if (!encoder_helper_funcs->atomic_check)
 			return -ENXIO;
@@ -1045,6 +1111,23 @@ void rockchip_drm_show_logo(struct drm_device *drm_dev)
 	unsigned int plane_mask = 0;
 	struct drm_crtc *crtc;
 	int ret, i;
+	static bool is_first_show_logo = true;
+
+	/*
+	 * The rockchip_drm_bind() and rockchip_drm_unbind() may be invoked
+	 * manually by the user multiple times.
+	 *
+	 * During the first call to rockchip_drm_bind(),
+	 * rockchip_drm_show_logo() attempts to parse the buffer passed in
+	 * by U-Boot and releases those resources immediately after their
+	 * initial use.
+	 *
+	 * When rockchip_drm_bind() is executed a second time, those resources
+	 * are no longer available, so we skip the logo display.
+	 */
+	if (!is_first_show_logo)
+		return;
+	is_first_show_logo = false;
 
 	root = of_get_child_by_name(np, "route");
 	if (!root) {
@@ -1054,6 +1137,11 @@ void rockchip_drm_show_logo(struct drm_device *drm_dev)
 
 	if (init_loader_memory(drm_dev)) {
 		dev_warn(drm_dev->dev, "failed to parse loader memory\n");
+		return;
+	}
+
+	if (!private->logo) {
+		dev_dbg(drm_dev->dev, "Logo display is disabled\n");
 		return;
 	}
 
@@ -1077,7 +1165,7 @@ void rockchip_drm_show_logo(struct drm_device *drm_dev)
 		if (!set)
 			continue;
 
-		if (setup_initial_state(drm_dev, state, set)) {
+		if (setup_initial_state(drm_dev, state, set, route)) {
 			drm_framebuffer_put(set->fb);
 			INIT_LIST_HEAD(&set->head);
 			list_add_tail(&set->head, &mode_unset_list);
@@ -1118,9 +1206,15 @@ void rockchip_drm_show_logo(struct drm_device *drm_dev)
 			 */
 			if (unset->hdisplay && unset->vdisplay) {
 				crtc_state = drm_atomic_get_crtc_state(state, crtc);
-				if (crtc_state)
+				if (crtc_state) {
 					rockchip_drm_copy_mode_from_mode_set(&crtc_state->adjusted_mode,
 									     unset);
+					ret = drm_atomic_set_mode_for_crtc(crtc_state, NULL);
+					if (ret)
+						dev_warn(drm_dev->dev,
+							 "CRTC:%s set null mode failed\n",
+							 crtc->name);
+				}
 				if (priv->crtc_funcs[pipe] &&
 				    priv->crtc_funcs[pipe]->loader_protect)
 					priv->crtc_funcs[pipe]->loader_protect(crtc, true,
@@ -1260,18 +1354,43 @@ static const char *const loader_protect_clocks[] __initconst = {
 	"dclk_vp1",
 	"dclk_vp2",
 	"dclk_vp3",
+	"clk_dsihost0",
+	"clk_dsihost1",
 };
 
-static struct clk **loader_clocks __initdata;
+static struct clk **loader_clocks;
 static int __init rockchip_clocks_loader_protect(void)
 {
+	struct device_node *np, *route_np, *route_child_np;
 	int nclocks = ARRAY_SIZE(loader_protect_clocks);
 	struct clk *clk;
 	int i;
+	int ret = 0;
+
+	/* Check for available route nodes and enable protect only when node is available. */
+	np = of_find_compatible_node(NULL, NULL, "rockchip,display-subsystem");
+	if (!np || !of_device_is_available(np)) {
+		ret = -ENODEV;
+		goto err_np;
+	}
+
+	route_np = of_get_child_by_name(np, "route");
+	if (!route_np) {
+		ret = -ENODEV;
+		goto err_route_np;
+	}
+
+	route_child_np = of_get_next_available_child(route_np, NULL);
+	if (!route_child_np) {
+		ret = -ENODEV;
+		goto err_route_child_np;
+	}
 
 	loader_clocks = kcalloc(nclocks, sizeof(void *), GFP_KERNEL);
-	if (!loader_clocks)
-		return -ENOMEM;
+	if (!loader_clocks) {
+		ret = -ENOMEM;
+		goto err_route_child_np;
+	}
 
 	for (i = 0; i < nclocks; i++) {
 		clk = __clk_lookup(loader_protect_clocks[i]);
@@ -1282,11 +1401,18 @@ static int __init rockchip_clocks_loader_protect(void)
 		}
 	}
 
-	return 0;
+err_route_child_np:
+	of_node_put(route_child_np);
+err_route_np:
+	of_node_put(route_np);
+err_np:
+	of_node_put(np);
+
+	return ret;
 }
 arch_initcall_sync(rockchip_clocks_loader_protect);
 
-static int __init rockchip_clocks_loader_unprotect(void)
+int rockchip_clocks_loader_unprotect(void)
 {
 	int i;
 
@@ -1300,8 +1426,8 @@ static int __init rockchip_clocks_loader_unprotect(void)
 			clk_disable_unprepare(clk);
 	}
 	kfree(loader_clocks);
+	loader_clocks = NULL;
 
 	return 0;
 }
-late_initcall_sync(rockchip_clocks_loader_unprotect);
 #endif

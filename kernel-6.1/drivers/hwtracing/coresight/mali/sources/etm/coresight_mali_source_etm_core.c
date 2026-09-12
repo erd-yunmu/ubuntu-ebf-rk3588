@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2022 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2022-2025 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -40,7 +40,6 @@ static char *type_name = "mali-source-etm";
 enum cs_etm_dynamic_regs {
 	CS_ETM_TRCCONFIGR,
 	CS_ETM_TRCTRACEIDR,
-	CS_ETM_TRCVDARCCTLR,
 	CS_ETM_TRCSTALLCTLR,
 	CS_ETM_TRCVIIECTLR,
 	CS_ETM_NR_DYN_REGS
@@ -80,12 +79,6 @@ struct kbase_debug_coresight_csf_op etm_enable_ops[] = {
 	WRITE_IMM_OP(CS_ETM_BASE_ADDR + TRCSYNCPR, 0x0000000C),
 	// Set global timestamp control register to select resource 0
 	WRITE_IMM_OP(CS_ETM_BASE_ADDR + TRCTSCTLR, 0x00000000),
-	// Set viewData include/exclude address range comparators to 0
-	WRITE_PTR_OP(CS_ETM_BASE_ADDR + TRCVDARCCTLR, &etm_state.regs[CS_ETM_TRCVDARCCTLR]),
-	// Set viewData main control to select resource 0
-	WRITE_IMM_OP(CS_ETM_BASE_ADDR + TRCVDCTLR, 0x00000001),
-	//Set viewData comparators to 0
-	WRITE_IMM_OP(CS_ETM_BASE_ADDR + TRCVDSACCTLR, 0x00000000),
 	// Set stop/start logic to started state, select resource 1
 	WRITE_IMM_OP(CS_ETM_BASE_ADDR + TRCVICTLR, TRCVICTLR_SSSTATUS | BIT(0)),
 	// Set viewInst start and stop control
@@ -121,8 +114,6 @@ static void set_default_regs(void)
 	etm_state.regs[CS_ETM_TRCCONFIGR] = 0x00000800;
 	// Set ID
 	etm_state.regs[CS_ETM_TRCTRACEIDR] = CS_MALI_TRACE_ID;
-	// Set data comparators to none
-	etm_state.regs[CS_ETM_TRCVDARCCTLR] = 0x00000000;
 	// Set instructions address filter to none
 	etm_state.regs[CS_ETM_TRCVIIECTLR] = 0x00000000;
 	// Set stall configuration to a basic setting
@@ -161,8 +152,10 @@ int coresight_mali_sources_init_drvdata(struct coresight_mali_source_drvdata *dr
 	drvdata->base.disable_seq.ops = etm_disable_ops;
 	drvdata->base.disable_seq.nr_ops = NELEMS(etm_disable_ops);
 
-	drvdata->base.config = kbase_debug_coresight_csf_config_create(
-		drvdata->base.kbase_client, &drvdata->base.enable_seq, &drvdata->base.disable_seq);
+	drvdata->base.config = kbase_debug_coresight_csf_config_create(drvdata->base.kbase_client,
+								       &drvdata->base.enable_seq,
+								       &drvdata->base.disable_seq,
+								       false);
 	if (!drvdata->base.config) {
 		dev_err(drvdata->base.dev, "Config create failed unexpectedly\n");
 		kbase_debug_coresight_csf_unregister(drvdata->base.kbase_client);
@@ -206,22 +199,21 @@ static int verify_store_reg(struct device *dev, const char *buf, size_t count, i
 	return count;
 }
 
-#define CS_ETM_REG_ATTR_RW(_a, _b)                                                                 \
-	static ssize_t _a##_show(struct device *dev, struct device_attribute *attr,                \
-				 char *const buf)                                                  \
-	{                                                                                          \
-		return sprintf(buf, "%#x\n", etm_state.regs[CS_ETM_##_b]);                         \
-	}                                                                                          \
-	static ssize_t _a##_store(struct device *dev, struct device_attribute *attr,               \
-				  const char *buf, size_t count)                                   \
-	{                                                                                          \
-		return verify_store_reg(dev, buf, count, CS_ETM_##_b);                             \
-	}                                                                                          \
+#define CS_ETM_REG_ATTR_RW(_a, _b)                                                   \
+	static ssize_t _a##_show(struct device *dev, struct device_attribute *attr,  \
+				 char *const buf)                                    \
+	{                                                                            \
+		return sprintf(buf, "%#x\n", etm_state.regs[CS_ETM_##_b]);           \
+	}                                                                            \
+	static ssize_t _a##_store(struct device *dev, struct device_attribute *attr, \
+				  const char *buf, size_t count)                     \
+	{                                                                            \
+		return verify_store_reg(dev, buf, count, CS_ETM_##_b);               \
+	}                                                                            \
 	static DEVICE_ATTR_RW(_a)
 
 CS_ETM_REG_ATTR_RW(trcconfigr, TRCCONFIGR);
 CS_ETM_REG_ATTR_RW(trctraceidr, TRCTRACEIDR);
-CS_ETM_REG_ATTR_RW(trcvdarcctlr, TRCVDARCCTLR);
 CS_ETM_REG_ATTR_RW(trcviiectlr, TRCVIIECTLR);
 CS_ETM_REG_ATTR_RW(trcstallctlr, TRCSTALLCTLR);
 
@@ -232,13 +224,8 @@ static ssize_t is_enabled_show(struct device *dev, struct device_attribute *attr
 static DEVICE_ATTR_RO(is_enabled);
 
 static struct attribute *coresight_etm_attrs[] = {
-	&dev_attr_is_enabled.attr,
-	&dev_attr_trcconfigr.attr,
-	&dev_attr_trctraceidr.attr,
-	&dev_attr_trcvdarcctlr.attr,
-	&dev_attr_trcviiectlr.attr,
-	&dev_attr_trcstallctlr.attr,
-	NULL,
+	&dev_attr_is_enabled.attr,  &dev_attr_trcconfigr.attr,	 &dev_attr_trctraceidr.attr,
+	&dev_attr_trcviiectlr.attr, &dev_attr_trcstallctlr.attr, NULL,
 };
 static struct attribute_group coresight_etm_group = { .attrs = coresight_etm_attrs,
 						      .name = "mgmt" };

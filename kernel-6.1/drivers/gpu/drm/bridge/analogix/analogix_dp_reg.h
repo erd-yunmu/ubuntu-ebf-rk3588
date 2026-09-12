@@ -146,6 +146,8 @@
 #define ANALOGIX_DP_CRC_CON			0x890
 #define ANALOGIX_DP_I2S_CTRL			0x9C8
 
+#define ANALOGIX_DP_LINK_POLICY			0x9D8
+
 /* ANALOGIX_DP_TX_SW_RESET */
 #define RESET_DP_TX				(0x1 << 0)
 
@@ -454,6 +456,15 @@
 /* ANALOGIX_DP_AUX_CH_STA */
 #define AUX_BUSY				(0x1 << 4)
 #define AUX_STATUS_MASK				(0xf << 0)
+#define AUX_STATUS_OK				(0x0 << 0)
+#define AUX_STATUS_NACK_ERROR			(0x1 << 0)
+#define AUX_STATUS_TIMEOUT_ERROR		(0x2 << 0)
+#define AUX_STATUS_UNKNOWN_ERROR		(0x3 << 0)
+#define AUX_STATUS_MUCH_DEFER_ERROR		(0x4 << 0)
+#define AUX_STATUS_TX_SHORT_ERROR		(0x5 << 0)
+#define AUX_STATUS_RX_SHORT_ERROR		(0x6 << 0)
+#define AUX_STATUS_NACK_WITHOUT_M_ERROR		(0x7 << 0)
+#define AUX_STATUS_I2C_NACK_ERROR		(0x8 << 0)
 
 /* ANALOGIX_DP_AUX_CH_DEFER_CTL */
 #define DEFER_CTRL_EN				(0x1 << 7)
@@ -514,5 +525,8 @@
 
 /* ANALOGIX_DP_I2S_CTRL */
 #define I2S_EN					(0x1 << 4)
+
+/* ANALOGIX_DP_LINK_POLICY */
+#define ALTERNATE_SR_ENABLE			(0x1 << 7)
 
 #endif /* _ANALOGIX_DP_REG_H */

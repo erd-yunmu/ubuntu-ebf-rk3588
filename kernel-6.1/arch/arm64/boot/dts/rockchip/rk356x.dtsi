@@ -149,6 +149,8 @@
 			/* MHz    MHz    uV */
 			   0      1992   75000
 		>;
+		rockchip,high-temp = <95000>;
+		rockchip,high-temp-max-volt = <1100000>;
 
 		/* RK3568 && RK3568M cpu OPPs */
 		opp-408000000 {
@@ -220,8 +222,10 @@
 
 	cpuinfo {
 		compatible = "rockchip,cpuinfo";
-		nvmem-cells = <&otp_id>, <&otp_cpu_version>, <&cpu_code>;
-		nvmem-cell-names = "id", "cpu-version", "cpu-code";
+		nvmem-cells = <&otp_id>, <&otp_cpu_version>, <&cpu_code>,
+			      <&specification_serial_number>, <&remark_spec_serial_number>;
+		nvmem-cell-names = "id", "cpu-version", "cpu-code",
+				   "specification_serial_number", "remark_spec_serial_number";
 	};
 
 	display_subsystem: display-subsystem {
@@ -281,6 +285,11 @@
 				connect = <&vp2_out_rgb>;
 			};
 		};
+	};
+
+	dmcdbg: dmcdbg {
+		compatible = "rockchip,rk3568-dmcdbg";
+		status = "disabled";
 	};
 
 	firmware {
@@ -1136,6 +1145,7 @@
 			91001    100000  3
 		>;
 		rockchip,pvtm-ch = <0 5>;
+		rockchip,init-freq = <900000>;
 
 		/* RK3568 && RK3568M npu OPPs */
 		opp-200000000 {
@@ -1460,15 +1470,6 @@
 		#iommu-cells = <0>;
 		power-domains = <&power RK3568_PD_RGA>;
 		//rockchip,disable-device-link-resume;
-		status = "disabled";
-	};
-
-	eink: eink@fdf00000 {
-		compatible = "rockchip,rk3568-eink-tcon";
-		reg = <0x0 0xfdf00000 0x0 0x74>;
-		interrupts = <GIC_SPI 178 IRQ_TYPE_LEVEL_HIGH>;
-		clocks = <&cru PCLK_EINK>, <&cru HCLK_EINK>;
-		clock-names = "pclk", "hclk";
 		status = "disabled";
 	};
 
@@ -2020,6 +2021,18 @@
 				};
 			};
 		};
+	};
+
+	hdcp2: hdcp2@fe080000 {
+		compatible = "rockchip,rk356x-hdcp";
+		reg = <0x0 0xfe080000 0x0 0x2000>;
+		interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru ACLK_HDCP>, <&cru PCLK_HDCP>,
+			 <&cru HCLK_HDCP>, <&cru ACLK_VOP_PRE>;
+		clock-names ="aclk_hdcp2", "pclk_hdcp2", "hdcp2_clk_hdmi", "aclk_vop_pre";
+		resets = <&cru SRST_P_HDCP>, <&cru SRST_H_HDCP>, <&cru SRST_A_HDCP>;
+		reset-names = "hdcp", "h_hdcp", "a_hdcp";
+		status = "disabled";
 	};
 
 	hdmi: hdmi@fe0a0000 {
@@ -2615,6 +2628,7 @@
 		rockchip,grf = <&grf>;
 		rockchip,playback-only;
 		#sound-dai-cells = <0>;
+		sound-name-prefix = "I2S0";
 		status = "disabled";
 	};
 
@@ -2639,6 +2653,7 @@
 			     &i2s1m0_sdo0   &i2s1m0_sdo1
 			     &i2s1m0_sdo2   &i2s1m0_sdo3>;
 		#sound-dai-cells = <0>;
+		sound-name-prefix = "I2S1";
 		status = "disabled";
 	};
 
@@ -2660,6 +2675,7 @@
 			     &i2s2m0_sdi
 			     &i2s2m0_sdo>;
 		#sound-dai-cells = <0>;
+		sound-name-prefix = "I2S2";
 		status = "disabled";
 	};
 
@@ -2684,6 +2700,7 @@
 			     &i2s3m0_lrck
 			     &i2s3m0_sdi
 			     &i2s3m0_sdo>;
+		sound-name-prefix = "I2S3";
 		status = "disabled";
 	};
 
@@ -2705,6 +2722,7 @@
 		resets = <&cru SRST_M_PDM>;
 		reset-names = "pdm-m";
 		#sound-dai-cells = <0>;
+		sound-name-prefix = "PDM";
 		status = "disabled";
 	};
 

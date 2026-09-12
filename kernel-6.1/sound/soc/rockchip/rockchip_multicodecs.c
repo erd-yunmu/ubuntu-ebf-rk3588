@@ -56,6 +56,11 @@ struct input_dev_poller {
 	struct delayed_work work;
 };
 
+struct mclk_rate_entry {
+	unsigned int base_rate;
+	unsigned int mclk_freq;
+};
+
 struct multicodecs_data {
 	struct snd_soc_card snd_card;
 	struct snd_soc_dai_link dai_link[3];
@@ -67,7 +72,11 @@ struct multicodecs_data {
 	struct extcon_dev *extcon;
 	struct delayed_work handler;
 	unsigned int mclk_fs;
+	unsigned int *mclk_fs_map;
+	struct mclk_rate_entry *mclk_rate_map;
+	int mclk_rate_map_count;
 	bool codec_hp_det;
+	bool headset_unplugging;
 	u32 num_keys;
 	u32 last_key;
 	u32 keyup_voltage;
@@ -82,9 +91,9 @@ struct multicodecs_data {
 	unsigned int rx_slot_mask;
 };
 
-static const unsigned int headset_extcon_cable[] = {
-	EXTCON_JACK_MICROPHONE,
-	EXTCON_JACK_HEADPHONE,
+static unsigned int headset_extcon_cable[] = {
+	EXTCON_NONE,
+	EXTCON_NONE,
 	EXTCON_NONE,
 };
 
@@ -150,6 +159,10 @@ static void mc_keys_poll(struct input_dev *input)
 	int i, value, ret;
 	u32 diff, closest = 0xffffffff;
 	int keycode = 0;
+
+	/* Suppress spurious key events during headset unplug */
+	if (mc_data->headset_unplugging)
+		return;
 
 	ret = iio_read_channel_processed(mc_data->adc, &value);
 	if (unlikely(ret < 0)) {
@@ -225,6 +238,9 @@ static void adc_jack_handler(struct work_struct *work)
 	struct snd_soc_jack *jack_headset = mc_data->jack_headset;
 	int adc, ret = 0;
 
+	/* Reset unplugging flag before processing jack state */
+	mc_data->headset_unplugging = false;
+
 	if (!gpiod_get_value(mc_data->hp_det_gpio)) {
 		snd_soc_jack_report(jack_headset, 0, SND_JACK_HEADSET);
 		extcon_set_state_sync(mc_data->extcon,
@@ -233,6 +249,12 @@ static void adc_jack_handler(struct work_struct *work)
 				EXTCON_JACK_MICROPHONE, false);
 		if (mc_data->poller)
 			mc_keys_poller_stop(mc_data->poller);
+
+		if (mc_data->last_key) {
+			input_report_key(mc_data->input, mc_data->last_key, 0);
+			input_sync(mc_data->input);
+			mc_data->last_key = 0;
+		}
 
 		return;
 	}
@@ -254,12 +276,13 @@ static void adc_jack_handler(struct work_struct *work)
 		snd_soc_jack_report(jack_headset,
 				    snd_soc_jack_get_type(jack_headset, adc),
 				    SND_JACK_HEADSET);
-		extcon_set_state_sync(mc_data->extcon, EXTCON_JACK_HEADPHONE, true);
 
 		if (snd_soc_jack_get_type(jack_headset, adc) == SND_JACK_HEADSET) {
 			extcon_set_state_sync(mc_data->extcon, EXTCON_JACK_MICROPHONE, true);
 			if (mc_data->poller)
 				mc_keys_poller_start(mc_data->poller);
+		} else {
+			extcon_set_state_sync(mc_data->extcon, EXTCON_JACK_HEADPHONE, true);
 		}
 	}
 };
@@ -267,6 +290,10 @@ static void adc_jack_handler(struct work_struct *work)
 static irqreturn_t headset_det_irq_thread(int irq, void *data)
 {
 	struct multicodecs_data *mc_data = (struct multicodecs_data *)data;
+
+	/* Immediately mark unplugging to suppress spurious key events */
+	if (!gpiod_get_value(mc_data->hp_det_gpio))
+		mc_data->headset_unplugging = true;
 
 	queue_delayed_work(system_power_efficient_wq, &mc_data->handler, msecs_to_jiffies(200));
 
@@ -364,6 +391,37 @@ static const struct snd_kcontrol_new mc_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Headset Mic"),
 };
 
+/*
+ * Look up MCLK from DTS rate-map table.
+ * Each entry: <base_rate mclk_freq>, match if rate % base_rate == 0.
+ * Pick the highest base_rate match (most specific) to avoid ambiguity:
+ *   e.g. 48000 matches both 8000 and 12000, should pick 12000.
+ * Returns 0 if no match found.
+ */
+static unsigned int get_mclk_by_rate(unsigned int rate,
+				     struct mclk_rate_entry *entries,
+				     int count)
+{
+	unsigned int best_mclk = 0;
+	unsigned int best_base = 0;
+	int i;
+
+	if (!rate || !entries || count <= 0)
+		return 0;
+
+	for (i = 0; i < count; i++) {
+		if (!entries[i].base_rate || !entries[i].mclk_freq)
+			continue;
+		if (rate % entries[i].base_rate == 0 &&
+		    entries[i].base_rate > best_base) {
+			best_base = entries[i].base_rate;
+			best_mclk = entries[i].mclk_freq;
+		}
+	}
+
+	return best_mclk;
+}
+
 static int rk_multicodecs_hw_params(struct snd_pcm_substream *substream,
 				    struct snd_pcm_hw_params *params)
 {
@@ -372,15 +430,24 @@ static int rk_multicodecs_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *codec_dai;
 	struct multicodecs_data *mc_data = snd_soc_card_get_drvdata(rtd->card);
 	unsigned int mclk;
+	unsigned int codec_mclk;
 	int ret, i;
 
-	mclk = params_rate(params) * mc_data->mclk_fs;
+	mclk = get_mclk_by_rate(params_rate(params),
+				mc_data->mclk_rate_map,
+				mc_data->mclk_rate_map_count);
+	if (!mclk)
+		mclk = params_rate(params) * mc_data->mclk_fs;
 
 	for_each_rtd_codec_dais(rtd, i, codec_dai) {
-		ret = snd_soc_dai_set_sysclk(codec_dai, substream->stream, mclk,
+		if (mc_data->mclk_fs_map[i] > 0)
+			codec_mclk = params_rate(params) * mc_data->mclk_fs_map[i];
+		else
+			codec_mclk = mclk;
+		ret = snd_soc_dai_set_sysclk(codec_dai, substream->stream, codec_mclk,
 					     SND_SOC_CLOCK_IN);
 		if (ret && ret != -ENOTSUPP) {
-			pr_err("Set codec_dai sysclk failed: %d\n", ret);
+			pr_err("Set codec_dai sysclk(%uHZ) failed: %d\n", codec_mclk, ret);
 			goto out;
 		}
 	}
@@ -388,7 +455,7 @@ static int rk_multicodecs_hw_params(struct snd_pcm_substream *substream,
 	ret = snd_soc_dai_set_sysclk(cpu_dai, substream->stream, mclk,
 				     SND_SOC_CLOCK_OUT);
 	if (ret && ret != -ENOTSUPP) {
-		pr_err("Set cpu_dai sysclk failed: %d\n", ret);
+		pr_err("Set cpu_dai sysclk(%uHZ) failed: %d\n", mclk, ret);
 		goto out;
 	}
 
@@ -734,6 +801,16 @@ static int rk_multicodecs_probe_keys(struct platform_device *pdev,
 	return ret;
 }
 
+static int rk_multicodecs_resume_post(struct snd_soc_card *card)
+{
+	struct multicodecs_data *mc_data = dev_get_drvdata(card->dev);
+
+	if (gpiod_to_irq(mc_data->hp_det_gpio) >= 0)
+		queue_delayed_work(system_power_efficient_wq, &mc_data->handler,
+				   msecs_to_jiffies(200));
+	return 0;
+}
+
 static int rk_multicodecs_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card;
@@ -741,10 +818,12 @@ static int rk_multicodecs_probe(struct platform_device *pdev)
 	struct snd_soc_dai_link_component *codecs;
 	struct multicodecs_data *mc_data;
 	struct of_phandle_args args;
+	unsigned int *map;
 	u32 val;
 	int count, irq;
 	int ret = 0, i = 0, idx = 0;
 	const char *prefix = "rockchip,";
+	int cable = 0;
 
 	ret = wait_locked_card(np, &pdev->dev);
 	if (ret < 0) {
@@ -858,9 +937,58 @@ static int rk_multicodecs_probe(struct platform_device *pdev)
 		card->num_links = 3;
 	}
 
+	map = devm_kcalloc(&pdev->dev, count, sizeof(*map), GFP_KERNEL);
+	if (!map)
+		return -ENOMEM;
+	ret = of_property_read_u32_array(np, "rockchip,mclk-fs-mapping", map, count);
+	if (ret)
+		memset(map, 0x0, sizeof(*map) * count);
+	mc_data->mclk_fs_map = map;
+
 	mc_data->mclk_fs = DEFAULT_MCLK_FS;
 	if (!of_property_read_u32(np, "rockchip,mclk-fs", &val))
 		mc_data->mclk_fs = val;
+
+	count = of_property_count_u32_elems(np, "rockchip,mclk-rate-map");
+	if (count > 0 && count % 2 != 0) {
+		dev_warn(&pdev->dev, "mclk-rate-map has odd number of elements, ignoring\n");
+		count = 0;
+	}
+	if (count > 0) {
+		mc_data->mclk_rate_map_count = count / 2;
+		mc_data->mclk_rate_map = devm_kcalloc(&pdev->dev,
+						      mc_data->mclk_rate_map_count,
+						      sizeof(*mc_data->mclk_rate_map),
+						      GFP_KERNEL);
+		if (!mc_data->mclk_rate_map)
+			return -ENOMEM;
+		for (i = 0; i < mc_data->mclk_rate_map_count; i++) {
+			ret = of_property_read_u32_index(np, "rockchip,mclk-rate-map",
+							 i * 2,
+							 &mc_data->mclk_rate_map[i].base_rate);
+			if (ret) {
+				dev_warn(&pdev->dev, "mclk-rate-map: failed to read base_rate at index %d\n", i);
+				mc_data->mclk_rate_map_count = i;
+				break;
+			}
+			ret = of_property_read_u32_index(np, "rockchip,mclk-rate-map",
+							 i * 2 + 1,
+							 &mc_data->mclk_rate_map[i].mclk_freq);
+			if (ret) {
+				dev_warn(&pdev->dev, "mclk-rate-map: failed to read mclk_freq at index %d\n", i);
+				mc_data->mclk_rate_map_count = i;
+				break;
+			}
+		}
+
+		dev_dbg(&pdev->dev, "mclk-rate-map: %d entries\n",
+			mc_data->mclk_rate_map_count);
+
+		for (i = 0; i < mc_data->mclk_rate_map_count; i++)
+			dev_dbg(&pdev->dev, "base=%u -> mclk=%u\n",
+				mc_data->mclk_rate_map[i].base_rate,
+				mc_data->mclk_rate_map[i].mclk_freq);
+	}
 	if (!of_property_read_u32(np, "rockchip,pre-power-on-delay-ms", &val))
 		mc_data->pre_poweron_delayms = val;
 	if (!of_property_read_u32(np, "rockchip,post-power-down-delay-ms", &val))
@@ -883,6 +1011,7 @@ static int rk_multicodecs_probe(struct platform_device *pdev)
 		ret = rk_multicodecs_probe_keys(pdev, mc_data);
 		if (ret)
 			dev_warn(&pdev->dev, "Has no input keys\n");
+		headset_extcon_cable[cable++] = EXTCON_JACK_MICROPHONE;
 	}
 
 	INIT_DEFERRABLE_WORK(&mc_data->handler, adc_jack_handler);
@@ -902,6 +1031,10 @@ static int rk_multicodecs_probe(struct platform_device *pdev)
 	mc_data->hp_det_gpio = devm_gpiod_get_optional(&pdev->dev, "hp-det", GPIOD_IN);
 	if (IS_ERR(mc_data->hp_det_gpio))
 		return PTR_ERR(mc_data->hp_det_gpio);
+	if (gpiod_to_irq(mc_data->hp_det_gpio) >= 0) {
+		headset_extcon_cable[cable++] = EXTCON_JACK_HEADPHONE;
+		card->resume_post = &rk_multicodecs_resume_post;
+	}
 
 	mc_data->extcon = devm_extcon_dev_allocate(&pdev->dev, headset_extcon_cable);
 	if (IS_ERR(mc_data->extcon)) {
@@ -968,7 +1101,21 @@ static struct platform_driver rockchip_multicodecs_driver = {
 	},
 };
 
+#ifdef CONFIG_INITCALL_ASYNC
+static int __init rockchip_multicodecs_driver_init(void)
+{
+	return platform_driver_register(&rockchip_multicodecs_driver);
+}
+late_initcall(rockchip_multicodecs_driver_init);
+
+static void __exit rockchip_multicodecs_driver_exit(void)
+{
+	platform_driver_unregister(&rockchip_multicodecs_driver);
+}
+module_exit(rockchip_multicodecs_driver_exit);
+#else
 module_platform_driver(rockchip_multicodecs_driver);
+#endif
 
 MODULE_AUTHOR("Sugar Zhang <sugar.zhang@rock-chips.com>");
 MODULE_DESCRIPTION("Rockchip General Multicodecs ASoC driver");

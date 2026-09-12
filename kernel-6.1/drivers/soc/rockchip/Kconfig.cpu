@@ -43,6 +43,9 @@ config CPU_RV1126
 	bool "RV1109/26"
 	depends on ARM
 
+config CPU_RV1126B
+	bool "RV1126B"
+
 config CPU_PX30
 	bool "PX30"
 
@@ -66,6 +69,9 @@ config CPU_RK3506
 
 config CPU_RK3528
 	bool "RK3528"
+
+config CPU_RK3538
+	bool "RK3538"
 
 config CPU_RK3562
 	bool "RK3562"

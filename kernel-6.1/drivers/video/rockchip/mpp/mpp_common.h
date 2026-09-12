@@ -507,6 +507,9 @@ struct mpp_taskqueue {
 	u32 core_id_max;
 	u32 core_count;
 	unsigned long dev_active_flags;
+
+	/* for devices which share iommu, record last attach device */
+	struct mpp_iommu_info *last_iommu_info;
 };
 
 struct mpp_reset_group {
@@ -547,6 +550,9 @@ struct mpp_service {
 	/* global timing record flag */
 	u32 timing_en;
 	u32 load_interval;
+
+	/* bit mask for iommu shared */
+	u32 iommu_shared_mask;
 };
 
 /*

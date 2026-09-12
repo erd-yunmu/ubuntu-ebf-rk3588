@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Copyright (c) 2023 Rockchip Electronics Co., Ltd. */
 
-#include <linux/delay.h>
-#include <linux/interrupt.h>
-#include <linux/iommu.h>
-#include <linux/pm_runtime.h>
-#include <linux/videodev2.h>
-#include <media/media-entity.h>
-#include <media/v4l2-event.h>
-
+#include "vpss.h"
+#include "common.h"
+#include "stream.h"
 #include "dev.h"
+#include "vpss_offline.h"
+#include "hw.h"
+#include "procfs.h"
 #include "regs.h"
 
 static const struct vpsssd_fmt rkvpss_formats[] = {
@@ -18,6 +16,26 @@ static const struct vpsssd_fmt rkvpss_formats[] = {
 		.fourcc = V4L2_PIX_FMT_NV16,
 	},
 };
+
+static inline const char *s_dev_name(int i)
+{
+	switch (i) {
+	case 0:
+		return S0_VDEV_NAME;
+	case 1:
+		return S1_VDEV_NAME;
+	case 2:
+		return S2_VDEV_NAME;
+	case 3:
+		return S3_VDEV_NAME;
+	case 4:
+		return S4_VDEV_NAME;
+	case 5:
+		return S5_VDEV_NAME;
+	default:
+		return S0_VDEV_NAME;
+	}
+}
 
 static int rkvpss_subdev_link_setup(struct media_entity *entity,
 				    const struct media_pad *local,
@@ -29,6 +47,7 @@ static int rkvpss_subdev_link_setup(struct media_entity *entity,
 	struct rkvpss_device *dev;
 	struct rkvpss_stream_vdev *vdev;
 	struct rkvpss_stream *stream = NULL;
+	int i;
 
 	if (local->index != RKVPSS_PAD_SINK &&
 	    local->index != RKVPSS_PAD_SOURCE)
@@ -46,22 +65,23 @@ static int rkvpss_subdev_link_setup(struct media_entity *entity,
 	if (vpss_sdev->state & VPSS_START)
 		return -EBUSY;
 
-	if (!strcmp(remote->entity->name, S0_VDEV_NAME)) {
-		stream = &vdev->stream[RKVPSS_OUTPUT_CH0];
-	} else if (!strcmp(remote->entity->name, S1_VDEV_NAME)) {
-		stream = &vdev->stream[RKVPSS_OUTPUT_CH1];
-	} else if (!strcmp(remote->entity->name, S2_VDEV_NAME)) {
-		stream = &vdev->stream[RKVPSS_OUTPUT_CH2];
-	} else if (!strcmp(remote->entity->name, S3_VDEV_NAME)) {
-		stream = &vdev->stream[RKVPSS_OUTPUT_CH3];
-	} else if (strstr(remote->entity->name, "rkisp")) {
+	for (i = 0; i < vpss_outchn_max(dev->hw_dev->vpss_ver); i++) {
+		if (!strcmp(remote->entity->name, s_dev_name(i))) {
+			stream = &vdev->stream[i];
+			break;
+		}
+	}
+
+	if (stream)
+		stream->linked = flags & MEDIA_LNK_FL_ENABLED;
+
+	if (strstr(remote->entity->name, "rkisp")) {
 		if (flags & MEDIA_LNK_FL_ENABLED)
 			dev->inp = INP_ISP;
 		else
 			dev->inp = INP_INVAL;
 	}
-	if (stream)
-		stream->linked = flags & MEDIA_LNK_FL_ENABLED;
+
 	v4l2_dbg(1, rkvpss_debug, &dev->v4l2_dev, "input:%d\n", dev->inp);
 	return 0;
 }
@@ -164,11 +184,13 @@ static int rkvpss_sd_s_stream(struct v4l2_subdev *sd, int on)
 	rkvpss_cmsc_config(dev, true);
 
 	if (dev->unite_mode)
-		w = w / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
+		w = w / 2 + dev->unite_extend_pixel;
 
 	rkvpss_unite_write(dev, RKVPSS_VPSS_ONLINE2_SIZE, h << 16 | w);
 
 	val = RKVPSS_CFG_FORCE_UPD | RKVPSS_CFG_GEN_UPD | RKVPSS_MIR_GEN_UPD;
+	if (dev->hw_dev->vpss_ver == VPSS_V20)
+		val |= RKVPSS_MIR_FORCE_UPD;
 	if (!dev->hw_dev->is_ofl_cmsc)
 		val |= RKVPSS_MIR_FORCE_UPD;
 
@@ -214,6 +236,8 @@ static int rkvpss_sd_s_power(struct v4l2_subdev *sd, int on)
 				return ret;
 			}
 		}
+		v4l2_subdev_call(dev->remote_sd, core, ioctl, RKISP_VPSS_GET_UNITE_EXTEND_PIXEL,
+				 &dev->unite_extend_pixel);
 		v4l2_subdev_call(dev->remote_sd, core, ioctl, RKISP_VPSS_GET_UNITE_MODE,
 				 &dev->unite_mode);
 		ret = pm_runtime_get_sync(dev->dev);
@@ -249,27 +273,39 @@ static int rkvpss_sof(struct rkvpss_subdev *sdev, struct rkisp_vpss_sof *info)
 	dev->is_idle = false;
 
 	v4l2_dbg(3, rkvpss_debug, &dev->v4l2_dev,
-		 "%s unite_mode:%u, unite_indev:%u seq:%d\n", __func__,
-		 dev->unite_mode, dev->unite_index, info->seq);
+		 "%s unite(mode:%u indev:%u) seq:%d drop:%d\n", __func__,
+		 dev->unite_mode, dev->unite_index, info->seq, info->skip_frame);
 
 	rkvpss_cmsc_config(dev, !info->irq);
-	for (i = 0; i < RKVPSS_OUTPUT_MAX; i++) {
+	for (i = 0; i < vpss_outchn_max(dev->hw_dev->vpss_ver); i++) {
 		stream = &dev->stream_vdev.stream[i];
 		if (!stream->streaming)
 			continue;
+		stream->skip_frame = info->skip_frame;
 		if (stream->ops->frame_start)
 			stream->ops->frame_start(stream, info->irq);
 	}
 
 	if (!info->irq && (!hw->is_single || dev->unite_mode)) {
+		// 1126b unite or multi sensor todo
 		hw->cur_dev_id = dev->dev_id;
 		rkvpss_update_regs(dev, RKVPSS_VPSS_CTRL, RKVPSS_VPSS_ONLINE2_SIZE);
 		rkvpss_update_regs(dev, RKVPSS_VPSS_IRQ_CFG, RKVPSS_VPSS_IMSC);
 		rkvpss_update_regs(dev, RKVPSS_VPSS_Y2R_COE00, RKVPSS_VPSS_Y2R_OFF2);
 		rkvpss_update_regs(dev, RKVPSS_CMSC_INTSCT_CORR, RKVPSS_CMSC_WIN7_L3_SLP);
 		rkvpss_update_regs(dev, RKVPSS_CROP1_0_H_OFFS, RKVPSS_CROP1_3_V_SIZE);
-		rkvpss_update_regs(dev, RKVPSS_ZME_Y_HOR_COE0_10, RKVPSS_ZME_UV_VER_COE16_76);
-		rkvpss_update_regs(dev, RKVPSS_ZME_H_SIZE, RKVPSS_ZME_UV_YSCL_FACTOR);
+		if (is_vpss_v10(hw)) {
+			rkvpss_update_regs(dev, RKVPSS_ZME_Y_HOR_COE0_10, RKVPSS_ZME_UV_VER_COE16_76);
+			rkvpss_update_regs(dev, RKVPSS_ZME_H_SIZE, RKVPSS_ZME_UV_YSCL_FACTOR);
+		}
+		if (is_vpss_v20(hw)) {
+			rkvpss_update_regs(dev, RKVPSS_VPSS_CLK_GATE, RKVPSS_VPSS_CLK_GATE);
+			rkvpss_update_regs(dev, RKVPSS2X_CROP1_4_OFFS, RKVPSS2X_CROP1_5_SIZE);
+			rkvpss_update_regs(dev, RKVPSS2X_SCALE0_SRC_SIZE, RKVPSS2X_SCALE0_IN_CROP_OFFSET);
+			rkvpss_update_regs(dev, RKVPSS2X_SCALE4_SRC_SIZE, RKVPSS2X_SCALE4_IN_CROP_OFFSET);
+			rkvpss_update_regs(dev, RKVPSS2X_SCALE5_SRC_SIZE, RKVPSS2X_SCALE5_IN_CROP_OFFSET);
+			rkvpss_update_regs(dev, RKVPSS2X_MI_CHN4_WR_CTRL, RKVPSS2X_MI_CHN5_WR_LINE_CNT);
+		}
 		rkvpss_update_regs(dev, RKVPSS_SCALE1_SRC_SIZE, RKVPSS_SCALE1_IN_CROP_OFFSET);
 		rkvpss_update_regs(dev, RKVPSS_SCALE2_SRC_SIZE, RKVPSS_SCALE2_IN_CROP_OFFSET);
 		rkvpss_update_regs(dev, RKVPSS_SCALE3_SRC_SIZE, RKVPSS_SCALE3_IN_CROP_OFFSET);
@@ -280,14 +316,20 @@ static int rkvpss_sof(struct rkvpss_subdev *sdev, struct rkisp_vpss_sof *info)
 		rkvpss_update_regs(dev, RKVPSS_SCALE3_CTRL, RKVPSS_SCALE3_UPDATE);
 		rkvpss_update_regs(dev, RKVPSS_SCALE2_CTRL, RKVPSS_SCALE2_UPDATE);
 		rkvpss_update_regs(dev, RKVPSS_SCALE1_CTRL, RKVPSS_SCALE1_UPDATE);
-		rkvpss_update_regs(dev, RKVPSS_ZME_CTRL, RKVPSS_ZME_UPDATE);
+		if (is_vpss_v20(hw)) {
+			rkvpss_update_regs(dev, RKVPSS2X_SCALE0_CTRL, RKVPSS2X_SCALE0_UPDATE);
+			rkvpss_update_regs(dev, RKVPSS2X_SCALE4_CTRL, RKVPSS2X_SCALE4_UPDATE);
+			rkvpss_update_regs(dev, RKVPSS2X_SCALE5_CTRL, RKVPSS2X_SCALE5_UPDATE);
+		}
+		if (is_vpss_v10(hw))
+			rkvpss_update_regs(dev, RKVPSS_ZME_CTRL, RKVPSS_ZME_UPDATE);
 		rkvpss_update_regs(dev, RKVPSS_CROP1_CTRL, RKVPSS_CROP1_UPDATE);
 		rkvpss_update_regs(dev, RKVPSS_CMSC_CTRL, RKVPSS_CMSC_UPDATE);
 		rkvpss_update_regs(dev, RKVPSS_VPSS_UPDATE, RKVPSS_VPSS_UPDATE);
 
 		/* force update mi write */
 		vpss_online = rkvpss_hw_read(hw, RKVPSS_VPSS_ONLINE);
-		for (i = 0; i < RKVPSS_OUTPUT_MAX; i++) {
+		for (i = 0; i < vpss_outchn_max(dev->hw_dev->vpss_ver); i++) {
 			if (((vpss_online >> (2 * i)) & 0x3) == 0x2)
 				val |= BIT(i);
 		}
@@ -296,7 +338,7 @@ static int rkvpss_sof(struct rkvpss_subdev *sdev, struct rkisp_vpss_sof *info)
 	}
 
 	dev->irq_ends_mask = VPSS_FRAME_END;
-	for (i = 0; i < RKVPSS_OUTPUT_MAX; i++) {
+	for (i = 0; i < vpss_outchn_max(dev->hw_dev->vpss_ver); i++) {
 		if (hw->is_ofl_ch[i])
 			continue;
 		if (rkvpss_hw_read(dev->hw_dev, RKVPSS_MI_CHN0_WR_CTRL_SHD + i * 0x100) & 0x1)
@@ -328,6 +370,9 @@ static long rkvpss_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		break;
 	case RKISP_VPSS_RESET_NOTIFY_VPSS:
 		rkvpss_reset_handle(vpss_dev);
+		break;
+	case RKISP_VPSS_CMD_FRAME_INFO:
+		memcpy(&vpss_dev->frame_info, arg, sizeof(struct rkisp_vpss_frame_info));
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -423,16 +468,29 @@ static void rkvpss_end_notify_isp(struct rkvpss_device *dev)
 
 void rkvpss_check_idle(struct rkvpss_device *dev, u32 irq)
 {
+	unsigned long lock_flags = 0;
+
+	spin_lock_irqsave(&dev->idle_lock, lock_flags);
 	dev->irq_ends |= (irq & dev->irq_ends_mask);
 
 	v4l2_dbg(3, rkvpss_debug, &dev->v4l2_dev,
 		 "%s irq:0x%x ends:0x%x mask:0x%x\n",
 		 __func__, irq, dev->irq_ends, dev->irq_ends_mask);
 
-	if ((dev->irq_ends & dev->irq_ends_mask) != dev->irq_ends_mask)
+	if ((dev->irq_ends & dev->irq_ends_mask) != dev->irq_ends_mask) {
+		spin_unlock_irqrestore(&dev->idle_lock, lock_flags);
 		return;
+	}
+
+	/* offline MI frame end */
+	if (!dev->irq_ends_mask) {
+		spin_unlock_irqrestore(&dev->idle_lock, lock_flags);
+		return;
+	}
 
 	dev->irq_ends = 0;
+	spin_unlock_irqrestore(&dev->idle_lock, lock_flags);
+
 	rkvpss_end_notify_isp(dev);
 	dev->is_idle = true;
 
@@ -448,6 +506,7 @@ int rkvpss_register_subdev(struct rkvpss_device *dev,
 	int ret;
 
 	spin_lock_init(&dev->cmsc_lock);
+	spin_lock_init(&dev->idle_lock);
 	memset(vpss_sdev, 0, sizeof(*vpss_sdev));
 	vpss_sdev->dev = dev;
 	sd = &vpss_sdev->sd;

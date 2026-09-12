@@ -124,6 +124,10 @@ enum rk801_reg {
 #define RK801_SLEEP_POL_MSK                      BIT(1)
 #define RK801_SLEEP_ACT_H                        BIT(1)
 #define RK801_SLEEP_ACT_L                        0
+#define RK801_RST_MSK                            (0x3 << 4)
+#define RK801_RST_RESTART_PMU                    (0x0 << 4)
+#define RK801_RST_RESTART_REG                    (0x1 << 4)
+#define RK801_RST_RESTART_REG_RESETB             (0x2 << 4)
 
 /* RK801_INT_CONFIG_REG */
 #define RK801_INT_POL_MSK                        BIT(1)
@@ -672,6 +676,11 @@ enum rk805_reg {
 #define RK805_OUT_REG			0x52
 #define RK805_ON_SOURCE_REG		0xAE
 #define RK805_OFF_SOURCE_REG		0xAF
+#define RK805B_VSELTABLE_REG		0x71
+
+#define RK805B_VSELTABLE_4OR8		0x80
+#define RK805B_CHIP_VER_MSK		0x0F
+#define RK805B_CHIP_VER_NUM		0x04
 
 #define RK805_NUM_REGULATORS		7
 
@@ -730,6 +739,9 @@ enum rk805_reg {
 #define RK805_RAMP_RATE_6MV_PER_US	(1 << RK805_RAMP_RATE_OFFSET)
 #define RK805_RAMP_RATE_12_5MV_PER_US	(2 << RK805_RAMP_RATE_OFFSET)
 #define RK805_RAMP_RATE_25MV_PER_US	(3 << RK805_RAMP_RATE_OFFSET)
+
+#define RK805_SLP_POL_MASK		(1 << 1)
+#define RK805_SLP_POL_SHIFT		1
 
 /* RK808 IRQ Definitions */
 #define RK808_IRQ_VOUT_LO	0
@@ -935,6 +947,7 @@ enum rk805_reg {
 #define SHUTDOWN_FUN			(0x2 << 2)
 #define SLEEP_FUN			(0x1 << 2)
 #define RK8XX_ID_MSK			0xfff0
+#define RK801_ID_MSK			0xffff
 #define PWM_MODE_MSK			BIT(7)
 #define FPWM_MODE			BIT(7)
 #define AUTO_PWM_MODE			0
@@ -1346,15 +1359,30 @@ struct rk808_pin_info {
 	struct pinctrl_state *sleep;
 };
 
+struct rk808_pwrctrl {
+	struct gpio_desc *gpio;
+	bool req_pwrctrl_dvs;
+	bool act_low;
+};
+
 struct rk808 {
 	struct i2c_client		*i2c;
 	struct regmap_irq_chip_data	*irq_data;
 	struct regmap_irq_chip_data	*battery_irq_data;
 	struct regmap			*regmap;
 	long				variant;
+	int				vsel_table;
 	const struct regmap_config	*regmap_cfg;
 	const struct regmap_irq_chip	*regmap_irq_chip;
 	void				(*pm_pwroff_prep_fn)(void);
 	struct rk808_pin_info *pins;
+	struct rk808_pwrctrl pwrctrl;
 };
+
+#if IS_REACHABLE(CONFIG_MFD_RK808)
+int rk8xx_suspend_sync(void);
+#else
+static inline int rk8xx_suspend_sync(void) { return -ENODEV; }
+#endif
+
 #endif /* __LINUX_REGULATOR_RK808_H */

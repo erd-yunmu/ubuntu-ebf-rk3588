@@ -2,7 +2,7 @@
 /*
  * gpiolib support for different serdes chip
  *
- * Copyright (c) 2023-2028 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2023-2028 Rockchip Electronics Co., Ltd.
  *
  * Author: luowei <lw@rock-chips.com>
  *
@@ -42,10 +42,9 @@ static void serdes_gpio_set(struct gpio_chip *chip, unsigned int offset, int val
 {
 	struct serdes_gpio *serdes_gpio = gpiochip_get_data(chip);
 	struct serdes *serdes = serdes_gpio->parent->parent;
-	int ret = 0;
 
 	if (serdes->chip_data->gpio_ops->set_level)
-		ret = serdes->chip_data->gpio_ops->set_level(serdes, offset, value);
+		serdes->chip_data->gpio_ops->set_level(serdes, offset, value);
 
 	SERDES_DBG_MFD("%s: %s %s gpio=%d,val=%d\n", __func__, dev_name(serdes->dev),
 		       serdes->chip_data->name, offset, value);
@@ -105,28 +104,39 @@ static void serdes_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 	struct serdes *serdes = serdes_gpio->parent->parent;
 	int i = 0;
 	int ret = 0;
+	int gpio;
+	const char *level;
+	struct gpio_desc *desc;
 
 	for (i = 0; i < chip->ngpio; i++) {
-		int gpio = i + chip->base;
-		const char *level;
 
-		seq_printf(s, "gpio-%02d ", gpio);
+		if (!gpiochip_is_requested(chip, i))
+			continue;
+
+		gpio = i + chip->base;
+		desc = gpiochip_get_desc(chip, i);
+		if (IS_ERR(desc))
+			continue;
 
 		if (serdes->chip_data->gpio_ops->get_level)
 			ret = serdes->chip_data->gpio_ops->get_level(serdes, i);
+		else
+			ret = 0;
+
 		switch (ret) {
 		case SERDES_GPIO_LEVEL_HIGH:
-			level = "level-high";
+			level = "hi";
 			break;
 		case SERDES_GPIO_LEVEL_LOW:
-			level = "level-low";
+			level = "lo";
 			break;
 		default:
 			level = "invalid level";
 			break;
 		}
 
-		seq_printf(s, " %s\n", level);
+		seq_printf(s, " gpio-%-3d (%-20.20s|%-20.20s) %s\n",
+			   gpio, desc->name ?: "", desc->label, level);
 	}
 }
 #else
@@ -183,9 +193,14 @@ static int serdes_gpio_probe(struct platform_device *pdev)
 		serdes_gpio->gpio_chip.ngpio = 8;
 	}
 #ifdef CONFIG_OF_GPIO
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
 	serdes_gpio->gpio_chip.of_node = serdes_gpio->dev->of_node;
+#else
+	serdes_gpio->gpio_chip.fwnode = dev_fwnode(serdes_gpio->dev);
 #endif
-	serdes_gpio->gpio_chip.label = kasprintf(GFP_KERNEL, "%s-gpio", chip_data->name);
+#endif
+	serdes_gpio->gpio_chip.label = devm_kasprintf(serdes_gpio->dev, GFP_KERNEL,
+						      "%s-gpio", chip_data->name);
 
 	/* Add gpiochip */
 	ret = devm_gpiochip_add_data(&pdev->dev, &serdes_gpio->gpio_chip,
@@ -209,6 +224,7 @@ static const struct of_device_id serdes_gpio_of_match[] = {
 	{ .compatible = "rohm,bu18tl82-gpio", },
 	{ .compatible = "rohm,bu18rl82-gpio", },
 	{ .compatible = "maxim,max96745-gpio", },
+	{ .compatible = "maxim,max96749-gpio", },
 	{ .compatible = "maxim,max96752-gpio", },
 	{ .compatible = "maxim,max96755-gpio", },
 	{ .compatible = "maxim,max96772-gpio", },

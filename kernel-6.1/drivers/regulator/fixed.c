@@ -157,7 +157,13 @@ of_get_fixed_voltage_config(struct device *dev,
 	return config;
 }
 
+static int fixed_voltage_get_current_limit(struct regulator_dev *rdev)
+{
+	return rdev->constraints->max_uA;
+}
+
 static const struct regulator_ops fixed_voltage_ops = {
+	.get_current_limit = fixed_voltage_get_current_limit,
 };
 
 static const struct regulator_ops fixed_voltage_clkenabled_ops = {
@@ -287,6 +293,7 @@ static int reg_fixed_voltage_probe(struct platform_device *pdev)
 		ret = dev_err_probe(&pdev->dev, PTR_ERR(drvdata->dev),
 				    "Failed to register regulator: %ld\n",
 				    PTR_ERR(drvdata->dev));
+		gpiod_put(cfg.ena_gpiod);
 		return ret;
 	}
 

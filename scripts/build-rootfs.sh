@@ -111,11 +111,6 @@ mount -t sysfs /sys ${chroot_dir}/sys
 mount -o bind /dev ${chroot_dir}/dev
 mount -o bind /dev/pts ${chroot_dir}/dev/pts
 
-# Package priority for ppa
-cp ${overlay_dir}/etc/apt/preferences.d/rockchip-ppa ${chroot_dir}/etc/apt/preferences.d/rockchip-ppa
-cp ${overlay_dir}/etc/apt/preferences.d/panfork-mesa-ppa ${chroot_dir}/etc/apt/preferences.d/panfork-mesa-ppa
-cp ${overlay_dir}/etc/apt/preferences.d/rockchip-multimedia-ppa ${chroot_dir}/etc/apt/preferences.d/rockchip-multimedia-ppa
-
 # Download and update packages
 cat << EOF | chroot ${chroot_dir} /bin/bash
 set -eE 
@@ -150,13 +145,6 @@ echo lubancat > /etc/hostname
 
 # set localtime
 ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-
-# Add mesa and rockchip multimedia ppa
-if [[ ${MAINLINE} != "Y" ]]; then
-    apt-get -y update && apt-get -y install software-properties-common
-    add-apt-repository -y ppa:liujianfeng1994/panfork-mesa
-    add-apt-repository -y ppa:liujianfeng1994/rockchip-multimedia
-fi
 
 # Download and update installed packages
 apt-get -y update && apt-get -y upgrade && apt-get -y dist-upgrade
@@ -284,9 +272,6 @@ chroot ${chroot_dir} /bin/bash -c "pro config set apt_news=false"
 rm -f ${chroot_dir}/var/lib/ubuntu-release-upgrader/release-upgrade-available
 cp ${overlay_dir}/etc/update-manager/release-upgrades ${chroot_dir}/etc/update-manager/release-upgrades
 
-# Copy over the ubuntu rockchip install util
-cp ${overlay_dir}/usr/bin/ubuntu-rockchip-install ${chroot_dir}/usr/bin/ubuntu-rockchip-install
-
 # Let systemd create machine id on first boot
 rm -f ${chroot_dir}/var/lib/dbus/machine-id
 true > ${chroot_dir}/etc/machine-id
@@ -306,20 +291,23 @@ mount -t sysfs /sys ${chroot_dir}/sys
 mount -o bind /dev ${chroot_dir}/dev
 mount -o bind /dev/pts ${chroot_dir}/dev/pts
 
+# Copy the isolated Mesa package into the desktop rootfs
+cp ../packages/mesa/*.deb ${chroot_dir}/tmp/
+
 # Download and update packages
 cat << EOF | chroot ${chroot_dir} /bin/bash
 set -eE 
 trap 'echo Error: in $0 on line $LINENO' ERR
 
 # Desktop packages
-apt-get -y install ubuntu-desktop dbus-x11 xterm pulseaudio pavucontrol qtwayland5 \
-gstreamer1.0-plugins-bad gstreamer1.0-plugins-base gstreamer1.0-plugins-good mpv \
-gstreamer1.0-tools gstreamer1.0-rockchip1 chromium mali-g610-firmware malirun \
-rockchip-multimedia-config librist4 librist-dev rist-tools dvb-tools ir-keytable \
-libdvbv5-0 libdvbv5-dev libdvbv5-doc libv4l-0 libv4l2rds0 libv4lconvert0 libv4l-dev \
-libv4l-rkmpp qv4l2 v4l-utils libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview \
-libgl1-mesa-dev libgles2-mesa-dev libglx-mesa0 mesa-common-dev mesa-vulkan-drivers \
-mesa-utils libwidevinecdm libcanberra-pulse gnome-software language-pack-zh-han*
+apt-get -y install ubuntu-desktop dbus-x11 xterm pulseaudio pavucontrol qtwayland5 guvcview \
+libcanberra-pulse mpv gnome-software language-pack-zh-han*
+
+# Install Mesa 26.2.2 and resolve its runtime dependencies from Jammy
+apt-get -y install /tmp/mesa-panfrost-panvk-26.2.2-ubuntu22.04-arm64.deb
+rm -f /tmp/mesa-panfrost-panvk-26.2.2-ubuntu22.04-arm64.deb
+getent group render > /dev/null || groupadd --system render
+usermod -aG render cat
 
 export LANGUAGE="zh_CN"
 export LANG="zh_CN.UTF-8"
@@ -336,10 +324,6 @@ thunderbird-locale-zh-hans ibus-libpinyin libreoffice-help-zh-tw libreoffice-l10
 
 # Remove cloud-init and landscape-common
 apt-get -y purge cloud-init landscape-common cryptsetup-initramfs
-
-# Chromium uses fixed paths for libv4l2.so
-ln -rsf /usr/lib/*/libv4l2.so /usr/lib/
-[ -e /usr/lib/aarch64-linux-gnu/ ] && ln -Tsf lib /usr/lib64
 
 # Clean package cache
 apt-get -y autoremove && apt-get -y clean && apt-get -y autoclean
@@ -377,6 +361,11 @@ rm -rf ${chroot_dir}/etc/systemd/system/systemd-networkd-wait-online.service.d/o
 
 # Enable wayland session
 cp ${overlay_dir}/etc/gdm3/custom.conf ${chroot_dir}/etc/gdm3/custom.conf
+
+# Use the isolated Mesa 26.2.2 build for desktop and GDM
+cat ${overlay_dir}/etc/mesa-26.2.2.environment >> ${chroot_dir}/etc/environment
+mkdir -p ${chroot_dir}/etc/systemd/system/gdm3.service.d
+cp ${overlay_dir}/etc/systemd/system/gdm3.service.d/mesa-26.2.2.conf ${chroot_dir}/etc/systemd/system/gdm3.service.d/
 
 # default image background
 rm -rf ${chroot_dir}/usr/share/backgrounds/Jammy-Jellyfish_WP_4096x2304_Grey.png

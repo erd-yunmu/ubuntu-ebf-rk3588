@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) Fuzhou Rockchip Electronics Co.Ltd
+ * Copyright (C) Rockchip Electronics Co., Ltd.
  * Author:
  *      Mark Yao <mark.yao@rock-chips.com>
  *      Sandy Huang <hjc@rock-chips.com>
@@ -412,10 +412,25 @@ static void rockchip_lvds_disable(struct rockchip_lvds *lvds)
 static void rockchip_lvds_encoder_enable(struct drm_encoder *encoder)
 {
 	struct rockchip_lvds *lvds = encoder_to_lvds(encoder);
+	int output_if;
 
 	if (lvds->panel)
 		drm_panel_prepare(lvds->panel);
 	rockchip_lvds_enable(lvds);
+
+	switch (lvds->pixel_order) {
+	case ROCKCHIP_LVDS_DUAL_LINK_ODD_EVEN_PIXELS:
+	case ROCKCHIP_LVDS_DUAL_LINK_EVEN_ODD_PIXELS:
+	case ROCKCHIP_LVDS_DUAL_LINK_LEFT_RIGHT_PIXELS:
+	case ROCKCHIP_LVDS_DUAL_LINK_RIGHT_LEFT_PIXELS:
+		output_if = VOP_OUTPUT_IF_LVDS1 | VOP_OUTPUT_IF_LVDS0;
+		break;
+	default:
+		output_if = lvds->id ? VOP_OUTPUT_IF_LVDS1 : VOP_OUTPUT_IF_LVDS0;
+		break;
+	}
+	rockchip_drm_crtc_output_post_enable(encoder->crtc, output_if);
+
 	if (lvds->panel)
 		drm_panel_enable(lvds->panel);
 }
@@ -431,13 +446,12 @@ static void rockchip_lvds_encoder_disable(struct drm_encoder *encoder)
 		drm_panel_unprepare(lvds->panel);
 }
 
-static int rockchip_lvds_encoder_loader_protect(struct drm_encoder *encoder,
-						bool on)
+static int rockchip_lvds_encoder_loader_protect(struct rockchip_drm_sub_dev *sub_dev, bool on)
 {
-	struct rockchip_lvds *lvds = encoder_to_lvds(encoder);
+	struct rockchip_lvds *lvds = container_of(sub_dev, struct rockchip_lvds, sub_dev);
 
 	if (lvds->panel)
-		panel_simple_loader_protect(lvds->panel);
+		rockchip_drm_panel_loader_protect(lvds->panel, on);
 
 
 	if (on) {

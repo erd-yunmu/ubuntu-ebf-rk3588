@@ -2,7 +2,7 @@
 /*
  * maxim-max96772.c  --  I2C register interface access for max96772 serdes chip
  *
- * Copyright (c) 2023-2028 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2023-2028 Rockchip Electronics Co., Ltd.
  *
  * Author:
  */
@@ -14,11 +14,13 @@ static const struct regmap_range max96772_readable_ranges[] = {
 	regmap_reg_range(0x0000, 0x0800),
 	regmap_reg_range(0x1700, 0x1700),
 	regmap_reg_range(0x4100, 0x4100),
-	regmap_reg_range(0x6230, 0x6230),
+	regmap_reg_range(0x6000, 0x6230),
 	regmap_reg_range(0x7014, 0x7016),
 	regmap_reg_range(0xe75e, 0xe75e),
 	regmap_reg_range(0xe7c4, 0xe7c6),
 	regmap_reg_range(0xe776, 0xe7bf),
+	regmap_reg_range(0xe7d1, 0xe7d1),
+	regmap_reg_range(0xe7de, 0xe7de),
 };
 
 static const struct regmap_access_table max96772_readable_table = {
@@ -33,113 +35,6 @@ static struct regmap_config max96772_regmap_config = {
 	.max_register = 0xffff,
 	.rd_table = &max96772_readable_table,
 };
-
-struct config_desc {
-	u16 reg;
-	u8 mask;
-	u8 val;
-};
-
-struct serdes_group_data {
-	const struct config_desc *configs;
-	int num_configs;
-};
-
-static int MAX96772_GPIO0_pins[] = {0};
-static int MAX96772_GPIO1_pins[] = {1};
-static int MAX96772_GPIO2_pins[] = {2};
-static int MAX96772_GPIO3_pins[] = {3};
-static int MAX96772_GPIO4_pins[] = {4};
-static int MAX96772_GPIO5_pins[] = {5};
-static int MAX96772_GPIO6_pins[] = {6};
-static int MAX96772_GPIO7_pins[] = {7};
-
-static int MAX96772_GPIO8_pins[] = {8};
-static int MAX96772_GPIO9_pins[] = {9};
-static int MAX96772_GPIO10_pins[] = {10};
-static int MAX96772_GPIO11_pins[] = {11};
-static int MAX96772_GPIO12_pins[] = {12};
-static int MAX96772_GPIO13_pins[] = {13};
-static int MAX96772_GPIO14_pins[] = {14};
-static int MAX96772_GPIO15_pins[] = {15};
-
-#define GROUP_DESC(nm) \
-{ \
-	.name = #nm, \
-	.pins = nm ## _pins, \
-	.num_pins = ARRAY_SIZE(nm ## _pins), \
-}
-
-struct serdes_function_data {
-	u8 gpio_out_dis:1;
-	u8 gpio_tx_en:1;
-	u8 gpio_rx_en:1;
-	u8 gpio_in_level:1;
-	u8 gpio_out_level:1;
-	u8 gpio_tx_id;
-	u8 gpio_rx_id;
-	u16 mdelay;
-};
-
-static const char *serdes_gpio_groups[] = {
-	"MAX96772_GPIO0", "MAX96772_GPIO1", "MAX96772_GPIO2", "MAX96772_GPIO3",
-	"MAX96772_GPIO4", "MAX96772_GPIO5", "MAX96772_GPIO6", "MAX96772_GPIO7",
-
-	"MAX96772_GPIO8", "MAX96772_GPIO9", "MAX96772_GPIO10", "MAX96772_GPIO11",
-	"MAX96772_GPIO12", "MAX96772_GPIO13", "MAX96772_GPIO14", "MAX96772_GPIO15",
-};
-
-#define FUNCTION_DESC_GPIO_INPUT_BYPASS(id) \
-{ \
-	.name = "SER_TO_DES_RXID"#id, \
-	.group_names = serdes_gpio_groups, \
-	.num_group_names = ARRAY_SIZE(serdes_gpio_groups), \
-	.data = (void *)(const struct serdes_function_data []) { \
-		{ .gpio_rx_en = 1, .gpio_rx_id = id } \
-	}, \
-} \
-
-#define FUNCTION_DESC_GPIO_OUTPUT_BYPASS(id) \
-{ \
-	.name = "DES_TXID"#id"_TO_SER", \
-	.group_names = serdes_gpio_groups, \
-	.num_group_names = ARRAY_SIZE(serdes_gpio_groups), \
-	.data = (void *)(const struct serdes_function_data []) { \
-		{ .gpio_out_dis = 1, .gpio_tx_en = 1, .gpio_tx_id = id } \
-	}, \
-} \
-
-#define FUNCTION_DESC_GPIO_OUTPUT_LOW(id) \
-{ \
-	.name = "DES_TXID"#id"_OUTPUT_LOW", \
-	.group_names = serdes_gpio_groups, \
-	.num_group_names = ARRAY_SIZE(serdes_gpio_groups), \
-	.data = (void *)(const struct serdes_function_data []) { \
-		{ .gpio_out_dis = 0, .gpio_tx_en = 0, \
-		  .gpio_rx_en = 0, .gpio_out_level = 0, .gpio_tx_id = id } \
-	}, \
-} \
-
-#define FUNCTION_DESC_GPIO_OUTPUT_HIGH(id) \
-{ \
-	.name = "DES_TXID"#id"_OUTPUT_HIGH", \
-	.group_names = serdes_gpio_groups, \
-	.num_group_names = ARRAY_SIZE(serdes_gpio_groups), \
-	.data = (void *)(const struct serdes_function_data []) { \
-		{ .gpio_out_dis = 0, .gpio_tx_en = 0, \
-		  .gpio_rx_en = 0, .gpio_out_level = 1, .gpio_tx_id = id } \
-	}, \
-} \
-
-#define FUNCTION_DES_DELAY_MS(ms) \
-{ \
-	.name = "DELAY_"#ms"MS", \
-	.group_names = serdes_gpio_groups, \
-	.num_group_names = ARRAY_SIZE(serdes_gpio_groups), \
-	.data = (void *)(const struct serdes_function_data []) { \
-		{ .mdelay = ms, } \
-	}, \
-} \
 
 static struct pinctrl_pin_desc max96772_pins_desc[] = {
 	PINCTRL_PIN(MAXIM_MAX96772_GPIO0, "MAX96772_GPIO0"),
@@ -169,7 +64,7 @@ static struct group_desc max96772_groups_desc[] = {
 	GROUP_DESC(MAX96772_GPIO4),
 	GROUP_DESC(MAX96772_GPIO5),
 	GROUP_DESC(MAX96772_GPIO6),
-	GROUP_DESC(MAX96772_GPIO7),
+	GROUP_DESC_CONFIG(MAX96772_GPIO7),
 
 	GROUP_DESC(MAX96772_GPIO8),
 	GROUP_DESC(MAX96772_GPIO9),
@@ -337,6 +232,70 @@ static const struct reg_sequence max96772_clk_ref[4][14] = {
 	}
 };
 
+static const struct reg_sequence max96772_clk_ssc[4][14] = {
+	{
+		{ 0xe7b2, 0x50 },
+		{ 0xe7b3, 0x00 },
+		{ 0xe7b4, 0x35 },
+		{ 0xe7b5, 0x42 },
+		{ 0xe7b6, 0x81 },
+		{ 0xe7b7, 0x30 },
+		{ 0xe7b8, 0x07 },
+		{ 0xe7b9, 0x10 },
+		{ 0xe7ba, 0x01 },
+		{ 0xe7bb, 0x00 },
+		{ 0xe7bc, 0x00 },
+		{ 0xe7bd, 0x00 },
+		{ 0xe7be, 0x52 },
+		{ 0xe7bf, 0x00 },
+	}, {
+		{ 0xe7b2, 0x50 },
+		{ 0xe7b3, 0x00 },
+		{ 0xe7b4, 0xd7 },
+		{ 0xe7b5, 0x45 },
+		{ 0xe7b6, 0x6b },
+		{ 0xe7b7, 0x20 },
+		{ 0xe7b8, 0x07 },
+		{ 0xe7b9, 0x00 },
+		{ 0xe7ba, 0x01 },
+		{ 0xe7bb, 0x00 },
+		{ 0xe7bc, 0x00 },
+		{ 0xe7bd, 0x00 },
+		{ 0xe7be, 0x52 },
+		{ 0xe7bf, 0x00 },
+	}, {
+		{ 0xe7b2, 0x30 },
+		{ 0xe7b3, 0x00 },
+		{ 0xe7b4, 0xd7 },
+		{ 0xe7b5, 0x45 },
+		{ 0xe7b6, 0x6b },
+		{ 0xe7b7, 0x20 },
+		{ 0xe7b8, 0x14 },
+		{ 0xe7b9, 0x00 },
+		{ 0xe7ba, 0x2e },
+		{ 0xe7bb, 0x00 },
+		{ 0xe7bc, 0x02 },
+		{ 0xe7bd, 0x01 },
+		{ 0xe7be, 0x32 },
+		{ 0xe7bf, 0x00 },
+	}, {
+		{ 0xe7b2, 0x30 },
+		{ 0xe7b3, 0x00 },
+		{ 0xe7b4, 0xd7 },
+		{ 0xe7b5, 0x45 },
+		{ 0xe7b6, 0x6b },
+		{ 0xe7b7, 0x20 },
+		{ 0xe7b8, 0x14 },
+		{ 0xe7b9, 0x00 },
+		{ 0xe7ba, 0x2e },
+		{ 0xe7bb, 0x00 },
+		{ 0xe7bc, 0x00 },
+		{ 0xe7bd, 0x00 },
+		{ 0xe7be, 0x32 },
+		{ 0xe7bf, 0x00 },
+	}
+};
+
 static int max96772_aux_dpcd_read(struct serdes *serdes, unsigned int reg, unsigned int *value)
 {
 	serdes_reg_write(serdes, 0xe778, reg & 0xff);
@@ -358,6 +317,35 @@ static int max96772_panel_prepare(struct serdes *serdes)
 	u32 vact, vsa, vfp, vbp;
 	u64 hwords, mvid;
 	bool hsync_pol, vsync_pol;
+	int ret;
+	u32 dpcd;
+	int link_rate;
+
+	if (!serdes->serdes_panel->link_rate || !serdes->serdes_panel->lane_count) {
+		ret = max96772_aux_dpcd_read(serdes, DP_MAX_LANE_COUNT, &dpcd);
+		if (ret) {
+			dev_err(serdes->dev, "failed to read max lane count\n");
+			return ret;
+		}
+
+		serdes->serdes_panel->lane_count = min_t(int, 4, dpcd & DP_MAX_LANE_COUNT_MASK);
+
+		ret = max96772_aux_dpcd_read(serdes, DP_MAX_LINK_RATE, &dpcd);
+		if (ret) {
+			dev_err(serdes->dev, "failed to read max link rate\n");
+			return ret;
+		}
+
+		serdes->serdes_panel->link_rate = min_t(int, dpcd, DP_LINK_BW_5_4);
+
+		ret = max96772_aux_dpcd_read(serdes, DP_MAX_DOWNSPREAD, &dpcd);
+		if (ret) {
+			dev_err(serdes->dev, "failed to read max downspread\n");
+			return ret;
+		}
+
+		serdes->serdes_panel->ssc = !!(dpcd & DP_MAX_DOWNSPREAD_0_5);
+	}
 
 	serdes_reg_write(serdes, 0xe790, serdes->serdes_panel->link_rate);
 	serdes_reg_write(serdes, 0xe792, serdes->serdes_panel->lane_count);
@@ -373,20 +361,46 @@ static int max96772_panel_prepare(struct serdes *serdes)
 		 serdes->serdes_panel->link_rate, serdes->serdes_panel->lane_count,
 		 serdes->serdes_panel->ssc);
 
-	switch (serdes->serdes_panel->link_rate) {
-	case DP_LINK_BW_5_4:
-		serdes_multi_reg_write(serdes, max96772_clk_ref[2],
-				       ARRAY_SIZE(max96772_clk_ref[2]));
+	if (serdes->serdes_panel->ssc) {
+		switch (serdes->serdes_panel->link_rate) {
+		case DP_LINK_BW_8_1:
+			serdes_multi_reg_write(serdes, max96772_clk_ssc[3],
+						    ARRAY_SIZE(max96772_clk_ssc[3]));
 		break;
-	case DP_LINK_BW_2_7:
-		serdes_multi_reg_write(serdes, max96772_clk_ref[1],
-				       ARRAY_SIZE(max96772_clk_ref[1]));
+		case DP_LINK_BW_5_4:
+			serdes_multi_reg_write(serdes, max96772_clk_ssc[2],
+						    ARRAY_SIZE(max96772_clk_ssc[2]));
 		break;
-	case DP_LINK_BW_1_62:
-	default:
-		serdes_multi_reg_write(serdes, max96772_clk_ref[0],
-				       ARRAY_SIZE(max96772_clk_ref[0]));
+		case DP_LINK_BW_2_7:
+			serdes_multi_reg_write(serdes, max96772_clk_ssc[1],
+						    ARRAY_SIZE(max96772_clk_ssc[1]));
 		break;
+		case DP_LINK_BW_1_62:
+		default:
+			serdes_multi_reg_write(serdes, max96772_clk_ssc[0],
+						    ARRAY_SIZE(max96772_clk_ssc[0]));
+		break;
+		}
+	} else {
+		switch (serdes->serdes_panel->link_rate) {
+		case DP_LINK_BW_8_1:
+			serdes_multi_reg_write(serdes, max96772_clk_ref[3],
+					       ARRAY_SIZE(max96772_clk_ref[3]));
+			break;
+		case DP_LINK_BW_5_4:
+			serdes_multi_reg_write(serdes, max96772_clk_ref[2],
+					       ARRAY_SIZE(max96772_clk_ref[2]));
+			break;
+		case DP_LINK_BW_2_7:
+			serdes_multi_reg_write(serdes, max96772_clk_ref[1],
+					       ARRAY_SIZE(max96772_clk_ref[1]));
+			break;
+		case DP_LINK_BW_1_62:
+		default:
+			serdes_multi_reg_write(serdes, max96772_clk_ref[0],
+					       ARRAY_SIZE(max96772_clk_ref[0]));
+			break;
+		}
 	}
 
 	vact = mode->vdisplay;
@@ -425,12 +439,14 @@ static int max96772_panel_prepare(struct serdes *serdes)
 
 	/* HWORDS = ((HRES x bits / pixel) / 16) - LANE_COUNT */
 	hwords = DIV_ROUND_CLOSEST_ULL(hact * 24, 16) - serdes->serdes_panel->lane_count;
-	serdes_reg_write(serdes, 0xe7a4, hwords);
-	serdes_reg_write(serdes, 0xe7a5, hwords >> 8);
+	serdes_reg_write(serdes, 0xe7a4, hwords & 0xff);
+	serdes_reg_write(serdes, 0xe7a5, (hwords >> 8) & 0xff);
 
-	/* MVID = (PCLK x NVID) x 10 / Link Rate */
+	/* MVID = (PCLK_in_MHz x NVID)/(Link_Rate_in_GBs * 100) */
+	link_rate = drm_dp_bw_code_to_link_rate(serdes->serdes_panel->link_rate);
 	mvid = DIV_ROUND_CLOSEST_ULL((u64)mode->clock * 32768,
-				     drm_dp_bw_code_to_link_rate(serdes->serdes_panel->link_rate));
+				     link_rate);
+
 	serdes_reg_write(serdes, 0xe7a6, mvid & 0xff);
 	serdes_reg_write(serdes, 0xe7a7, (mvid >> 8) & 0xff);
 
@@ -514,7 +530,8 @@ static int max96772_pinctrl_set_mux(struct serdes *serdes,
 	struct serdes_pinctrl *pinctrl = serdes->pinctrl;
 	struct function_desc *func;
 	struct group_desc *grp;
-	int i;
+	unsigned int i, offset, npins;
+	const char *func_name, *grp_name;
 	u16 ms;
 
 	func = pinmux_generic_get_function(pinctrl->pctl, function);
@@ -525,35 +542,45 @@ static int max96772_pinctrl_set_mux(struct serdes *serdes,
 	if (!grp)
 		return -EINVAL;
 
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
+	npins = grp->num_pins;
+	func_name = func->name;
+	grp_name = grp->name;
+#else
+	npins = grp->grp.npins;
+	func_name = func->func.name;
+	grp_name = grp->grp.name;
+#endif
+
 	SERDES_DBG_CHIP("%s: serdes chip %s func=%s data=%p group=%s data=%p, num_pin=%d\n",
-			__func__, serdes->chip_data->name, func->name,
-			func->data, grp->name, grp->data, grp->num_pins);
+			__func__, serdes->chip_data->name, func_name,
+			func->data, grp_name, grp->data, npins);
 
 	if (func->data) {
 		struct serdes_function_data *fdata = func->data;
 
 		ms = fdata->mdelay;
-		for (i = 0; i < grp->num_pins; i++) {
+		for (i = 0; i < npins; i++) {
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
+			offset = grp->pins[i] - pinctrl->pin_base;
+#else
+			offset = grp->grp.pins[i] - pinctrl->pin_base;
+#endif
+
 			if (!ms) {
-				serdes_set_bits(serdes, GPIO_A_REG(grp->pins[i] - pinctrl->pin_base),
+				serdes_set_bits(serdes, GPIO_A_REG(offset),
 						GPIO_OUT_DIS | GPIO_RX_EN | GPIO_TX_EN | GPIO_OUT,
 						FIELD_PREP(GPIO_OUT_DIS, fdata->gpio_out_dis) |
 						FIELD_PREP(GPIO_RX_EN, fdata->gpio_rx_en) |
 						FIELD_PREP(GPIO_TX_EN, fdata->gpio_tx_en) |
 						FIELD_PREP(GPIO_OUT, fdata->gpio_out_level));
-				serdes_set_bits(serdes,
-						GPIO_B_REG(grp->pins[i] - pinctrl->pin_base),
-						OUT_TYPE,
+				serdes_set_bits(serdes, GPIO_B_REG(offset), OUT_TYPE,
 						FIELD_PREP(OUT_TYPE, 1));
 				if (fdata->gpio_tx_en)
-					serdes_set_bits(serdes,
-							GPIO_B_REG(grp->pins[i] - pinctrl->pin_base),
-							GPIO_TX_ID,
+					serdes_set_bits(serdes, GPIO_B_REG(offset), GPIO_TX_ID,
 							FIELD_PREP(GPIO_TX_ID, fdata->gpio_tx_id));
 				if (fdata->gpio_rx_en)
-					serdes_set_bits(serdes,
-							GPIO_C_REG(grp->pins[i] - pinctrl->pin_base),
-							GPIO_RX_ID,
+					serdes_set_bits(serdes, GPIO_C_REG(offset), GPIO_RX_ID,
 							FIELD_PREP(GPIO_RX_ID, fdata->gpio_rx_id));
 			} else {
 				mdelay(ms);
@@ -568,7 +595,6 @@ static int max96772_pinctrl_set_mux(struct serdes *serdes,
 
 		for (i = 0; i < gdata->num_configs; i++) {
 			const struct config_desc *config = &gdata->configs[i];
-
 			serdes_set_bits(serdes, config->reg,
 					config->mask, config->val);
 		}
@@ -730,21 +756,101 @@ static struct serdes_chip_pinctrl_ops max96772_pinctrl_ops = {
 
 static int max96772_gpio_direction_input(struct serdes *serdes, int gpio)
 {
+	struct serdes_pinctrl *pinctrl = serdes->pinctrl;
+	struct group_desc *grp;
+	int i;
+
+	grp = pinctrl_generic_get_group(pinctrl->pctl, gpio);
+	if (!grp)
+		return -EINVAL;
+
+	if (grp->data) {
+		struct serdes_group_data *gdata = grp->data;
+
+		for (i = 0; i < gdata->num_configs; i++) {
+			const struct config_desc *config = &gdata->configs[i];
+
+			serdes_set_bits(serdes, config->reg,
+					config->mask, config->val);
+		}
+	}
+
+	serdes_set_bits(serdes, GPIO_A_REG(gpio),
+					GPIO_OUT_DIS | GPIO_RX_EN | GPIO_TX_EN,
+					FIELD_PREP(GPIO_OUT_DIS, 0) |
+					FIELD_PREP(GPIO_RX_EN, 1) |
+					FIELD_PREP(GPIO_TX_EN, 0));
+
+	serdes_set_bits(serdes, GPIO_B_REG(gpio),
+					OUT_TYPE,
+					FIELD_PREP(OUT_TYPE, 1));
+
+	SERDES_DBG_CHIP("%s: serdes chip %s gpio=%d\n",
+		__func__, serdes->chip_data->name, gpio);
+
 	return 0;
 }
 
 static int max96772_gpio_direction_output(struct serdes *serdes, int gpio, int value)
 {
+	struct serdes_pinctrl *pinctrl = serdes->pinctrl;
+	struct group_desc *grp;
+	int i;
+
+	grp = pinctrl_generic_get_group(pinctrl->pctl, gpio);
+	if (!grp)
+		return -EINVAL;
+
+	if (grp->data) {
+		struct serdes_group_data *gdata = grp->data;
+
+		for (i = 0; i < gdata->num_configs; i++) {
+			const struct config_desc *config = &gdata->configs[i];
+
+			serdes_set_bits(serdes, config->reg,
+					config->mask, config->val);
+		}
+	}
+
+	serdes_set_bits(serdes, GPIO_A_REG(gpio),
+					GPIO_OUT_DIS | GPIO_RX_EN | GPIO_TX_EN | GPIO_OUT,
+					FIELD_PREP(GPIO_OUT_DIS, 0) |
+					FIELD_PREP(GPIO_RX_EN, 0) |
+					FIELD_PREP(GPIO_TX_EN, 0) |
+					FIELD_PREP(GPIO_OUT, value));
+
+	serdes_set_bits(serdes,
+					GPIO_B_REG(gpio),
+					OUT_TYPE,
+					FIELD_PREP(OUT_TYPE, 1));
+
+	SERDES_DBG_CHIP("%s: serdes chip %s gpio=%d value=%d\n",
+		__func__, serdes->chip_data->name, gpio, value);
+
 	return 0;
 }
 
 static int max96772_gpio_get_level(struct serdes *serdes, int gpio)
 {
-	return 0;
+	unsigned int value;
+
+	serdes_reg_read(serdes, GPIO_A_REG(gpio), &value);
+
+	value &= GPIO_IN;
+	SERDES_DBG_CHIP("%s: serdes chip %s gpio=%d\n",
+		__func__, serdes->chip_data->name, gpio, value);
+
+	return value;
 }
 
 static int max96772_gpio_set_level(struct serdes *serdes, int gpio, int value)
 {
+	serdes_set_bits(serdes, GPIO_A_REG(gpio), GPIO_OUT,
+			FIELD_PREP(GPIO_OUT, value));
+
+	SERDES_DBG_CHIP("%s: serdes chip %s gpio=%d value=%d\n",
+		__func__, serdes->chip_data->name, gpio, value);
+
 	return 0;
 }
 

@@ -2239,7 +2239,10 @@ int mpp_dev_probe(struct mpp_dev *mpp,
 	if (IS_ERR(mpp->iommu_info)) {
 		dev_err(dev, "failed to attach iommu\n");
 		mpp->iommu_info = NULL;
+	} else {
+		mpp->iommu_info->queue = mpp->queue;
 	}
+
 	if (mpp->hw_ops->init) {
 		ret = mpp->hw_ops->init(mpp);
 		if (ret)

@@ -2,7 +2,7 @@
 /*
  * serdes-pinctrl.c  -- serdes pin control driver.
  *
- * Copyright (c) 2023-2028 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2023-2028 Rockchip Electronics Co., Ltd.
  *
  * Author: luowei <lw@rock-chips.com>
  */
@@ -27,6 +27,13 @@ static const struct mfd_cell serdes_gpio_max96745_devs[] = {
 	{
 		.name = "serdes-gpio",
 		.of_compatible = "maxim,max96745-gpio",
+	},
+};
+
+static const struct mfd_cell serdes_gpio_max96749_devs[] = {
+	{
+		.name = "serdes-gpio",
+		.of_compatible = "maxim,max96749-gpio",
 	},
 };
 
@@ -173,6 +180,10 @@ static int serdes_pinctrl_gpio_init(struct serdes *serdes)
 		serdes_devs = serdes_gpio_max96745_devs;
 		mfd_num = ARRAY_SIZE(serdes_gpio_max96745_devs);
 		break;
+	case MAXIM_ID_MAX96749:
+		serdes_devs = serdes_gpio_max96749_devs;
+		mfd_num = ARRAY_SIZE(serdes_gpio_max96749_devs);
+		break;
 	case MAXIM_ID_MAX96752:
 		serdes_devs = serdes_gpio_max96752_devs;
 		mfd_num = ARRAY_SIZE(serdes_gpio_max96752_devs);
@@ -229,7 +240,7 @@ static int serdes_pinctrl_probe(struct platform_device *pdev)
 	int pin_base = 0;
 	int i, j, ret;
 
-	if (!serdes->dev)
+	if (!serdes->dev || !serdes->chip_data)
 		return -1;
 
 	pinctrl_info = chip_data->pinctrl_info;
@@ -282,7 +293,7 @@ static int serdes_pinctrl_probe(struct platform_device *pdev)
 	if (pin_base) {
 		for (i = 0; i < pinctrl_info->num_pins; i++) {
 			serdes_pinctrl->pdesc[i].number = pinctrl_info->pins[i].number + pin_base;
-			serdes_pinctrl->pdesc[i].name = kasprintf(GFP_KERNEL, "%s-gpio%d",
+			serdes_pinctrl->pdesc[i].name = devm_kasprintf(dev, GFP_KERNEL, "%s-gpio%d",
 								  pinctrl_info->pins[i].name,
 								  serdes_pinctrl->pdesc[i].number);
 			SERDES_DBG_MFD("%s:pdesc number=%d, name=%s\n", __func__,
@@ -302,6 +313,7 @@ static int serdes_pinctrl_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to register serdes pinctrl\n");
 
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
 	for (i = 0; i < pinctrl_info->num_groups; i++) {
 		struct group_desc *group = &pinctrl_info->groups[i];
 		int *grp_pins = devm_kcalloc(dev,
@@ -334,8 +346,43 @@ static int serdes_pinctrl_probe(struct platform_device *pdev)
 			return ret;
 		}
 	}
+#else
+	for (i = 0; i < pinctrl_info->num_groups; i++) {
+		struct group_desc *group = &pinctrl_info->groups[i];
+		struct pingroup *grp = &group->grp;
+		int *grp_pins = devm_kcalloc(dev,
+					     grp->npins, sizeof(*grp->pins), GFP_KERNEL);
 
-	ret = pinctrl_enable(serdes_pinctrl->pctl);
+		for (j = 0; j < grp->npins; j++) {
+			grp_pins[j] = grp->pins[j] + pin_base;
+			SERDES_DBG_MFD("%s group name %s pin=%d base=%d\n", __func__,
+				       grp->name, grp_pins[j], pin_base);
+		}
+
+		ret = pinctrl_generic_add_group(serdes_pinctrl->pctl, grp->name,
+						grp_pins, grp->npins, group->data);
+		if (ret < 0) {
+			dev_err(dev, "Failed to register serdes group %s\n",
+				grp->name);
+			return ret;
+		}
+	}
+
+	for (i = 0; i < pinctrl_info->num_functions; i++) {
+		const struct function_desc *func = &pinctrl_info->functions[i];
+
+		ret = pinmux_generic_add_function(serdes_pinctrl->pctl, func->func.name,
+						  func->func.groups, func->func.ngroups,
+						  func->data);
+		if (ret < 0) {
+			dev_err(dev, "Failed to register serdes function %s\n",
+				func->func.name);
+			return ret;
+		}
+	}
+#endif
+
+	pinctrl_enable(serdes_pinctrl->pctl);
 
 	ret = serdes_pinctrl_gpio_init(serdes);
 

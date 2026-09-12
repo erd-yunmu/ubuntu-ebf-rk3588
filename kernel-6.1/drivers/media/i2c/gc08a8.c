@@ -88,7 +88,7 @@
 
 /*
 #define GC08a8_FLIP_MIRROR_REG		0x0101
-#define GC08a8_MIRROR_BIT_MASK		BIT(0)  
+#define GC08a8_MIRROR_BIT_MASK		BIT(0)
 #define GC08a8_FLIP_BIT_MASK		BIT(1)
 */
 
@@ -944,7 +944,7 @@ static int gc08a8_enable_test_pattern(struct gc08a8 *gc08a8, u32 pattern)
 {
     //u32 val;
     return 0;
-    
+
     #if  0
     if (pattern)
         val = GC08a8_TEST_PATTERN_ENABLE;
@@ -953,7 +953,7 @@ static int gc08a8_enable_test_pattern(struct gc08a8 *gc08a8, u32 pattern)
 
     return gc08a8_write_reg(gc08a8->client, GC08a8_REG_TEST_PATTERN,
                 GC08a8_REG_VALUE_08BIT, val);
-    #endif			
+    #endif
 }
 
 
@@ -1269,7 +1269,7 @@ static int __gc08a8_start_stream(struct gc08a8 *gc08a8)
     if (ret)
         return ret;
 
-    
+
     ret = __v4l2_ctrl_handler_setup(&gc08a8->ctrl_handler);
     if (gc08a8->has_init_exp && gc08a8->cur_mode->hdr_mode != NO_HDR) {
         ret = gc08a8_ioctl(&gc08a8->subdev, PREISP_CMD_SET_HDRAE_EXP,
@@ -1613,10 +1613,10 @@ static int gc08a8_set_ctrl(struct v4l2_ctrl *ctrl)
         ret = gc08a8_enable_test_pattern(gc08a8, ctrl->val);
         break;
     case V4L2_CID_HFLIP:
-        
+
         break;
     case V4L2_CID_VFLIP:
-        
+
         break;
     default:
         dev_warn(&client->dev, "%s Unhandled id:0x%x, val:0x%x\n",
@@ -1767,7 +1767,7 @@ static int gc08a8_probe(struct i2c_client *client,
         DRIVER_VERSION >> 16,
         (DRIVER_VERSION & 0xff00) >> 8,
         DRIVER_VERSION & 0x00ff);
-    
+
     dev_info(dev, "driver updatetime 2024-12-26 15:33:00");
 
     gc08a8 = devm_kzalloc(dev, sizeof(*gc08a8), GFP_KERNEL);

@@ -44,48 +44,87 @@ static int rga_set_feature(struct rga_req *rga_base)
 	return feature;
 }
 
-static bool rga_check_csc_constant(const struct rga_hw_data *data, struct rga_req *rga_base,
-				   uint32_t mode, uint32_t flag)
+static bool rga_check_csc(struct rga_job *job,
+			  const struct rga_hw_data *data, struct rga_req *rga_base)
 {
-	if (mode & flag)
-		return true;
+	switch (rga_base->yuv2rgb_mode & RGA_Y2R_MASK) {
+	case RGA_Y2R_BT601_LIMIT:
+		if (!(data->csc_y2r_mode & RGA_MODE_CSC_BT601L)) {
+			if (DEBUGGER_EN(MSG))
+				rga_job_log(job, "unsupported yuv(BT.601 limit range) -> rgb, mode[%#x]\n",
+					    rga_base->yuv2rgb_mode);
+			return false;
+		}
 
-	if ((rga_base->full_csc.flag & 0x1) && (data->feature & RGA_FULL_CSC))
-		return true;
+		break;
+	case RGA_Y2R_BT601_FULL:
+		if (!(data->csc_y2r_mode & RGA_MODE_CSC_BT601F)) {
+			if (DEBUGGER_EN(MSG))
+				rga_job_log(job, "unsupported yuv(BT.601 full range) -> rgb, mode[%#x]\n",
+					    rga_base->yuv2rgb_mode);
+			return false;
+		}
 
-	return false;
-}
+		break;
+	case RGA_Y2R_BT709_LIMIT:
+		if (!(data->csc_y2r_mode & RGA_MODE_CSC_BT709)) {
+			if (DEBUGGER_EN(MSG))
+				rga_job_log(job, "unsupported yuv(BT.709 limit range) -> rgb, mode[%#x]\n",
+					    rga_base->yuv2rgb_mode);
+			return false;
+		}
 
-static bool rga_check_csc(const struct rga_hw_data *data, struct rga_req *rga_base)
-{
-	switch (rga_base->yuv2rgb_mode) {
-	case 0x1:
-		return rga_check_csc_constant(data, rga_base,
-					      data->csc_y2r_mode, RGA_MODE_CSC_BT601L);
-	case 0x2:
-		return rga_check_csc_constant(data, rga_base,
-					      data->csc_y2r_mode, RGA_MODE_CSC_BT601F);
-	case 0x3:
-		return rga_check_csc_constant(data, rga_base,
-					      data->csc_y2r_mode, RGA_MODE_CSC_BT709);
-	case 0x1 << 2:
-		return rga_check_csc_constant(data, rga_base,
-					      data->csc_r2y_mode, RGA_MODE_CSC_BT601F);
-	case 0x2 << 2:
-		return rga_check_csc_constant(data, rga_base,
-					      data->csc_r2y_mode, RGA_MODE_CSC_BT601L);
-	case 0x3 << 2:
-		return rga_check_csc_constant(data, rga_base,
-					      data->csc_r2y_mode, RGA_MODE_CSC_BT709);
+		break;
 	default:
 		break;
 	}
 
-	if ((rga_base->full_csc.flag & 0x1)) {
-		if (data->feature & RGA_FULL_CSC)
-			return true;
-		else
+	switch (rga_base->yuv2rgb_mode & RGA_R2Y_MASK) {
+	case RGA_R2Y_BT601_LIMIT:
+		if (!(data->csc_r2y_mode & RGA_MODE_CSC_BT601L)) {
+			if (DEBUGGER_EN(MSG))
+				rga_job_log(job, "unsupported rgb -> yuv(BT.601 limit range), mode[%#x]\n",
+					    rga_base->yuv2rgb_mode);
 			return false;
+		}
+
+		break;
+	case RGA_R2Y_BT601_FULL:
+		if (!(data->csc_r2y_mode & RGA_MODE_CSC_BT601F)) {
+			if (DEBUGGER_EN(MSG))
+				rga_job_log(job, "unsupported rgb -> yuv(BT.601 full range), mode[%#x]\n",
+					    rga_base->yuv2rgb_mode);
+			return false;
+		}
+
+		break;
+	case RGA_R2Y_BT709_LIMIT:
+		if (!(data->csc_r2y_mode & RGA_MODE_CSC_BT709)) {
+			if (DEBUGGER_EN(MSG))
+				rga_job_log(job, "unsupported rgb -> yuv(BT.709 limit range), mode[%#x]\n",
+					    rga_base->yuv2rgb_mode);
+			return false;
+		}
+
+		break;
+	default:
+		break;
+	}
+
+	if ((rga_base->full_csc.flag & 0x1) &&
+	    !(data->feature & (RGA_FULL_CSC | RGA_FULL_CSC_10BIT))) {
+		/*
+		 * RGA2E requires FULL_CSC to execute R2Y BT.709-limit_range,
+		 * while RGA3 can directly support this CSC mode.
+		 */
+		if (data == &rga3_data &&
+		    (rga_base->yuv2rgb_mode & RGA_R2Y_MASK) == RGA_R2Y_BT709_LIMIT)
+			return true;
+
+		if (DEBUGGER_EN(MSG))
+			rga_job_log(job, "unsupported full csc\n");
+
+		return false;
 	}
 
 	return true;
@@ -174,8 +213,9 @@ static bool rga_check_align(struct rga_job *job,
 
 static bool rga_check_channel(struct rga_job *job, const struct rga_hw_data *data,
 			      struct rga_img_info_t *img,
-			      const char *name, int input, int win_num)
+			      const char *name, int input, int swap, int win_num)
 {
+	int w, h;
 	const struct rga_rect_range *range;
 
 	if (input)
@@ -183,28 +223,36 @@ static bool rga_check_channel(struct rga_job *job, const struct rga_hw_data *dat
 	else
 		range = &data->output_range;
 
-	if (!rga_check_resolution(range, img->act_w, img->act_h)) {
+	if (swap) {
+		w = img->act_h;
+		h = img->act_w;
+	} else {
+		w = img->act_w;
+		h = img->act_h;
+	}
+
+	if (!rga_check_resolution(range, w, h)) {
 		if (DEBUGGER_EN(MSG))
 			rga_job_log(job, "%s resolution check error, input range[%dx%d ~ %dx%d], [w,h] = [%d, %d]\n",
 				name,
 				data->input_range.min.width, data->input_range.min.height,
 				data->input_range.max.width, data->input_range.max.height,
-				img->act_w, img->act_h);
+				w, h);
 
 		return false;
 	}
 
 	if (data == &rga3_data &&
 	    !rga_check_resolution(&data->input_range,
-				  img->act_w + img->x_offset,
-				  img->act_h + img->y_offset)) {
+				  w + img->x_offset,
+				  h + img->y_offset)) {
 		if (DEBUGGER_EN(MSG))
 			rga_job_log(job, "%s RGA3 resolution check error, input range[%dx%d ~ %dx%d], [w+x,h+y] = [%d, %d]\n",
 				name,
 				data->input_range.min.width, data->input_range.min.height,
 				data->input_range.max.width, data->input_range.max.height,
-				img->act_w + img->x_offset,
-				img->act_h + img->y_offset);
+				w + img->x_offset,
+				h + img->y_offset);
 		return false;
 	}
 
@@ -286,23 +334,19 @@ static bool rga_check_rotate(struct rga_job *job, const struct rga_hw_data *data
 	return true;
 }
 
-int rga_job_assign(struct rga_job *job)
+static int rga_task_assign(struct rga_job *job, struct rga_req *rga_base)
 {
-	struct rga_img_info_t *src0 = &job->rga_command_base.src;
-	struct rga_img_info_t *src1 = &job->rga_command_base.pat;
-	struct rga_img_info_t *dst = &job->rga_command_base.dst;
-
-	struct rga_req *rga_base = &job->rga_command_base;
+	struct rga_img_info_t *src0 = &rga_base->src;
+	struct rga_img_info_t *src1 = &rga_base->pat;
+	struct rga_img_info_t *dst = &rga_base->dst;
 	const struct rga_hw_data *data;
 	struct rga_scheduler_t *scheduler = NULL;
 
 	int feature;
-	int core = RGA_NONE_CORE;
 	int optional_cores = RGA_NONE_CORE;
 	int specified_cores = RGA_NONE_CORE;
 	int i;
-	int min_of_job_count = -1;
-	unsigned long flags;
+	int need_swap = false;
 
 	/* assigned by userspace */
 	if (rga_base->core > RGA_NONE_CORE) {
@@ -343,6 +387,13 @@ int rga_job_assign(struct rga_job *job)
 						scheduler->core);
 				continue;
 			}
+		}
+
+		/* some mode rotate 90/270 need swap dst_width/dst_height  */
+		if (((rga_base->rotate_mode & 0x0f) == 1) &&
+			((rga_base->sina == 65536 && rga_base->cosa == 0) ||
+			(rga_base->sina == -65536 && rga_base->cosa == 0))) {
+			need_swap = true;
 		}
 
 		/* only colorfill need single win (colorpalette?) */
@@ -407,7 +458,7 @@ int rga_job_assign(struct rga_job *job)
 				continue;
 			}
 
-			if (!rga_check_channel(job, data, src0, "src0", true, 0)) {
+			if (!rga_check_channel(job, data, src0, "src0", true, false, 0)) {
 				if (DEBUGGER_EN(MSG))
 					rga_job_log(job, "%s(%#x), break on src0",
 						rga_get_core_name(scheduler->core),
@@ -416,7 +467,7 @@ int rga_job_assign(struct rga_job *job)
 			}
 
 			if (src1->yrgb_addr > 0) {
-				if (!rga_check_channel(job, data, src1, "src1", true, 1)) {
+				if (!rga_check_channel(job, data, src1, "src1", true, false, 1)) {
 					if (DEBUGGER_EN(MSG))
 						rga_job_log(job, "%s(%#x), break on src1",
 							rga_get_core_name(scheduler->core),
@@ -426,7 +477,7 @@ int rga_job_assign(struct rga_job *job)
 			}
 		}
 
-		if (!rga_check_channel(job, data, dst, "dst", false, 2)) {
+		if (!rga_check_channel(job, data, dst, "dst", false, need_swap, 2)) {
 			if (DEBUGGER_EN(MSG))
 				rga_job_log(job, "%s(%#x), break on dst",
 					rga_get_core_name(scheduler->core),
@@ -434,7 +485,7 @@ int rga_job_assign(struct rga_job *job)
 			continue;
 		}
 
-		if (!rga_check_csc(data, rga_base)) {
+		if (!rga_check_csc(job, data, rga_base)) {
 			if (DEBUGGER_EN(MSG))
 				rga_job_log(job, "%s(%#x), break on rga_check_csc",
 					rga_get_core_name(scheduler->core),
@@ -456,6 +507,35 @@ int rga_job_assign(struct rga_job *job)
 	if (optional_cores == 0) {
 		rga_job_err(job, "no core match\n");
 		return -1;
+	}
+
+	return optional_cores;
+}
+
+int rga_job_assign(struct rga_job *job)
+{
+	int i;
+	int ret;
+	int core = RGA_NONE_CORE;
+	int optional_cores = RGA_CORE_MASK;
+	int min_of_job_count = -1;
+	unsigned long flags;
+	struct rga_req *user_req;
+	struct rga_scheduler_t *scheduler;
+
+	for (i = 0; i < job->task_count; i++) {
+		user_req = &job->task_list[i];
+
+		ret = rga_task_assign(job, user_req);
+		if (ret < 0) {
+			rga_job_err(job, "failed to assign task %d\n", i);
+			return ret;
+		}
+
+		if (DEBUGGER_EN(MSG))
+			rga_job_log(job, "task[%d] assign optional cores = %#x\n", i, ret);
+
+		optional_cores &= ret;
 	}
 
 	for (i = 0; i < rga_drvdata->num_of_scheduler; i++) {

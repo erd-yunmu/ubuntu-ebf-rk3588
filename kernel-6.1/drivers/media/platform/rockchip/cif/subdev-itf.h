@@ -29,6 +29,8 @@
 #define TOISP_CH_MAX 3
 
 #define SDITF_PIXEL_RATE_MAX (1000000000)
+#define SDITF_MAX_EFFEC_EXPOSURE_CNT (1)
+#define SDITF_FREE_BUF_DELAY (2)
 
 struct capture_info {
 	unsigned int offset_x;
@@ -100,6 +102,7 @@ struct sditf_priv {
 	struct rkmodule_hdr_cfg	hdr_cfg;
 	struct capture_info cap_info;
 	struct rkisp_vicap_mode mode;
+	struct rkisp_vicap_mode mode_src;
 	struct toisp_info toisp_inf;
 	struct v4l2_ctrl *pixel_rate;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -123,6 +126,13 @@ struct sditf_priv {
 	u32 cur_time;
 	u32 cur_gain;
 	int one_to_multi_id;
+	u32 hdr_wrap_line;
+	u32 effect_exp_cnt;
+	int free_buf_delay_cnt;
+	bool is_toisp_off;
+	bool is_buf_init;
+	bool is_multi_online;
+	bool is_free_thunderboot_buf;
 };
 
 extern struct platform_driver rkcif_subdev_driver;

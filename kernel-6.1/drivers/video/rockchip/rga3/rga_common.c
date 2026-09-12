@@ -31,6 +31,14 @@ bool rga_is_rgb_format(uint32_t format)
 	case RGA_FORMAT_XBGR_8888:
 	case RGA_FORMAT_ABGR_5551:
 	case RGA_FORMAT_ABGR_4444:
+	case RGA_FORMAT_RGBA_1010102:
+	case RGA_FORMAT_BGRA_1010102:
+	case RGA_FORMAT_ARGB_2101010:
+	case RGA_FORMAT_ABGR_2101010:
+	case RGA_FORMAT_RGBX_1010102:
+	case RGA_FORMAT_BGRX_1010102:
+	case RGA_FORMAT_XRGB_2101010:
+	case RGA_FORMAT_XBGR_2101010:
 		return true;
 	default:
 		return false;
@@ -40,6 +48,7 @@ bool rga_is_rgb_format(uint32_t format)
 bool rga_is_yuv_format(uint32_t format)
 {
 	switch (format) {
+	case RGA_FORMAT_Y1:
 	case RGA_FORMAT_Y4:
 	case RGA_FORMAT_Y8:
 	case RGA_FORMAT_YCbCr_400:
@@ -69,6 +78,8 @@ bool rga_is_yuv_format(uint32_t format)
 
 	case RGA_FORMAT_YCbCr_444_SP:
 	case RGA_FORMAT_YCrCb_444_SP:
+
+	case RGA_FORMAT_YUV_101010:
 		return true;
 	default:
 		return false;
@@ -90,6 +101,10 @@ bool rga_is_alpha_format(uint32_t format)
 	case RGA_FORMAT_ABGR_8888:
 	case RGA_FORMAT_ABGR_5551:
 	case RGA_FORMAT_ABGR_4444:
+	case RGA_FORMAT_RGBA_1010102:
+	case RGA_FORMAT_BGRA_1010102:
+	case RGA_FORMAT_ARGB_2101010:
+	case RGA_FORMAT_ABGR_2101010:
 
 	case RGA_FORMAT_A8:
 		return true;
@@ -175,6 +190,7 @@ bool rga_is_yuv422_semi_planar_format(uint32_t format)
 bool rga_is_yuv8bit_format(uint32_t format)
 {
 	switch (format) {
+	case RGA_FORMAT_Y1:
 	case RGA_FORMAT_Y4:
 	case RGA_FORMAT_Y8:
 	case RGA_FORMAT_YCbCr_400:
@@ -212,6 +228,7 @@ bool rga_is_yuv10bit_format(uint32_t format)
 	case RGA_FORMAT_YCrCb_420_SP_10B:
 	case RGA_FORMAT_YCbCr_422_SP_10B:
 	case RGA_FORMAT_YCrCb_422_SP_10B:
+	case RGA_FORMAT_YUV_101010:
 		return true;
 	default:
 		return false;
@@ -235,6 +252,7 @@ bool rga_is_only_y_format(uint32_t format)
 	case RGA_FORMAT_YCbCr_400:
 	case RGA_FORMAT_Y4:
 	case RGA_FORMAT_Y8:
+	case RGA_FORMAT_Y1:
 		return true;
 	default:
 		return false;
@@ -354,6 +372,29 @@ const char *rga_get_format_name(uint32_t format)
 	case RGA_FORMAT_Y8:
 		return "Y8";
 
+	case RGA_FORMAT_Y1:
+		return "Y1";
+
+	case RGA_FORMAT_RGBA_1010102:
+		return "RGBA1010102";
+	case RGA_FORMAT_BGRA_1010102:
+		return "BGRA1010102";
+	case RGA_FORMAT_ARGB_2101010:
+		return "ARGB2101010";
+	case RGA_FORMAT_ABGR_2101010:
+		return "ABGR2101010";
+	case RGA_FORMAT_RGBX_1010102:
+		return "RGBX1010102";
+	case RGA_FORMAT_BGRX_1010102:
+		return "BGRX1010102";
+	case RGA_FORMAT_XRGB_2101010:
+		return "XRGB2101010";
+	case RGA_FORMAT_XBGR_2101010:
+		return "XBGR2101010";
+
+	case RGA_FORMAT_YUV_101010:
+		return "YUV101010";
+
 	default:
 		return "UNF";
 	}
@@ -372,7 +413,18 @@ int rga_get_format_bits(uint32_t format)
 	case RGA_FORMAT_XRGB_8888:
 	case RGA_FORMAT_ABGR_8888:
 	case RGA_FORMAT_XBGR_8888:
+	case RGA_FORMAT_RGBA_1010102:
+	case RGA_FORMAT_BGRA_1010102:
+	case RGA_FORMAT_ARGB_2101010:
+	case RGA_FORMAT_ABGR_2101010:
+	case RGA_FORMAT_RGBX_1010102:
+	case RGA_FORMAT_BGRX_1010102:
+	case RGA_FORMAT_XRGB_2101010:
+	case RGA_FORMAT_XBGR_2101010:
 		bits = 32;
+		break;
+	case RGA_FORMAT_YUV_101010:
+		bits = 30;
 		break;
 	case RGA_FORMAT_RGB_888:
 	case RGA_FORMAT_BGR_888:
@@ -413,9 +465,11 @@ int rga_get_format_bits(uint32_t format)
 		break;
 	case RGA_FORMAT_YCbCr_420_SP_10B:
 	case RGA_FORMAT_YCrCb_420_SP_10B:
+		bits = 15;
+		break;
 	case RGA_FORMAT_YCbCr_422_SP_10B:
 	case RGA_FORMAT_YCrCb_422_SP_10B:
-		bits = 15;
+		bits = 20;
 		break;
 	case RGA_FORMAT_YCbCr_400:
 	case RGA_FORMAT_BPP8:
@@ -431,6 +485,7 @@ int rga_get_format_bits(uint32_t format)
 		bits = 2;
 		break;
 	case RGA_FORMAT_BPP1:
+	case RGA_FORMAT_Y1:
 		bits = 1;
 		break;
 	default:
@@ -454,7 +509,18 @@ int rga_get_pixel_stride_from_format(uint32_t format)
 	case RGA_FORMAT_XRGB_8888:
 	case RGA_FORMAT_ABGR_8888:
 	case RGA_FORMAT_XBGR_8888:
+	case RGA_FORMAT_RGBA_1010102:
+	case RGA_FORMAT_BGRA_1010102:
+	case RGA_FORMAT_ARGB_2101010:
+	case RGA_FORMAT_ABGR_2101010:
+	case RGA_FORMAT_RGBX_1010102:
+	case RGA_FORMAT_BGRX_1010102:
+	case RGA_FORMAT_XRGB_2101010:
+	case RGA_FORMAT_XBGR_2101010:
 		pixel_stride = 32;
+		break;
+	case RGA_FORMAT_YUV_101010:
+		pixel_stride = 30;
 		break;
 	case RGA_FORMAT_RGB_888:
 	case RGA_FORMAT_BGR_888:
@@ -488,9 +554,6 @@ int rga_get_pixel_stride_from_format(uint32_t format)
 	case RGA_FORMAT_YCrCb_422_SP_10B:
 		pixel_stride = 10;
 		break;
-	case RGA_FORMAT_BPP1:
-	case RGA_FORMAT_BPP2:
-	case RGA_FORMAT_BPP4:
 	case RGA_FORMAT_BPP8:
 	case RGA_FORMAT_YCbCr_400:
 	case RGA_FORMAT_A8:
@@ -505,8 +568,16 @@ int rga_get_pixel_stride_from_format(uint32_t format)
 	case RGA_FORMAT_Y8:
 		pixel_stride = 8;
 		break;
+	case RGA_FORMAT_BPP4:
 	case RGA_FORMAT_Y4:
 		pixel_stride = 4;
+		break;
+	case RGA_FORMAT_BPP2:
+		pixel_stride = 2;
+		break;
+	case RGA_FORMAT_BPP1:
+	case RGA_FORMAT_Y1:
+		pixel_stride = 1;
 		break;
 	default:
 		rga_err("unknown format [0x%x]\n", format);
@@ -761,8 +832,20 @@ int rga_image_size_cal(int w, int h, int format,
 	case RGA_FORMAT_XRGB_8888:
 	case RGA_FORMAT_ABGR_8888:
 	case RGA_FORMAT_XBGR_8888:
+	case RGA_FORMAT_RGBA_1010102:
+	case RGA_FORMAT_BGRA_1010102:
+	case RGA_FORMAT_ARGB_2101010:
+	case RGA_FORMAT_ABGR_2101010:
+	case RGA_FORMAT_RGBX_1010102:
+	case RGA_FORMAT_BGRX_1010102:
+	case RGA_FORMAT_XRGB_2101010:
+	case RGA_FORMAT_XBGR_2101010:
 		yrgb = w * h * 4;
 		break;
+	case RGA_FORMAT_YUV_101010:
+		yrgb = ((w * 5) >> 2) * h * 3;
+		break;
+
 	case RGA_FORMAT_RGB_888:
 	case RGA_FORMAT_BGR_888:
 		yrgb = w * h * 3;
@@ -823,13 +906,22 @@ int rga_image_size_cal(int w, int h, int format,
 		uv = (w * h) >> 2;
 		v = uv;
 		break;
+	case RGA_FORMAT_BPP8:
 	case RGA_FORMAT_YCbCr_400:
 	case RGA_FORMAT_A8:
 	case RGA_FORMAT_Y8:
 		yrgb = w * h;
 		break;
+	case RGA_FORMAT_BPP4:
 	case RGA_FORMAT_Y4:
 		yrgb = (w * h) >> 1;
+		break;
+	case RGA_FORMAT_BPP2:
+		yrgb = (w * h) >> 2;
+		break;
+	case RGA_FORMAT_BPP1:
+	case RGA_FORMAT_Y1:
+		yrgb = (w * h) >> 3;
 		break;
 	default:
 		rga_err("Unsuport format [0x%x]\n", format);
@@ -924,4 +1016,28 @@ void rga_dump_req(struct rga_request *request, struct rga_req *req)
 		rga_get_interp_str(req->interp.verti), req->interp.verti);
 	rga_req_log(request, "core_mask = %#x, priority = %d, in_fence = %d(%#x)\n",
 		req->core, req->priority, req->in_fence_fd, req->in_fence_fd);
+}
+
+unsigned long rga_get_free_pages(gfp_t gfp_mask, unsigned int *order, unsigned long size)
+{
+	int cur_order, max_order;
+	unsigned long pages;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
+	max_order = MAX_ORDER;
+#else
+	max_order = MAX_PAGE_ORDER;
+#endif
+
+	cur_order = get_order(size);
+	if (cur_order > max_order) {
+		rga_err("Can not alloc pages with order[%d] for viraddr pages, max_order = %d\n",
+			cur_order, max_order);
+		return 0;
+	}
+
+	pages = __get_free_pages(gfp_mask, cur_order);
+	*order = cur_order;
+
+	return pages;
 }

@@ -1,7 +1,7 @@
 /*
  * MIPI DSI Bus
  *
- * Copyright (c) Fuzhou Rockchip Electronics Co.Ltd
+ * Copyright (c) Rockchip Electronics Co., Ltd.
  * Authors:
  *       Mark Yao <yzq@rock-chips.com>
  *
@@ -46,6 +46,7 @@
 #define MIPI_DSI_FMT_RGB666		1
 #define MIPI_DSI_FMT_RGB666_PACKED	2
 #define MIPI_DSI_FMT_RGB565		3
+#define MIPI_DSI_FMT_RGB101010		4
 
 #define MIPI_CSI_FMT_RAW8		0x10
 #define MIPI_CSI_FMT_RAW10		0x11

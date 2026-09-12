@@ -16,8 +16,10 @@
  * V0.0X01.0X08
  *	1. add support wakeup & sleep for aov function
  *	2. using 60fps output default
+ * V0.0X01.0X09 fix poweroff issue.
  */
 
+// #define DEBUG
 #include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/delay.h>
@@ -40,7 +42,7 @@
 #include "cam-tb-setup.h"
 #include "cam-sleep-wakeup.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x08)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x09)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -1146,10 +1148,10 @@ static void sc200ai_get_module_inf(struct sc200ai *sc200ai,
 				   struct rkmodule_inf *inf)
 {
 	memset(inf, 0, sizeof(*inf));
-	strlcpy(inf->base.sensor, SC200AI_NAME, sizeof(inf->base.sensor));
-	strlcpy(inf->base.module, sc200ai->module_name,
+	strscpy(inf->base.sensor, SC200AI_NAME, sizeof(inf->base.sensor));
+	strscpy(inf->base.module, sc200ai->module_name,
 		sizeof(inf->base.module));
-	strlcpy(inf->base.lens, sc200ai->len_name, sizeof(inf->base.lens));
+	strscpy(inf->base.lens, sc200ai->len_name, sizeof(inf->base.lens));
 }
 
 static int sc200ai_get_channel_info(struct sc200ai *sc200ai, struct rkmodule_channel_info *ch_info)
@@ -1568,7 +1570,7 @@ static void __sc200ai_power_off(struct sc200ai *sc200ai)
 	}
 	if (!IS_ERR(sc200ai->pwdn_gpio))
 		gpiod_set_value_cansleep(sc200ai->pwdn_gpio, 0);
-	clk_disable_unprepare(sc200ai->xvclk);
+
 	if (!IS_ERR(sc200ai->reset_gpio))
 		gpiod_set_value_cansleep(sc200ai->reset_gpio, 0);
 	if (!IS_ERR_OR_NULL(sc200ai->pins_sleep)) {
@@ -1921,7 +1923,7 @@ static int sc200ai_check_sensor_id(struct sc200ai *sc200ai,
 		return -ENODEV;
 	}
 
-	dev_info(dev, "Detected OV%06x sensor\n", CHIP_ID);
+	dev_info(dev, "Detected SC200AI(chip id:0x%04x) sensor\n", CHIP_ID);
 
 	return 0;
 }
@@ -2185,7 +2187,7 @@ static void __exit sensor_mod_exit(void)
 	i2c_del_driver(&sc200ai_i2c_driver);
 }
 
-#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP) && !defined(CONFIG_INITCALL_ASYNC)
+#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP)
 subsys_initcall(sensor_mod_init);
 #else
 device_initcall_sync(sensor_mod_init);

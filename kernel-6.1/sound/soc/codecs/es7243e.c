@@ -2391,7 +2391,7 @@ es7243e_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *i2c_id)
 	return ret;
 }
 
-static void __exit es7243e_i2c_remove(struct i2c_client *i2c)
+static void es7243e_i2c_remove(struct i2c_client *i2c)
 {
 	sysfs_remove_group(&i2c->dev.kobj, &es7243e_debug_attr_group);
 }
@@ -2405,49 +2405,49 @@ es7243e_i2c_detect(struct i2c_client *client, struct i2c_board_info *info)
 	if (adapter->nr == ES7243E_I2C_BUS_NUM) {
 #if ES7243E_CHANNELS_MAX > 0
 		if (client->addr == ES7243E_I2C_CHIP_ADDRESS_0) {
-			strlcpy(info->type, "ES7243E_MicArray_0", I2C_NAME_SIZE);
+			strscpy(info->type, "ES7243E_MicArray_0", I2C_NAME_SIZE);
 			return 0;
 		}
 #endif
 #if ES7243E_CHANNELS_MAX > 2
 		else if (client->addr == ES7243E_I2C_CHIP_ADDRESS_1) {
-			strlcpy(info->type, "ES7243E_MicArray_1", I2C_NAME_SIZE);
+			strscpy(info->type, "ES7243E_MicArray_1", I2C_NAME_SIZE);
 			return 0;
 		}
 #endif
 #if ES7243E_CHANNELS_MAX > 4
 		else if (client->addr == ES7243E_I2C_CHIP_ADDRESS_2) {
-			strlcpy(info->type, "ES7243E_MicArray_2", I2C_NAME_SIZE);
+			strscpy(info->type, "ES7243E_MicArray_2", I2C_NAME_SIZE);
 			return 0;
 		}
 #endif
 #if ES7243E_CHANNELS_MAX > 6
 		else if (client->addr == ES7243E_I2C_CHIP_ADDRESS_3) {
-			strlcpy(info->type, "ES7243E_MicArray_3", I2C_NAME_SIZE);
+			strscpy(info->type, "ES7243E_MicArray_3", I2C_NAME_SIZE);
 			return 0;
 		}
 #endif
 #if ES7243E_CHANNELS_MAX > 8
 		else if (client->addr == ES7243E_I2C_CHIP_ADDRESS_4) {
-			strlcpy(info->type, "ES7243E_MicArray_4", I2C_NAME_SIZE);
+			strscpy(info->type, "ES7243E_MicArray_4", I2C_NAME_SIZE);
 			return 0;
 		}
 #endif
 #if ES7243E_CHANNELS_MAX > 10
 		else if (client->addr == ES7243E_I2C_CHIP_ADDRESS_5) {
-			strlcpy(info->type, "ES7243E_MicArray_5", I2C_NAME_SIZE);
+			strscpy(info->type, "ES7243E_MicArray_5", I2C_NAME_SIZE);
 			return 0;
 		}
 #endif
 #if ES7243E_CHANNELS_MAX > 12
 		else if (client->addr == ES7243E_I2C_CHIP_ADDRESS_6) {
-			strlcpy(info->type, "ES7243E_MicArray_6", I2C_NAME_SIZE);
+			strscpy(info->type, "ES7243E_MicArray_6", I2C_NAME_SIZE);
 			return 0;
 		}
 #endif
 #if ES7243E_CHANNELS_MAX > 14
 		else if (client->addr == ES7243E_I2C_CHIP_ADDRESS_7) {
-			strlcpy(info->type, "ES7243E_MicArray_7", I2C_NAME_SIZE);
+			strscpy(info->type, "ES7243E_MicArray_7", I2C_NAME_SIZE);
 			return 0;
 		}
 #endif
@@ -2613,7 +2613,7 @@ static struct i2c_driver es7243e_i2c_driver = {
 #endif
 		   },
 	.probe = es7243e_i2c_probe,
-	.remove = __exit_p(es7243e_i2c_remove),
+	.remove = es7243e_i2c_remove,
 	.class = I2C_CLASS_HWMON,
 	.id_table = es7243e_i2c_id,
 

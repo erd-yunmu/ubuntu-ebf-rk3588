@@ -59,13 +59,13 @@ struct uac_rtd_params {
 
   /* Volume/Mute controls and their state */
   int fu_id; /* Feature Unit ID */
-  struct snd_kcontrol *snd_kctl_volume;
-  struct snd_kcontrol *snd_kctl_mute;
+  struct snd_ctl_elem_id snd_kctl_volume_id;
+  struct snd_ctl_elem_id snd_kctl_mute_id;
   s16 volume_min, volume_max, volume_res;
   s16 volume;
   int mute;
 
-	struct snd_kcontrol *snd_kctl_rate; /* read-only current rate */
+	struct snd_ctl_elem_id snd_kctl_rate_id; /* read-only current rate */
 	int srate; /* selected samplerate */
 	int active; /* playback/capture running */
 
@@ -321,6 +321,7 @@ static int uac_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	struct uac_rtd_params *prm;
 	struct g_audio *audio_dev;
 	struct uac_params *params;
+	unsigned int max_psize;
 	int err = 0;
 
 	audio_dev = uac->audio_dev;
@@ -348,8 +349,10 @@ static int uac_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	}
 
 	/* Clear buffer after Play stops */
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK && !prm->ss)
-		memset(prm->rbuf, 0, prm->max_psize * params->req_number);
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK && !prm->ss) {
+		max_psize = ALIGN(prm->max_psize, cache_line_size());
+		memset(prm->rbuf, 0, max_psize * params->req_number);
+	}
 
 	return err;
 }
@@ -498,14 +501,13 @@ static inline void free_ep_fback(struct uac_rtd_params *prm, struct usb_ep *ep)
 static void set_active(struct uac_rtd_params *prm, bool active)
 {
 	// notifying through the Rate ctrl
-	struct snd_kcontrol *kctl = prm->snd_kctl_rate;
 	unsigned long flags;
 
 	spin_lock_irqsave(&prm->lock, flags);
 	if (prm->active != active) {
 		prm->active = active;
 		snd_ctl_notify(prm->uac->card, SNDRV_CTL_EVENT_MASK_VALUE,
-				&kctl->id);
+				&prm->snd_kctl_rate_id);
 	}
 	spin_unlock_irqrestore(&prm->lock, flags);
 }
@@ -601,7 +603,8 @@ int u_audio_start_capture(struct g_audio *audio_dev)
 	struct usb_ep *ep, *ep_fback;
 	struct uac_rtd_params *prm;
 	struct uac_params *params = &audio_dev->params;
-	int req_len, i;
+	int req_len, i, ret;
+	unsigned int maxpacket;
 
 	/*
 	 * For better compatibility on some PC Hosts which
@@ -619,11 +622,21 @@ int u_audio_start_capture(struct g_audio *audio_dev)
 	prm = &uac->c_prm;
 	dev_dbg(dev, "start capture with rate %d\n", prm->srate);
 	ep = audio_dev->out_ep;
-	config_ep_by_speed(gadget, &audio_dev->func, ep);
+	ret = config_ep_by_speed(gadget, &audio_dev->func, ep);
+	if (ret < 0) {
+		dev_err(dev, "config_ep_by_speed for out_ep failed (%d)\n", ret);
+		return ret;
+	}
+
 	req_len = ep->maxpacket;
+	maxpacket = ALIGN((unsigned int)ep->maxpacket, cache_line_size());
 
 	prm->ep_enabled = true;
-	usb_ep_enable(ep);
+	ret = usb_ep_enable(ep);
+	if (ret < 0) {
+		dev_err(dev, "usb_ep_enable failed for out_ep (%d)\n", ret);
+		return ret;
+	}
 
 	for (i = 0; i < params->req_number; i++) {
 		if (!prm->reqs[i]) {
@@ -637,7 +650,7 @@ int u_audio_start_capture(struct g_audio *audio_dev)
 			req->context = prm;
 			req->length = req_len;
 			req->complete = u_audio_iso_complete;
-			req->buf = prm->rbuf + i * ep->maxpacket;
+			req->buf = prm->rbuf + i * maxpacket;
 		}
 
 		if (usb_ep_queue(ep, prm->reqs[i], GFP_ATOMIC))
@@ -651,9 +664,18 @@ int u_audio_start_capture(struct g_audio *audio_dev)
 		return 0;
 
 	/* Setup feedback endpoint */
-	config_ep_by_speed(gadget, &audio_dev->func, ep_fback);
+	ret = config_ep_by_speed(gadget, &audio_dev->func, ep_fback);
+	if (ret < 0) {
+		dev_err(dev, "config_ep_by_speed in_ep_fback failed (%d)\n", ret);
+		return ret; // TODO: Clean up out_ep
+	}
+
 	prm->fb_ep_enabled = true;
-	usb_ep_enable(ep_fback);
+	ret = usb_ep_enable(ep_fback);
+	if (ret < 0) {
+		dev_err(dev, "usb_ep_enable failed for in_ep_fback (%d)\n", ret);
+		return ret; // TODO: Clean up out_ep
+	}
 	req_len = ep_fback->maxpacket;
 
 	req_fback = usb_ep_alloc_request(ep_fback, GFP_ATOMIC);
@@ -713,8 +735,8 @@ int u_audio_start_playback(struct g_audio *audio_dev)
 	struct uac_params *params = &audio_dev->params;
 	unsigned int factor;
 	const struct usb_endpoint_descriptor *ep_desc;
-	int req_len, i;
-	unsigned int p_pktsize;
+	int req_len, i, ret;
+	unsigned int p_pktsize, maxpacket;
 
 	/*
 	 * For better compatibility on some PC Hosts which
@@ -732,9 +754,14 @@ int u_audio_start_playback(struct g_audio *audio_dev)
 	prm = &uac->p_prm;
 	dev_dbg(dev, "start playback with rate %d\n", prm->srate);
 	ep = audio_dev->in_ep;
-	config_ep_by_speed(gadget, &audio_dev->func, ep);
+	ret = config_ep_by_speed(gadget, &audio_dev->func, ep);
+	if (ret < 0) {
+		dev_err(dev, "config_ep_by_speed for in_ep failed (%d)\n", ret);
+		return ret;
+	}
 
 	ep_desc = ep->desc;
+	maxpacket = ALIGN((unsigned int)ep->maxpacket, cache_line_size());
 	/*
 	 * Always start with original frequency
 	 */
@@ -759,7 +786,11 @@ int u_audio_start_playback(struct g_audio *audio_dev)
 	uac->p_residue_mil = 0;
 
 	prm->ep_enabled = true;
-	usb_ep_enable(ep);
+	ret = usb_ep_enable(ep);
+	if (ret < 0) {
+		dev_err(dev, "usb_ep_enable failed for in_ep (%d)\n", ret);
+		return ret;
+	}
 
 	for (i = 0; i < params->req_number; i++) {
 		if (!prm->reqs[i]) {
@@ -773,7 +804,7 @@ int u_audio_start_playback(struct g_audio *audio_dev)
 			req->context = prm;
 			req->length = req_len;
 			req->complete = u_audio_iso_complete;
-			req->buf = prm->rbuf + i * ep->maxpacket;
+			req->buf = prm->rbuf + i * maxpacket;
 		}
 
 		if (usb_ep_queue(ep, prm->reqs[i], GFP_ATOMIC))
@@ -855,7 +886,7 @@ int u_audio_set_volume(struct g_audio *audio_dev, int playback, s16 val)
 		schedule_work(&audio_dev->work);
 
 		snd_ctl_notify(uac->card, SNDRV_CTL_EVENT_MASK_VALUE,
-				&prm->snd_kctl_volume->id);
+				&prm->snd_kctl_volume_id);
 	}
 
 	return 0;
@@ -911,7 +942,7 @@ int u_audio_set_mute(struct g_audio *audio_dev, int playback, int val)
 		schedule_work(&audio_dev->work);
 
 		snd_ctl_notify(uac->card, SNDRV_CTL_EVENT_MASK_VALUE,
-			       &prm->snd_kctl_mute->id);
+			       &prm->snd_kctl_mute_id);
 	}
 
 	return 0;
@@ -1408,6 +1439,7 @@ int g_audio_setup(struct g_audio *g_audio, const char *pcm_name,
 	struct uac_params *params;
 	int p_chmask, c_chmask;
 	int i, err;
+	unsigned int max_psize;
 
 	if (!g_audio)
 		return -EINVAL;
@@ -1444,7 +1476,8 @@ int g_audio_setup(struct g_audio *g_audio, const char *pcm_name,
 			goto fail;
 		}
 
-		prm->rbuf = kcalloc(params->req_number, prm->max_psize,
+		max_psize = ALIGN(prm->max_psize, cache_line_size());
+		prm->rbuf = kcalloc(params->req_number, max_psize,
 				GFP_KERNEL);
 		if (!prm->rbuf) {
 			prm->max_psize = 0;
@@ -1469,7 +1502,8 @@ int g_audio_setup(struct g_audio *g_audio, const char *pcm_name,
 			goto fail;
 		}
 
-		prm->rbuf = kcalloc(params->req_number, prm->max_psize,
+		max_psize = ALIGN(prm->max_psize, cache_line_size());
+		prm->rbuf = kcalloc(params->req_number, max_psize,
 				GFP_KERNEL);
 		if (!prm->rbuf) {
 			prm->max_psize = 0;
@@ -1583,7 +1617,7 @@ int g_audio_setup(struct g_audio *g_audio, const char *pcm_name,
 			err = snd_ctl_add(card, kctl);
 			if (err < 0)
 				goto snd_fail;
-			prm->snd_kctl_mute = kctl;
+			prm->snd_kctl_mute_id = kctl->id;
 			prm->mute = 0;
 		}
 
@@ -1611,7 +1645,7 @@ int g_audio_setup(struct g_audio *g_audio, const char *pcm_name,
 			err = snd_ctl_add(card, kctl);
 			if (err < 0)
 				goto snd_fail;
-			prm->snd_kctl_volume = kctl;
+			prm->snd_kctl_volume_id = kctl->id;
 			prm->volume = fu->volume_max;
 			prm->volume_max = fu->volume_max;
 			prm->volume_min = fu->volume_min;
@@ -1635,7 +1669,7 @@ int g_audio_setup(struct g_audio *g_audio, const char *pcm_name,
 		err = snd_ctl_add(card, kctl);
 		if (err < 0)
 			goto snd_fail;
-		prm->snd_kctl_rate = kctl;
+		prm->snd_kctl_rate_id = kctl->id;
 	}
 
 	strscpy(card->driver, card_name, sizeof(card->driver));
@@ -1691,6 +1725,8 @@ void g_audio_cleanup(struct g_audio *g_audio)
 	g_audio->device = NULL;
 
 	uac = g_audio->uac;
+	g_audio->uac = NULL;
+
 	card = uac->card;
 	if (card)
 		snd_card_free_when_closed(card);

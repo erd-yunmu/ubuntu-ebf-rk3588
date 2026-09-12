@@ -198,6 +198,11 @@ config INTEL_XWAY_PHY
 	  PEF 7061, PEF 7071 and PEF 7072 or integrated into the Intel
 	  SoCs xRX200, xRX300, xRX330, xRX350 and xRX550.
 
+config JLSEMI_PHY
+	tristate "JLSemi PHYs"
+	help
+	  Currently supports the JLSemi PHYs.
+	  
 config LSI_ET1011C_PHY
 	tristate "LSI ET1011C PHY"
 	help
@@ -302,6 +307,11 @@ config RENESAS_PHY
 	help
 	  Supports the Renesas PHYs uPD60620 and uPD60620A.
 
+config ROCKCHIP_FEPHY
+	tristate "Driver for Rockchip Fast Ethernet PHYs"
+	help
+	  Currently supports the Rockchip Fast Ethernet PHYs.
+
 config ROCKCHIP_PHY
 	tristate "Rockchip Ethernet PHYs"
 	help
@@ -364,11 +374,6 @@ config VITESSE_PHY
 	tristate "Vitesse PHYs"
 	help
 	  Currently supports the vsc8244
-	  
-config JLSEMI_PHY
-	tristate "JLSemi PHYs"
-	help
-	  Currently supports the JLSemi PHYs.
 
 config XILINX_GMII2RGMII
 	tristate "Xilinx GMII2RGMII converter driver"

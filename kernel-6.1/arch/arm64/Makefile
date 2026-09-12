@@ -10,7 +10,7 @@
 #
 # Copyright (C) 1995-2001 by Russell King
 
-LDFLAGS_vmlinux	:=--no-undefined -X
+LDFLAGS_vmlinux	:=--no-undefined -X --pic-veneer
 
 ifeq ($(CONFIG_RELOCATABLE), y)
 # Pass --no-apply-dynamic-relocs to restore pre-binutils-2.27 behaviour
@@ -224,5 +224,4 @@ else
 endif
 	$(Q)$(srctree)/scripts/mkimg --dtb $*.dtb
 
-CLEAN_DIRS += out
-CLEAN_FILES += boot.img kernel.img resource.img zboot.img
+CLEAN_FILES += out boot.img kernel.img resource.img zboot.img

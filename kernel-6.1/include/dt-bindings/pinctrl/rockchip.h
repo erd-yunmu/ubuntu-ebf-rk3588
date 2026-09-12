@@ -42,6 +42,12 @@
 #define RK_PD6		30
 #define RK_PD7		31
 
+#define RK_PIN_TO_BIT(pin)	(1 << (pin))
+
+#define RK_GROUP_NUM		4
+#define RK_GROUP_MASK		((1 << RK_GROUP_NUM) - 1)
+#define RK_GROUP_TO_BIT(group)	(1 << (group))
+
 #define RK_FUNC_GPIO	0
 
 #define PCA_IO0_0		0

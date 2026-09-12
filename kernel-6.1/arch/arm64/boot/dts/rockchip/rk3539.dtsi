@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 Rockchip Electronics Co., Ltd.
+ */
+
+#include "rk3538.dtsi"
+
+/ {
+	compatible = "rockchip,rk3539";
+
+	interrupt-parent = <&gic>;
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	aliases {
+		ethernet0 = &gmac;
+	};
+
+	soc {
+		gmac: ethernet@fdd80000 {
+			compatible = "rockchip,rk3538-gmac", "snps,dwmac-4.20a";
+			reg = <0xfdd80000 0x10000>;
+			interrupts = <GIC_SPI 127 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 126 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "macirq", "eth_wake_irq";
+			rockchip,grf = <&phpl_grf>;
+			clocks = <&cru CLK_GMAC_125M>, <&cru CLK_GMAC_50M_IOBUF>,
+				 <&cru PCLK_GMAC>, <&cru ACLK_GMAC>,
+				 <&cru CLK_GMAC_PTP_REF>;
+			clock-names = "stmmaceth", "clk_mac_ref",
+				      "pclk_mac", "aclk_mac",
+				      "ptp_ref";
+			resets = <&cru SRST_ARESETN_GMAC>;
+			reset-names = "stmmaceth";
+
+			snps,mixed-burst;
+			snps,tso;
+
+			snps,axi-config = <&gmac_stmmac_axi_setup>;
+			snps,mtl-rx-config = <&gmac_mtl_rx_setup>;
+			snps,mtl-tx-config = <&gmac_mtl_tx_setup>;
+
+			status = "disabled";
+
+			mdio0: mdio {
+				compatible = "snps,dwmac-mdio";
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+
+			gmac_stmmac_axi_setup: stmmac-axi-config {
+				snps,wr_osr_lmt = <4>;
+				snps,rd_osr_lmt = <8>;
+				snps,blen = <0 0 0 0 16 8 4>;
+			};
+
+			gmac_mtl_rx_setup: rx-queues-config {
+				snps,rx-queues-to-use = <1>;
+				queue0 {};
+			};
+
+			gmac_mtl_tx_setup: tx-queues-config {
+				snps,tx-queues-to-use = <1>;
+				queue0 {};
+			};
+		};
+	};
+};
+
+&cpu01_opp_table {
+	opp-1800000000 {
+		opp-hz = /bits/ 64 <1800000000>;
+		opp-microvolt = <1100000 1100000 1100000>;
+		opp-microvolt-L6 = <1087500 1087500 1100000>;
+		opp-microvolt-L7 = <1075000 1075000 1100000>;
+		opp-microvolt-L8 = <1062500 1062500 1100000>;
+		opp-microvolt-L9 = <1050000 1050000 1100000>;
+		opp-microvolt-L10 = <1037500 1037500 1100000>;
+		opp-microvolt-L11 = <1025000 1025000 1100000>;
+		opp-microvolt-L12 = <1025000 1025000 1100000>;
+		opp-microvolt-L13 = <1012500 1012500 1100000>;
+		opp-microvolt-L14 = <1000000 1000000 1100000>;
+		opp-microvolt-L15 = <1000000 1000000 1100000>;
+		opp-microvolt-L16 = <1000000 1000000 1100000>;
+		opp-microvolt-L17 = <1000000 1000000 1100000>;
+		opp-microvolt-L18 = <1000000 1000000 1100000>;
+		opp-microvolt-L19 = <1000000 1000000 1100000>;
+		opp-microvolt-L20 = <1000000 1000000 1100000>;
+		clock-latency-ns = <40000>;
+	};
+};
+
+&cpu23_opp_table {
+	/delete-node/ opp-1700000000;
+	opp-1800000000 {
+		opp-hz = /bits/ 64 <1800000000>;
+		opp-microvolt = <1100000 1100000 1100000>;
+		opp-microvolt-L6 = <1087500 1087500 1100000>;
+		opp-microvolt-L7 = <1075000 1075000 1100000>;
+		opp-microvolt-L8 = <1062500 1062500 1100000>;
+		opp-microvolt-L9 = <1050000 1050000 1100000>;
+		opp-microvolt-L10 = <1037500 1037500 1100000>;
+		opp-microvolt-L11 = <1025000 1025000 1100000>;
+		opp-microvolt-L12 = <1025000 1025000 1100000>;
+		opp-microvolt-L13 = <1012500 1012500 1100000>;
+		opp-microvolt-L14 = <1000000 1000000 1100000>;
+		opp-microvolt-L15 = <1000000 1000000 1100000>;
+		opp-microvolt-L16 = <1000000 1000000 1100000>;
+		opp-microvolt-L17 = <1000000 1000000 1100000>;
+		opp-microvolt-L18 = <1000000 1000000 1100000>;
+		opp-microvolt-L19 = <1000000 1000000 1100000>;
+		opp-microvolt-L20 = <1000000 1000000 1100000>;
+		clock-latency-ns = <40000>;
+	};
+	opp-1920000000 {
+		opp-hz = /bits/ 64 <1920000000>;
+		opp-microvolt = <1100000 1100000 1100000>;
+		opp-microvolt-L11 = <1087500 1087500 1100000>;
+		opp-microvolt-L12 = <1075000 1075000 1100000>;
+		opp-microvolt-L13 = <1062500 1062500 1100000>;
+		opp-microvolt-L14 = <1050000 1050000 1100000>;
+		opp-microvolt-L15 = <1037500 1037500 1100000>;
+		opp-microvolt-L16 = <1025000 1025000 1100000>;
+		opp-microvolt-L17 = <1012500 1012500 1100000>;
+		opp-microvolt-L18 = <1000000 1000000 1100000>;
+		opp-microvolt-L19 = <1000000 1000000 1100000>;
+		opp-microvolt-L20 = <1000000 1000000 1100000>;
+		clock-latency-ns = <40000>;
+	};
+};
+
+&gpu_opp_table {
+	opp-580000000 {
+		opp-hz = /bits/ 64 <580000000>;
+		opp-microvolt = <850000 850000 950000>;
+		opp-microvolt-L0 = <950000 950000 950000>;
+		opp-microvolt-L1 = <950000 950000 950000>;
+		opp-microvolt-L2 = <950000 950000 950000>;
+		opp-microvolt-L3 = <950000 950000 950000>;
+		opp-microvolt-L4 = <950000 950000 950000>;
+		opp-microvolt-L5 = <950000 950000 950000>;
+		opp-microvolt-L6 = <950000 950000 950000>;
+		opp-microvolt-L7 = <937500 937500 950000>;
+		opp-microvolt-L8 = <925000 925000 950000>;
+		opp-microvolt-L9 = <912500 912500 950000>;
+		opp-microvolt-L10 = <900000 900000 950000>;
+		opp-microvolt-L11 = <887500 887500 950000>;
+		opp-microvolt-L12 = <875000 875000 950000>;
+		opp-microvolt-L13 = <862500 862500 950000>;
+		opp-microvolt-L14 = <850000 850000 950000>;
+	};
+};
+
+&soc_thermal {
+	sustainable-power = <452>; /* milliwatts */
+};

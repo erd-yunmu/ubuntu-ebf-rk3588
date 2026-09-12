@@ -127,8 +127,13 @@
 	status = "okay";
 };
 
-&hdptxphy_hdmi {
+&hdptxphy {
 	status = "okay";
+};
+
+&hynitron {
+	status = "okay";
+	power-supply = <&vcc3v3_lcd_n>;
 };
 
 &i2c3 {

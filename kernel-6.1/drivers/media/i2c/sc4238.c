@@ -1690,10 +1690,10 @@ static void sc4238_get_module_inf(struct sc4238 *sc4238,
 				  struct rkmodule_inf *inf)
 {
 	memset(inf, 0, sizeof(*inf));
-	strlcpy(inf->base.sensor, SC4238_NAME, sizeof(inf->base.sensor));
-	strlcpy(inf->base.module, sc4238->module_name,
+	strscpy(inf->base.sensor, SC4238_NAME, sizeof(inf->base.sensor));
+	strscpy(inf->base.module, sc4238->module_name,
 		sizeof(inf->base.module));
-	strlcpy(inf->base.lens, sc4238->len_name, sizeof(inf->base.lens));
+	strscpy(inf->base.lens, sc4238->len_name, sizeof(inf->base.lens));
 }
 
 static int sc4238_get_gain_reg(struct sc4238 *sc4238, u32 total_gain,
@@ -2843,9 +2843,6 @@ static struct i2c_driver sc4238_i2c_driver = {
 	.id_table	= sc4238_match_id,
 };
 
-#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
-module_i2c_driver(sc4238_i2c_driver);
-#else
 static int __init sensor_mod_init(void)
 {
 	return i2c_add_driver(&sc4238_i2c_driver);
@@ -2856,9 +2853,12 @@ static void __exit sensor_mod_exit(void)
 	i2c_del_driver(&sc4238_i2c_driver);
 }
 
+#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP)
+subsys_initcall(sensor_mod_init);
+#else
 device_initcall_sync(sensor_mod_init);
-module_exit(sensor_mod_exit);
 #endif
+module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("Smartsens sc4238 sensor driver");
 MODULE_LICENSE("GPL v2");

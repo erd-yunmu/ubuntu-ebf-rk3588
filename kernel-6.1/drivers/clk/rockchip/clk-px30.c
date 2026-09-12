@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2018 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2018 Rockchip Electronics Co., Ltd.
  * Author: Elaine Zhang<zhangqing@rock-chips.com>
  */
 
@@ -401,13 +401,13 @@ static struct rockchip_clk_branch px30_clk_branches[] __initdata = {
 	COMPOSITE(SCLK_VOPB_PWM, "clk_vopb_pwm", mux_gpll_xin24m_p, 0,
 			PX30_CLKSEL_CON(7), 7, 1, MFLAGS, 0, 7, DFLAGS,
 			PX30_CLKGATE_CON(2), 5, GFLAGS),
-	COMPOSITE(0, "dclk_vopb_src", mux_cpll_npll_p, CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
+	COMPOSITE(0, "dclk_vopb_src", mux_cpll_npll_p, CLK_SET_RATE_NO_REPARENT,
 			PX30_CLKSEL_CON(5), 11, 1, MFLAGS, 0, 8, DFLAGS,
 			PX30_CLKGATE_CON(2), 2, GFLAGS),
 	COMPOSITE_NODIV(DCLK_VOPB, "dclk_vopb", mux_dclk_vopb_p, CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
 			PX30_CLKSEL_CON(5), 14, 2, MFLAGS,
 			PX30_CLKGATE_CON(2), 4, GFLAGS),
-	COMPOSITE(0, "dclk_vopl_src", mux_npll_cpll_p, CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
+	COMPOSITE(0, "dclk_vopl_src", mux_npll_cpll_p, CLK_SET_RATE_NO_REPARENT,
 			PX30_CLKSEL_CON(8), 11, 1, MFLAGS, 0, 8, DFLAGS,
 			PX30_CLKGATE_CON(2), 6, GFLAGS),
 	COMPOSITE_NODIV(DCLK_VOPL, "dclk_vopl", mux_dclk_vopl_p, CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
@@ -1000,6 +1000,20 @@ static void __init px30_register_armclk(void)
 				     ARRAY_SIZE(px30_cpuclk_rates));
 }
 
+static int protect_clocks[] = {
+	SCLK_VOPB_PWM,
+	SCLK_PWM0,
+	SCLK_PWM1,
+	PCLK_PWM0,
+	PCLK_PWM1,
+	ACLK_VOPB,
+	ACLK_VOPL,
+	HCLK_VOPB,
+	HCLK_VOPL,
+	DCLK_VOPB,
+	DCLK_VOPL,
+};
+
 static void __init px30_clk_init(struct device_node *np)
 {
 	struct rockchip_clk_provider *ctx;
@@ -1049,6 +1063,8 @@ static void __init px30_clk_init(struct device_node *np)
 	rockchip_register_restart_notifier(ctx, PX30_GLB_SRST_FST, NULL);
 
 	rockchip_clk_of_add_provider(np, ctx);
+
+	rockchip_clk_protect(ctx, protect_clocks, ARRAY_SIZE(protect_clocks));
 }
 CLK_OF_DECLARE(px30_cru, "rockchip,px30-cru", px30_clk_init);
 

@@ -25,6 +25,7 @@
 #include <linux/regulator/machine.h>
 #include <linux/rfkill-wlan.h>
 #include <linux/aspm_ext.h>
+#include <linux/completion.h>
 
 #include "pcie-designware.h"
 #include "../../pci.h"
@@ -142,7 +143,8 @@ struct rk_pcie {
 	bool				hp_no_link;
 	bool				is_lpbk;
 	bool				is_comp;
-	bool				finish_probe;
+	bool				probe_ok;
+	struct completion		probe_done;
 	bool				keep_power_in_suspend;
 	struct regulator		*vpcie3v3;
 	struct irq_domain		*irq_domain;
@@ -249,7 +251,8 @@ static int rk_pcie_link_up(struct dw_pcie *pci)
 	u32 val;
 
 	val = rk_pcie_readl_apb(rk_pcie, PCIE_CLIENT_LTSSM_STATUS);
-	if ((val & (RDLH_LINKUP | SMLH_LINKUP)) == 0x30000)
+	if ((val & (RDLH_LINKUP | SMLH_LINKUP)) == 0x30000 &&
+	    (val & GENMASK(5, 0)) == 0x11)
 		return 1;
 
 	return 0;
@@ -427,8 +430,15 @@ static int rk_pcie_establish_link(struct dw_pcie *pci)
 				 * we keep on accessing devices in unstable link status. Given
 				 * that LTSSM max timeout is 24ms per period, we can wait a bit
 				 * more for Gen switch.
+				 *
+				 * As per PCIe r6.0, sec 6.6.1, a Downstream Port that supports Link
+				 * speeds greater than 5.0 GT/s, software must wait a minimum of 100 ms
+				 * after Link training completes before sending a Configuration Request.
 				 */
-				msleep(50);
+				if (pci->link_gen < 3)
+					msleep(50);
+				else
+					msleep(100);
 				/* In case link drop after linkup, double check it */
 				if (dw_pcie_link_up(pci)) {
 					dev_info(pci->dev, "PCIe Link up, LTSSM is 0x%x\n",
@@ -931,6 +941,10 @@ static const struct dw_pcie_ops dw_pcie_ops = {
 	.start_link = rk_pcie_establish_link,
 	.stop_link = rk_pcie_stop_link,
 	.link_up = rk_pcie_link_up,
+};
+
+static const struct dw_pcie_ops dw_pcie_ops_default_link_up = {
+	.start_link = rk_pcie_establish_link,
 };
 
 static void rk_pcie_fast_link_setup(struct rk_pcie *rk_pcie, bool enable_dly2_en)
@@ -1478,7 +1492,10 @@ static int rk_pcie_hardware_io_config(struct rk_pcie *rk_pcie)
 			return ret;
 	}
 
-	reset_control_assert(rk_pcie->rsts);
+	if (device_property_read_bool(dev, "rockchip,skip-reset-in-config")) {
+		dev_info(dev, "skip reset controller\n");
+	} else
+		reset_control_assert(rk_pcie->rsts);
 	udelay(10);
 
 	ret = clk_bulk_prepare_enable(rk_pcie->clk_cnt, rk_pcie->clks);
@@ -1542,7 +1559,7 @@ static int rk_pcie_hardware_io_unconfig(struct rk_pcie *rk_pcie)
 	 *                   \_____________________________________
 	 */
 	if (rk_pcie_check_keep_power_in_suspend(rk_pcie))
-		gpiod_set_value_cansleep(rk_pcie->rst_gpio, 1);
+		gpiod_set_value_cansleep(rk_pcie->rst_gpio, 0);
 	phy_power_off(rk_pcie->phy);
 	phy_exit(rk_pcie->phy);
 	clk_bulk_disable_unprepare(rk_pcie->clk_cnt, rk_pcie->clks);
@@ -1649,6 +1666,8 @@ static int rk_pcie_really_probe(void *p)
 		goto release_driver;
 	}
 
+	init_completion(&rk_pcie->probe_done);
+
 	pci = devm_kzalloc(dev, sizeof(*pci), GFP_KERNEL);
 	if (!pci) {
 		ret = -ENOMEM;
@@ -1660,7 +1679,11 @@ static int rk_pcie_really_probe(void *p)
 	rk_pcie->msi_vector_num = data ? data->msi_vector_num : 0;
 	rk_pcie->intx = 0xffffffff;
 	pci->dev = dev;
-	pci->ops = &dw_pcie_ops;
+	if (device_property_read_bool(dev, "rockchip,default-link-up")) {
+		dev_info(dev, "using pcie default link_up because of rockchip,default-link-up\n");
+		pci->ops = &dw_pcie_ops_default_link_up;
+	} else
+		pci->ops = &dw_pcie_ops;
 	platform_set_drvdata(pdev, rk_pcie);
 
 	/* 3. firmware resource */
@@ -1670,15 +1693,15 @@ static int rk_pcie_really_probe(void *p)
 		goto release_driver;
 	}
 
+	pm_runtime_enable(dev);
+	pm_runtime_get_sync(pci->dev);
+
 	/* 4. hardware io settings */
 	ret = rk_pcie_hardware_io_config(rk_pcie);
 	if (ret) {
 		dev_err_probe(dev, ret, "setting hardware io failed\n");
 		goto release_driver;
 	}
-
-	pm_runtime_enable(dev);
-	pm_runtime_get_sync(pci->dev);
 
 	/* 5. host registers manipulation */
 	ret = rk_pcie_host_config(rk_pcie);
@@ -1729,7 +1752,9 @@ static int rk_pcie_really_probe(void *p)
 	/* 7. framework misc settings */
 	device_init_wakeup(dev, true);
 	device_enable_async_suspend(dev); /* Enable async system PM for multiports SoC */
-	rk_pcie->finish_probe = true;
+	rk_pcie->probe_ok = true;
+
+	complete_all(&rk_pcie->probe_done);
 
 	return 0;
 
@@ -1740,12 +1765,19 @@ deinit_irq_and_wq:
 unconfig_host:
 	rk_pcie_host_unconfig(rk_pcie);
 unconfig_hardware_io:
+	/*
+	 * Put the IP into reset state to avoid potentional memory access on background
+	 * which may hung the system because of unable to disable its genpd attached.
+	 */
+	rk_pcie_hardware_io_unconfig(rk_pcie);
 	pm_runtime_put(dev);
 	pm_runtime_disable(dev);
-	rk_pcie_hardware_io_unconfig(rk_pcie);
 release_driver:
-	if (rk_pcie)
-		rk_pcie->finish_probe = true;
+	if (rk_pcie) {
+		rk_pcie->probe_ok = false;
+
+		complete_all(&rk_pcie->probe_done);
+	}
 	if (IS_ENABLED(CONFIG_PCIE_RK_THREADED_INIT))
 		device_release_driver(dev);
 
@@ -1775,31 +1807,30 @@ static int rk_pcie_remove(struct platform_device *pdev)
 
 	if (IS_ENABLED(CONFIG_PCIE_RK_THREADED_INIT)) {
 		/* rk_pcie_really_probe hasn't been called yet, trying to get drvdata */
-		while (!rk_pcie && time_before(start, start + timeout)) {
+		while (!rk_pcie && time_before(jiffies, start + timeout)) {
 			set_current_state(TASK_INTERRUPTIBLE);
 			schedule_timeout(msecs_to_jiffies(200));
 			rk_pcie = dev_get_drvdata(dev);
 		}
 
-		/* check again to see if probe path fails or hasn't been finished */
-		start = jiffies;
-		while ((rk_pcie && !rk_pcie->finish_probe) && time_before(start, start + timeout)) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(msecs_to_jiffies(200));
-		};
+		if (!rk_pcie) {
+			dev_dbg(dev, "%s: rk_pcie is NULL after timeout\n", __func__);
+			return 0;
+		}
 
-		/*
-		 * Timeout should not happen as it's longer than regular probe actually.
-		 * But probe maybe fail, so need to double check bridge bus.
-		 */
-		if (!rk_pcie || !rk_pcie->pci || !rk_pcie->pci->pp.bridge ||
+		if (!wait_for_completion_timeout(&rk_pcie->probe_done, timeout)) {
+			dev_warn(dev, "%s: timeout waiting for threaded probe\n", __func__);
+			return 0;
+		}
+
+		if (!rk_pcie->probe_ok || !rk_pcie->pci || !rk_pcie->pci->pp.bridge ||
 		    !rk_pcie->pci->pp.bridge->bus) {
 			dev_dbg(dev, "%s return early due to failure in threaded init\n", __func__);
 			return 0;
 		}
 	}
 
-	if (IS_ENABLED(CONFIG_NO_GKI)) dw_pcie_host_deinit(&rk_pcie->pci->pp);
+	dw_pcie_host_deinit(&rk_pcie->pci->pp);
 	rk_pcie_writel_apb(rk_pcie, PCIE_CLIENT_INTR_MASK, 0xffffffff);
 	destroy_workqueue(rk_pcie->hot_rst_wq);
 	if (IS_ENABLED(CONFIG_PCIE_DW_ROCKCHIP_RC_DMATEST))
@@ -1823,12 +1854,29 @@ static int rk_pcie_remove(struct platform_device *pdev)
 	device_init_wakeup(dev, false);
 
 	rk_pcie_host_unconfig(rk_pcie);
-
+	/*
+	 * Put the IP into reset state to avoid potentional memory access on background
+	 * which may hung the system because of unable to disable its genpd attached.
+	 */
+	rk_pcie_hardware_io_unconfig(rk_pcie);
 	pm_runtime_put(dev);
 	pm_runtime_disable(dev);
-	rk_pcie_hardware_io_unconfig(rk_pcie);
 
 	return 0;
+}
+
+static int rk_pcie_dev_set_current_state(struct pci_dev *dev, void *data)
+{
+	pci_power_t state = *(pci_power_t *)data;
+
+	dev->current_state = state;
+	return 0;
+}
+
+static void rk_pcie_bus_set_current_state(struct pci_bus *bus, pci_power_t state)
+{
+	if (bus)
+		pci_walk_bus(bus, rk_pcie_dev_set_current_state, &state);
 }
 
 static void rk_pcie_shutdown(struct platform_device *pdev)
@@ -1837,6 +1885,8 @@ static void rk_pcie_shutdown(struct platform_device *pdev)
 	struct rk_pcie *rk_pcie = dev_get_drvdata(dev);
 
 	dev_dbg(rk_pcie->pci->dev, "shutdown...\n");
+	/* Prevent any configure space access by claiming we're in D3cold */
+	rk_pcie_bus_set_current_state(rk_pcie->pci->pp.bridge->bus, PCI_D3cold);
 	rk_pcie_disable_ltssm(rk_pcie);
 	rk_pcie_writel_apb(rk_pcie, PCIE_CLIENT_INTR_MASK, 0xffffffff);
 }

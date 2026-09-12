@@ -962,7 +962,6 @@ static int setup_port_interrupt_out(struct usb_serial_port *port,
 static int usb_serial_probe(struct usb_interface *interface,
 			       const struct usb_device_id *id)
 {
-	
 	struct device *ddev = &interface->dev;
 	struct usb_device *dev = interface_to_usbdev(interface);
 	struct usb_serial *serial = NULL;
@@ -973,10 +972,6 @@ static int usb_serial_probe(struct usb_interface *interface,
 	int i;
 	int num_ports = 0;
 	unsigned char max_endpoints;
-
-#ifdef CONFIG_SUPPORT_TDTECH_MODULE
-	struct usb_interface_descriptor *usb_iface_desc = &interface->cur_altsetting->desc;
-#endif
 
 	mutex_lock(&table_lock);
 	type = search_serial_device(interface);
@@ -991,17 +986,6 @@ static int usb_serial_probe(struct usb_interface *interface,
 		dev_err(ddev, "module get failed, exiting\n");
 		return -EIO;
 	}
-	
-#ifdef CONFIG_SUPPORT_TDTECH_MODULE
- 	if (usb_iface_desc->bInterfaceClass == USB_CLASS_VENDOR_SPEC &&
- 	usb_iface_desc->bInterfaceSubClass == 0x42 &&
- 	usb_iface_desc->bInterfaceProtocol == 1) {
- 	mutex_unlock(&table_lock);
- 	dev_dbg(ddev, "skip ADB interface!\n");
- 	return -ENODEV;
-	}
-#endif
-
 	mutex_unlock(&table_lock);
 
 	serial = create_serial(dev, interface, type);
@@ -1195,7 +1179,6 @@ static void usb_serial_disconnect(struct usb_interface *interface)
 	struct usb_serial *serial = usb_get_intfdata(interface);
 	struct device *dev = &interface->dev;
 	struct usb_serial_port *port;
-	struct tty_struct *tty;
 
 	/* sibling interface is cleaning up */
 	if (!serial)
@@ -1210,11 +1193,7 @@ static void usb_serial_disconnect(struct usb_interface *interface)
 
 	for (i = 0; i < serial->num_ports; ++i) {
 		port = serial->port[i];
-		tty = tty_port_tty_get(&port->port);
-		if (tty) {
-			tty_vhangup(tty);
-			tty_kref_put(tty);
-		}
+		tty_port_tty_vhangup(&port->port);
 		usb_serial_port_poison_urbs(port);
 		wake_up_interruptible(&port->port.delta_msr_wait);
 		cancel_work_sync(&port->work);

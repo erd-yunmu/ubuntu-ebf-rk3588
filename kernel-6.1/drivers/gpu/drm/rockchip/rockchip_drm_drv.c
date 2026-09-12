@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) Fuzhou Rockchip Electronics Co.Ltd
+ * Copyright (C) Rockchip Electronics Co., Ltd.
  * Author:Mark Yao <mark.yao@rock-chips.com>
  *
  * based on exynos_drm_drv.c
  */
 
+#include <linux/bitops.h>
 #include <linux/dma-buf-cache.h>
 #include <linux/dma-mapping.h>
 #include <linux/genalloc.h>
@@ -18,7 +19,9 @@
 #include <linux/component.h>
 #include <linux/console.h>
 #include <linux/iommu.h>
+#include <linux/kthread.h>
 #include <linux/of_reserved_mem.h>
+#include <uapi/linux/sched/types.h>
 
 #include <drm/drm_aperture.h>
 #include <drm/drm_debugfs.h>
@@ -47,6 +50,9 @@
 
 #include "../drm_crtc_internal.h"
 
+#define CREATE_TRACE_POINTS
+#include "rockchip_drm_trace.h"
+
 #define DRIVER_NAME	"rockchip"
 #define DRIVER_DESC	"RockChip Soc DRM"
 #define DRIVER_DATE	"20140818"
@@ -61,41 +67,574 @@
 	    (idx) += sizeof(struct displayid_block) + (block)->num_bytes, \
 	    (block) = (struct displayid_block *)&(displayid)[idx])
 
-#if IS_ENABLED(CONFIG_DRM_ROCKCHIP_VVOP)
+#if IS_ENABLED(CONFIG_DRM_ROCKCHIP_VKMS)
 static bool is_support_iommu = false;
 #else
 static bool is_support_iommu = true;
 #endif
 static bool iommu_reserve_map;
 
-static struct drm_driver rockchip_drm_driver;
+static const struct drm_driver rockchip_drm_driver;
 
 static unsigned int drm_debug;
 module_param_named(debug, drm_debug, int, 0600);
+
+static const u16 tfr_vrefresh_table[TFR_MAX] = {
+	[TFR_QMSVRR_INACTIVE] = 0,
+	[TFR_23P97] = 2397,
+	[TFR_24] = 2400,
+	[TFR_25] = 2500,
+	[TFR_29P97] = 2997,
+	[TFR_30] = 3000,
+	[TFR_47P95] = 4795,
+	[TFR_48] = 4800,
+	[TFR_50] = 5000,
+	[TFR_59P94] = 5994,
+	[TFR_60] = 6000,
+	[TFR_100] = 10000,
+	[TFR_119P88] = 11988,
+	[TFR_120] = 12000,
+};
+
+/* BRR 720p60hz */
+static const struct mvrr_const_val const_hdmi720p60_6000 = {
+	.vrefresh_khz = 6000,
+	.vtotal_fixed = 750,
+};
+
+/*
+ * @vrefresh_khz:	qms-vrr target refresh rate is 59.94Hz
+ * @vtotal_fixed:	When switch to target refresh rate, vtotal is 750
+ * @bit_len:		frac_array's bit length
+ * @frac_array:		Sources may also alternate between two sequential values
+ *			of actual vtotal to better approximate the target refresh
+ *			rate when target vtotal is fractional. For this example,
+ *			the source vtotal would vary between 750 and 751.
+ *			The value in frac_array indicates the order in which the
+ *			vtotal changes during this process. Each bit of 0 indicates
+ *			that the current frame vtotal is 750, and each bit of 1
+ *			indicates that the current frame vtotal is 751.
+ *			Take 0x3f(00111111B) as an example, it represents a vtotal
+ *			of 750 for the first and second frames, and 751 for the
+ *			remaining six frames. 0xe3 and 0xfe also have the same meaning.
+ *			The current frac_array represents the value of vtotal for 24
+ *			consecutive frames.
+ */
+static const struct mvrr_const_val const_hdmi720p60_5994 = {
+	.vrefresh_khz = 5994,
+	.vtotal_fixed = 750, /* 0.75 */
+	.bit_len = 24,
+	.frac_array = {0x3f, 0xe3, 0xfe},
+};
+
+static const struct mvrr_const_val const_hdmi720p60_5000 = {
+	.vrefresh_khz = 5000,
+	.vtotal_fixed = 900,
+};
+
+static const struct mvrr_const_val const_hdmi720p60_4800 = {
+	.vrefresh_khz = 4800,
+	.vtotal_fixed = 937, /* 0.5 */
+	.bit_len = 8,
+	.frac_array = {0x3c},
+};
+
+static const struct mvrr_const_val const_hdmi720p60_4795 = {
+	.vrefresh_khz = 4795,
+	.vtotal_fixed = 938, /* 0.4375 */
+	.bit_len = 16,
+	.frac_array = {0x1e, 0x0e},
+};
+
+static const struct mvrr_const_val const_hdmi720p60_3000 = {
+	.vrefresh_khz = 3000,
+	.vtotal_fixed = 1500,
+};
+
+static const struct mvrr_const_val const_hdmi720p60_2997 = {
+	.vrefresh_khz = 2997,
+	.vtotal_fixed = 1501, /* 0.5 */
+	.bit_len = 56,
+	.frac_array = {0x1f, 0xe0, 0x3f, 0x80, 0xfe, 0x03, 0xf8},
+};
+
+static const struct mvrr_const_val const_hdmi720p60_2500 = {
+	.vrefresh_khz = 2500,
+	.vtotal_fixed = 1800,
+};
+
+static const struct mvrr_const_val const_hdmi720p60_2400 = {
+	.vrefresh_khz = 2400,
+	.vtotal_fixed = 1875,
+};
+
+static const struct mvrr_const_val const_hdmi720p60_2397 = {
+	.vrefresh_khz = 2397,
+	.vtotal_fixed = 1876, /* 0.875 */
+	.bit_len = 40,
+	.frac_array = {0x1f, 0xff, 0xff, 0xff, 0xfc},
+};
+
+/* BRR 720p120hz */
+static const struct mvrr_const_val const_hdmi720p120_12000 = {
+	.vrefresh_khz = 12000,
+	.vtotal_fixed = 750,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_11988 = {
+	.vrefresh_khz = 11988,
+	.vtotal_fixed = 750, /* 0.75 */
+	.bit_len = 24,
+	.frac_array = {0x3f, 0xe3, 0xfe},
+};
+
+static const struct mvrr_const_val const_hdmi720p120_10000 = {
+	.vrefresh_khz = 10000,
+	.vtotal_fixed = 900,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_6000 = {
+	.vrefresh_khz = 6000,
+	.vtotal_fixed = 1500,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_5994 = {
+	.vrefresh_khz = 5994,
+	.vtotal_fixed = 1501, /* 0.5 */
+	.bit_len = 56,
+	.frac_array = {0x0f, 0xe0, 0x3f, 0x80, 0xfe, 0x03, 0xf8},
+};
+
+static const struct mvrr_const_val const_hdmi720p120_5000 = {
+	.vrefresh_khz = 5000,
+	.vtotal_fixed = 1800,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_4800 = {
+	.vrefresh_khz = 4800,
+	.vtotal_fixed = 1875,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_4795 = {
+	.vrefresh_khz = 4795,
+	.vtotal_fixed = 1876, /* 0.875 */
+	.bit_len = 40,
+	.frac_array = {0x1f, 0xff, 0xff, 0xff, 0xfc},
+};
+
+static const struct mvrr_const_val const_hdmi720p120_3000 = {
+	.vrefresh_khz = 3000,
+	.vtotal_fixed = 3000,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_2997 = {
+	.vrefresh_khz = 2997,
+	.vtotal_fixed = 3003,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_2500 = {
+	.vrefresh_khz = 2500,
+	.vtotal_fixed = 3600,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_2400 = {
+	.vrefresh_khz = 2400,
+	.vtotal_fixed = 3750,
+};
+
+static const struct mvrr_const_val const_hdmi720p120_2397 = {
+	.vrefresh_khz = 2397,
+	.vtotal_fixed = 3753, /* 0.75 */
+	.bit_len = 88,
+	.frac_array = {
+		0x03, 0xff, 0xff, 0xff, 0xfe, 0x00, 0x3f, 0xff, 0xff, 0xff, 0xe0
+	},
+};
+
+/* BRR 1080p60hz */
+static const struct mvrr_const_val const_hdmi1080p60_6000 = {
+	.vrefresh_khz = 6000,
+	.vtotal_fixed = 1125,
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_5994 = {
+	.vrefresh_khz = 5994,
+	.vtotal_fixed = 1126, /* 0.125 */
+	.bit_len = 24,
+	.frac_array = {0x00, 0x38, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_5000 = {
+	.vrefresh_khz = 5000,
+	.vtotal_fixed = 1350,
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_4800 = {
+	.vrefresh_khz = 4800,
+	.vtotal_fixed = 1406, /* 0.25 */
+	.bit_len = 16,
+	.frac_array = {0x03, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_4795 = {
+	.vrefresh_khz = 4795,
+	.vtotal_fixed = 1407, /* 0.65625 */
+	.bit_len = 32,
+	.frac_array = {0x1f, 0xf1, 0x7f, 0xf0},
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_3000 = {
+	.vrefresh_khz = 3000,
+	.vtotal_fixed = 2250,
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_2997 = {
+	.vrefresh_khz = 2997,
+	.vtotal_fixed = 2252, /* 0.25 */
+	.bit_len = 56,
+	.frac_array = {0x00, 0x3f, 0x80, 0x00, 0x03, 0xf8, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_2500 = {
+	.vrefresh_khz = 2500,
+	.vtotal_fixed = 2700,
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_2400 = {
+	.vrefresh_khz = 2400,
+	.vtotal_fixed = 2812, /* 0.5 */
+	.bit_len = 24,
+	.frac_array = {0x03, 0xff, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi1080p60_2397 = {
+	.vrefresh_khz = 2397,
+	.vtotal_fixed = 2815, /* 0.3125 */
+	.bit_len = 128,
+	.frac_array = {
+		0x00, 0x7f, 0x80, 0x00, 0x3f, 0xc0, 0x00, 0x0f,
+		0xf0, 0x00, 0x07, 0xf8, 0x00, 0x01, 0xfe, 0x00,
+	},
+};
+
+/* BRR 1080p120hz */
+static const struct mvrr_const_val const_hdmi1080p120_12000 = {
+	.vrefresh_khz = 12000,
+	.vtotal_fixed = 1125,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_11988 = {
+	.vrefresh_khz = 11988,
+	.vtotal_fixed = 1126, /* 0.125 */
+	.bit_len = 24,
+	.frac_array = {0x00, 0x38, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_10000 = {
+	.vrefresh_khz = 10000,
+	.vtotal_fixed = 1350,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_6000 = {
+	.vrefresh_khz = 6000,
+	.vtotal_fixed = 2250,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_5994 = {
+	.vrefresh_khz = 5994,
+	.vtotal_fixed = 2252, /* 0.25 */
+	.bit_len = 56,
+	.frac_array = {0x00, 0x3f, 0x80, 0x00, 0x03, 0xf8, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_5000 = {
+	.vrefresh_khz = 5000,
+	.vtotal_fixed = 2700,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_4800 = {
+	.vrefresh_khz = 4800,
+	.vtotal_fixed = 2812, /* 0.5 */
+	.bit_len = 24,
+	.frac_array = {0x03, 0xff, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_4795 = {
+	.vrefresh_khz = 4795,
+	.vtotal_fixed = 2812, /* 0.3125 */
+	.bit_len = 48,
+	.frac_array = {0x00, 0x3f, 0x80, 0x00, 0x3f, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_3000 = {
+	.vrefresh_khz = 3000,
+	.vtotal_fixed = 4500,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_2997 = {
+	.vrefresh_khz = 2997,
+	.vtotal_fixed = 4504, /* 0.5 */
+	.bit_len = 32,
+	.frac_array = {0x00, 0xff, 0xff, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_2500 = {
+	.vrefresh_khz = 2500,
+	.vtotal_fixed = 5400,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_2400 = {
+	.vrefresh_khz = 2400,
+	.vtotal_fixed = 5625,
+};
+
+static const struct mvrr_const_val const_hdmi1080p120_2397 = {
+	.vrefresh_khz = 2397,
+	.vtotal_fixed = 5630, /* 0.625 */
+	.bit_len = 48,
+	.frac_array = {0x00, 0x7f, 0xff, 0xff, 0xfe, 0x00},
+};
+
+/* BRR 2160p60hz */
+static const struct mvrr_const_val const_hdmi2160p60_6000 = {
+	.vrefresh_khz = 6000,
+	.vtotal_fixed = 2250,
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_5994 = {
+	.vrefresh_khz = 5994,
+	.vtotal_fixed = 2252, /* 0.25 */
+	.bit_len = 56,
+	.frac_array = {0x00, 0x3f, 0x80, 0x00, 0x03, 0xf8, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_5000 = {
+	.vrefresh_khz = 5000,
+	.vtotal_fixed = 2700,
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_4800 = {
+	.vrefresh_khz = 4800,
+	.vtotal_fixed = 2812, /* 0.5 */
+	.bit_len = 24,
+	.frac_array = {0x03, 0xff, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_4795 = {
+	.vrefresh_khz = 4795,
+	.vtotal_fixed = 2815, /* 0.3125 */
+	.bit_len = 48,
+	.frac_array = {0x00, 0x3f, 0x80, 0x00, 0x3f, 0xc0},
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_3000 = {
+	.vrefresh_khz = 3000,
+	.vtotal_fixed = 4500,
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_2997 = {
+	.vrefresh_khz = 2997,
+	.vtotal_fixed = 4504, /* 0.5 */
+	.bit_len = 32,
+	.frac_array = {0x00, 0xff, 0xff, 0x00},
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_2500 = {
+	.vrefresh_khz = 2500,
+	.vtotal_fixed = 5400,
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_2400 = {
+	.vrefresh_khz = 2400,
+	.vtotal_fixed = 5625,
+};
+
+static const struct mvrr_const_val const_hdmi2160p60_2397 = {
+	.vrefresh_khz = 2397,
+	.vtotal_fixed = 5630, /* 0.625 */
+	.bit_len = 48,
+	.frac_array = {0x00, 0x3f, 0xff, 0xff, 0xff, 0x00},
+};
+
+const struct mvrr_const_st const_hdmi1080p60_val = {
+	.brr_vic = HDMI_16_1920x1080P60_16x9,
+	.val = {
+		&const_hdmi1080p60_6000,
+		&const_hdmi1080p60_5994,
+		&const_hdmi1080p60_5000,
+		&const_hdmi1080p60_4800,
+		&const_hdmi1080p60_4795,
+		&const_hdmi1080p60_3000,
+		&const_hdmi1080p60_2997,
+		&const_hdmi1080p60_2500,
+		&const_hdmi1080p60_2400,
+		&const_hdmi1080p60_2397,
+		NULL,
+	},
+};
+
+const struct mvrr_const_st const_hdmi1080p120_val = {
+	.brr_vic = HDMI_63_1920x1080P120_16x9,
+	.val = {
+		&const_hdmi1080p120_12000,
+		&const_hdmi1080p120_11988,
+		&const_hdmi1080p120_10000,
+		&const_hdmi1080p120_6000,
+		&const_hdmi1080p120_5994,
+		&const_hdmi1080p120_5000,
+		&const_hdmi1080p120_4800,
+		&const_hdmi1080p120_4795,
+		&const_hdmi1080p120_3000,
+		&const_hdmi1080p120_2997,
+		&const_hdmi1080p120_2500,
+		&const_hdmi1080p120_2400,
+		&const_hdmi1080p120_2397,
+		NULL,
+	},
+};
+
+const struct mvrr_const_st const_hdmi720p60_val = {
+	.brr_vic = HDMI_4_1280x720P60_16x9,
+	.val = {
+		&const_hdmi720p60_6000,
+		&const_hdmi720p60_5994,
+		&const_hdmi720p60_5000,
+		&const_hdmi720p60_4800,
+		&const_hdmi720p60_4795,
+		&const_hdmi720p60_3000,
+		&const_hdmi720p60_2997,
+		&const_hdmi720p60_2500,
+		&const_hdmi720p60_2400,
+		&const_hdmi720p60_2397,
+		NULL,
+	},
+};
+
+const struct mvrr_const_st const_hdmi720p120_val = {
+	.brr_vic = HDMI_47_1280x720P120_16x9,
+	.val = {
+		&const_hdmi720p120_12000,
+		&const_hdmi720p120_11988,
+		&const_hdmi720p120_10000,
+		&const_hdmi720p120_6000,
+		&const_hdmi720p120_5994,
+		&const_hdmi720p120_5000,
+		&const_hdmi720p120_4800,
+		&const_hdmi720p120_4795,
+		&const_hdmi720p120_3000,
+		&const_hdmi720p120_2997,
+		&const_hdmi720p120_2500,
+		&const_hdmi720p120_2400,
+		&const_hdmi720p120_2397,
+		NULL,
+	},
+};
+
+const struct mvrr_const_st const_hdmi2160p60_val = {
+	.brr_vic = HDMI_97_3840x2160P60_16x9,
+	.val = {
+		&const_hdmi2160p60_6000,
+		&const_hdmi2160p60_5994,
+		&const_hdmi2160p60_5000,
+		&const_hdmi2160p60_4800,
+		&const_hdmi2160p60_4795,
+		&const_hdmi2160p60_3000,
+		&const_hdmi2160p60_2997,
+		&const_hdmi2160p60_2500,
+		&const_hdmi2160p60_2400,
+		&const_hdmi2160p60_2397,
+		NULL,
+	},
+};
+
+/* The vtotal parameters of 4096x2160p60hz are the same as 3840x2160p60hz */
+const struct mvrr_const_st const_hdmismpte60_val = {
+	.brr_vic = HDMI_102_4096x2160P60_256x135,
+	.val = {
+		&const_hdmi2160p60_6000,
+		&const_hdmi2160p60_5994,
+		&const_hdmi2160p60_5000,
+		&const_hdmi2160p60_4800,
+		&const_hdmi2160p60_4795,
+		&const_hdmi2160p60_3000,
+		&const_hdmi2160p60_2997,
+		&const_hdmi2160p60_2500,
+		&const_hdmi2160p60_2400,
+		&const_hdmi2160p60_2397,
+		NULL,
+	},
+};
+
+const struct mvrr_const_st *qms_const[] = {
+	&const_hdmi1080p60_val,
+	&const_hdmi1080p120_val,
+	&const_hdmi2160p60_val,
+	&const_hdmi720p60_val,
+	&const_hdmi720p120_val,
+	&const_hdmismpte60_val,
+	NULL,
+};
 
 static inline bool rockchip_drm_debug_enabled(enum rockchip_drm_debug_category category)
 {
 	return unlikely(drm_debug & category);
 }
 
+static void rockchip_drm_dbg_print(const struct device *dev, enum rockchip_drm_debug_category category,
+				   bool show_thread, struct va_format *vaf)
+{
+	if (rockchip_drm_debug_enabled(category)) {
+		if (dev) {
+			if (show_thread)
+				dev_printk(KERN_DEBUG, dev, "%s %pV\n", current->comm, vaf);
+			else
+				dev_printk(KERN_DEBUG, dev, "%pV\n", vaf);
+		} else {
+			if (show_thread)
+				printk(KERN_DEBUG "%s %pV\n", current->comm, vaf);
+			else
+				printk(KERN_DEBUG "%pV\n", vaf);
+		}
+	}
+
+	if (category == VOP_DEBUG_VSYNC)
+		trace_rockchip_drm_dbg_vsync(vaf);
+	else if (category == VOP_DEBUG_IOMMU_MAP)
+		trace_rockchip_drm_dbg_iommu(vaf);
+	else
+		trace_rockchip_drm_dbg_common(vaf);
+}
+
 __printf(3, 4)
-void rockchip_drm_dbg(const struct device *dev, enum rockchip_drm_debug_category category,
+void rockchip_drm_dbg(const struct device *dev,
+		      enum rockchip_drm_debug_category category,
 		      const char *format, ...)
 {
 	struct va_format vaf;
 	va_list args;
 
-	if (!rockchip_drm_debug_enabled(category))
-		return;
+	va_start(args, format);
+	vaf.fmt = format;
+	vaf.va = &args;
+
+	rockchip_drm_dbg_print(dev, category, false, &vaf);
+
+	va_end(args);
+}
+
+__printf(3, 4)
+void rockchip_drm_dbg_thread_info(const struct device *dev,
+				  enum rockchip_drm_debug_category category,
+				  const char *format, ...)
+{
+	struct va_format vaf;
+	va_list args;
 
 	va_start(args, format);
 	vaf.fmt = format;
 	vaf.va = &args;
 
-	if (dev)
-		dev_printk(KERN_DEBUG, dev, "%pV", &vaf);
-	else
-		printk(KERN_DEBUG "%pV", &vaf);
+	rockchip_drm_dbg_print(dev, category, true, &vaf);
 
 	va_end(args);
 }
@@ -249,10 +788,6 @@ EXPORT_SYMBOL(drm_mode_convert_to_origin_mode);
 
 uint32_t rockchip_drm_get_bpp(const struct drm_format_info *info)
 {
-	/* use whatever a driver has set */
-	if (info->cpp[0])
-		return info->cpp[0] * 8;
-
 	switch (info->format) {
 	case DRM_FORMAT_YUV420_8BIT:
 		return 12;
@@ -261,11 +796,8 @@ uint32_t rockchip_drm_get_bpp(const struct drm_format_info *info)
 	case DRM_FORMAT_VUY101010:
 		return 30;
 	default:
-		break;
+		return drm_format_info_bpp(info, 0);
 	}
-
-	/* all attempts failed */
-	return 0;
 }
 EXPORT_SYMBOL(rockchip_drm_get_bpp);
 
@@ -340,7 +872,7 @@ void rockchip_connector_update_vfp_for_vrr(struct drm_crtc *crtc, struct drm_dis
 
 	mutex_lock(&rockchip_drm_sub_dev_lock);
 	list_for_each_entry(sub_dev, &rockchip_drm_sub_dev_list, list) {
-		if (sub_dev->connector->state->crtc == crtc) {
+		if (sub_dev->connector && sub_dev->connector->state->crtc == crtc) {
 			if (sub_dev->update_vfp_for_vrr)
 				sub_dev->update_vfp_for_vrr(sub_dev->connector, mode, vfp);
 		}
@@ -390,7 +922,7 @@ int rockchip_drm_get_sub_dev_type(void)
 
 	mutex_lock(&rockchip_drm_sub_dev_lock);
 	list_for_each_entry(sub_dev, &rockchip_drm_sub_dev_list, list) {
-		if (sub_dev->connector->encoder) {
+		if (sub_dev->connector && sub_dev->connector->encoder) {
 			connector_type = sub_dev->connector->connector_type;
 			break;
 		}
@@ -409,7 +941,8 @@ u32 rockchip_drm_get_scan_line_time_ns(void)
 
 	mutex_lock(&rockchip_drm_sub_dev_lock);
 	list_for_each_entry(sub_dev, &rockchip_drm_sub_dev_list, list) {
-		if (sub_dev->connector->encoder && sub_dev->connector->state->crtc) {
+		if (sub_dev->connector && sub_dev->connector->encoder &&
+		    sub_dev->connector->state->crtc) {
 			mode = &sub_dev->connector->state->crtc->state->adjusted_mode;
 			linedur_ns  = div_u64((u64) mode->crtc_htotal * 1000000, mode->crtc_clock);
 			break;
@@ -430,6 +963,44 @@ void rockchip_drm_te_handle(struct drm_crtc *crtc)
 		priv->crtc_funcs[pipe]->te_handler(crtc);
 }
 EXPORT_SYMBOL(rockchip_drm_te_handle);
+
+struct drm_crtc *
+drm_atomic_get_old_crtc_for_encoder(struct drm_atomic_state *state,
+				    struct drm_encoder *encoder)
+{
+	struct drm_connector *connector;
+	struct drm_connector_state *conn_state;
+
+	connector = drm_atomic_get_old_connector_for_encoder(state, encoder);
+	if (!connector)
+		return NULL;
+
+	conn_state = drm_atomic_get_old_connector_state(state, connector);
+	if (!conn_state)
+		return NULL;
+
+	return conn_state->crtc;
+}
+EXPORT_SYMBOL(drm_atomic_get_old_crtc_for_encoder);
+
+struct drm_crtc *
+drm_atomic_get_new_crtc_for_encoder(struct drm_atomic_state *state,
+				    struct drm_encoder *encoder)
+{
+	struct drm_connector *connector;
+	struct drm_connector_state *conn_state;
+
+	connector = drm_atomic_get_new_connector_for_encoder(state, encoder);
+	if (!connector)
+		return NULL;
+
+	conn_state = drm_atomic_get_new_connector_state(state, connector);
+	if (!conn_state)
+		return NULL;
+
+	return conn_state->crtc;
+}
+EXPORT_SYMBOL(drm_atomic_get_new_crtc_for_encoder);
 
 static const struct drm_display_mode rockchip_drm_default_modes[] = {
 	/* 4 - 1280x720@60Hz 16:9 */
@@ -538,9 +1109,9 @@ cea_db_payload_len(const u8 *db)
 	     (i) < (end) && (i) + cea_db_payload_len(&(cea)[(i)]) < (end); \
 	     (i) += cea_db_payload_len(&(cea)[(i)]) + 1)
 
-#define HDMI_NEXT_HDR_VSDB_OUI 0xd04601
+#define HDMI_DOVI_VSDB_OUI 0xd04601
 
-static bool cea_db_is_hdmi_next_hdr_block(const u8 *db)
+static bool cea_db_is_hdmi_dovi_block(const u8 *db)
 {
 	unsigned int oui;
 
@@ -551,8 +1122,7 @@ static bool cea_db_is_hdmi_next_hdr_block(const u8 *db)
 		return false;
 
 	oui = db[3] << 16 | db[2] << 8 | db[1];
-
-	return oui == HDMI_NEXT_HDR_VSDB_OUI;
+	return oui == HDMI_DOVI_VSDB_OUI;
 }
 
 static bool cea_db_is_hdmi_forum_vsdb(const u8 *db)
@@ -585,6 +1155,27 @@ static bool cea_db_is_hdmi_forum_scdb(const u8 *db)
 {
 	return cea_db_is_extended_tag(db, CTA_EXT_DB_HF_SCDB) &&
 		cea_db_payload_len(db) >= 7;
+}
+
+#define HDRVIVID_VSVDB_OUI		0x047503
+
+static bool cea_db_is_hdmi_hdrvivid_block(const u8 *db)
+{
+	unsigned int oui;
+
+	if (cea_db_tag(db) != CTA_DB_EXTENDED_TAG)
+		return false;
+
+	if (cea_db_payload_len(db) < 14)
+		return false;
+
+	/* check ext tag flag */
+	if (db[1] != 0x01)
+		return false;
+
+	oui = db[4] << 16 | db[3] << 8 | db[2];
+
+	return oui == HDRVIVID_VSVDB_OUI;
 }
 
 static int
@@ -629,24 +1220,25 @@ cea_db_offsets(const u8 *cea, int *start, int *end)
 	return 0;
 }
 
-static u8 *find_edid_extension(const struct edid *edid,
-			       int ext_id, int *ext_index)
+static
+u8 *find_edid_extension(const struct edid *edid, int ext_id, int ext_block_num, int *ext_index)
 {
+	struct edid;
 	u8 *edid_ext = NULL;
 	int i;
 
 	/* No EDID or EDID extensions */
-	if (edid == NULL || edid->extensions == 0)
+	if (edid == NULL)
 		return NULL;
 
 	/* Find CEA extension */
-	for (i = *ext_index; i < edid->extensions; i++) {
+	for (i = *ext_index; i < ext_block_num; i++) {
 		edid_ext = (u8 *)edid + EDID_LENGTH * (i + 1);
 		if (edid_ext[0] == ext_id)
 			break;
 	}
 
-	if (i >= edid->extensions)
+	if (i >= ext_block_num)
 		return NULL;
 
 	*ext_index = i + 1;
@@ -680,11 +1272,10 @@ static int validate_displayid(u8 *displayid, int length, int idx)
 	return 0;
 }
 
-static u8 *find_displayid_extension(const struct edid *edid,
-				    int *length, int *idx,
-				    int *ext_index)
+static u8 *find_displayid_extension(const struct edid *edid, int *length, int *idx,
+				    int ext_block_num, int *ext_index)
 {
-	u8 *displayid = find_edid_extension(edid, 0x70, ext_index);
+	u8 *displayid = find_edid_extension(edid, 0x70, ext_block_num, ext_index);
 	struct displayid_header *base;
 	int ret;
 
@@ -705,26 +1296,26 @@ static u8 *find_displayid_extension(const struct edid *edid,
 	return displayid;
 }
 
-static u8 *find_cea_extension(const struct edid *edid)
+static u8 *find_cea_extension(const struct edid *edid, int ext_block_num, int ext_index)
 {
 	int length, idx;
 	struct displayid_block *block;
 	u8 *cea;
 	u8 *displayid;
-	int ext_index;
 
-	/* Look for a top level CEA extension block */
-	/* FIXME: make callers iterate through multiple CEA ext blocks? */
-	ext_index = 0;
-	cea = find_edid_extension(edid, 0x02, &ext_index);
+	cea = find_edid_extension(edid, 0x02, ext_block_num, &ext_index);
 	if (cea)
 		return cea;
 
 	/* CEA blocks can also be found embedded in a DisplayID block */
-	ext_index = 0;
+	if (ext_index >= ext_block_num)
+		ext_index = 0;
+	else
+		return NULL;
+
 	for (;;) {
-		displayid = find_displayid_extension(edid, &length, &idx,
-						     &ext_index);
+		displayid = find_displayid_extension(edid, &length, &idx, ext_block_num,
+					  &ext_index);
 		if (!displayid)
 			return NULL;
 
@@ -740,27 +1331,62 @@ static u8 *find_cea_extension(const struct edid *edid)
 
 #define EDID_CEA_YCRCB422	(1 << 4)
 
-int rockchip_drm_get_yuv422_format(struct drm_connector *connector,
-				   struct edid *edid)
+int rockchip_drm_get_yuv422_format(struct drm_connector *connector, const struct edid *edid,
+				   int ext_block_num)
 {
 	struct drm_display_info *info;
 	const u8 *edid_ext;
+	int ext_index;
 
 	if (!connector || !edid)
 		return -EINVAL;
 
 	info = &connector->display_info;
 
-	edid_ext = find_cea_extension(edid);
-	if (!edid_ext)
-		return -EINVAL;
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
 
-	if (edid_ext[3] & EDID_CEA_YCRCB422)
-		info->color_formats |= DRM_COLOR_FORMAT_YCBCR422;
+		if (edid_ext[3] & EDID_CEA_YCRCB422)
+			info->color_formats |= DRM_COLOR_FORMAT_YCBCR422;
+	}
 
 	return 0;
 }
 EXPORT_SYMBOL(rockchip_drm_get_yuv422_format);
+
+int rockchip_drm_parse_hdrvivid(void *sink_data, const struct edid *edid, int ext_block_num)
+{
+	const u8 *edid_ext;
+	int i, start, end, ext_index;
+
+	if (!sink_data || !edid)
+		return -EINVAL;
+
+	memset(sink_data, 0, HDRVIVID_VSVDB_LEN);
+
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
+
+		if (cea_db_offsets(edid_ext, &start, &end))
+			return -EINVAL;
+
+		for_each_cea_db(edid_ext, i, start, end) {
+			const u8 *db = &edid_ext[i];
+
+			if (cea_db_is_hdmi_hdrvivid_block(db)) {
+				memcpy(sink_data, db, HDRVIVID_VSVDB_LEN);
+				break;
+			}
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(rockchip_drm_parse_hdrvivid);
 
 static
 void get_max_frl_rate(int max_frl_rate, u8 *max_lanes, u8 *max_rate_per_lane)
@@ -812,367 +1438,183 @@ void get_max_frl_rate(int max_frl_rate, u8 *max_lanes, u8 *max_rate_per_lane)
 #define EDID_DSC_TOTAL_CHUNK_KBYTES	0x3f
 #define EDID_MAX_FRL_RATE_MASK		0xf0
 
-static
-void parse_edid_forum_vsdb(struct rockchip_drm_dsc_cap *dsc_cap,
-			   u8 *max_frl_rate_per_lane, u8 *max_lanes, u8 *add_func,
-			   const u8 *hf_vsdb)
-{
-	u8 max_frl_rate;
-	u8 dsc_max_frl_rate;
-	u8 dsc_max_slices;
+#define DRM_EDID_FAPA_START		(1 << 0)
+#define DRM_EDID_ALLM			(1 << 1)
+#define DRM_EDID_FVA			(1 << 2)
+#define DRM_EDID_QMS			(1 << 6)
+#define DRM_EDID_VRR_MIN_MASK		0x3f
+#define DRM_EDID_VRR_MAX_UPPER_MASK	0xc0
+#define DRM_EDID_QMS_TFR_MIN		(1 << 4)
+#define DRM_EDID_QMS_TFR_MAX		(1 << 5)
 
-	if (!hf_vsdb[7])
-		return;
-
-	DRM_DEBUG_KMS("hdmi_21 sink detected. parsing edid\n");
-	max_frl_rate = (hf_vsdb[7] & EDID_MAX_FRL_RATE_MASK) >> 4;
-	get_max_frl_rate(max_frl_rate, max_lanes,
-			 max_frl_rate_per_lane);
-
-	*add_func = hf_vsdb[8];
-
-	if (cea_db_payload_len(hf_vsdb) < 13)
-		return;
-
-	dsc_cap->v_1p2 = hf_vsdb[11] & EDID_DSC_1P2;
-
-	if (!dsc_cap->v_1p2)
-		return;
-
-	dsc_cap->native_420 = hf_vsdb[11] & EDID_DSC_NATIVE_420;
-	dsc_cap->all_bpp = hf_vsdb[11] & EDID_DSC_ALL_BPP;
-
-	if (hf_vsdb[11] & EDID_DSC_16BPC)
-		dsc_cap->bpc_supported = 16;
-	else if (hf_vsdb[11] & EDID_DSC_12BPC)
-		dsc_cap->bpc_supported = 12;
-	else if (hf_vsdb[11] & EDID_DSC_10BPC)
-		dsc_cap->bpc_supported = 10;
-	else
-		dsc_cap->bpc_supported = 0;
-
-	dsc_max_frl_rate = (hf_vsdb[12] & EDID_DSC_MAX_FRL_RATE_MASK) >> 4;
-	get_max_frl_rate(dsc_max_frl_rate, &dsc_cap->max_lanes,
-			 &dsc_cap->max_frl_rate_per_lane);
-	dsc_cap->total_chunk_kbytes = hf_vsdb[13] & EDID_DSC_TOTAL_CHUNK_KBYTES;
-
-	dsc_max_slices = hf_vsdb[12] & EDID_DSC_MAX_SLICES;
-	switch (dsc_max_slices) {
-	case 1:
-		dsc_cap->max_slices = 1;
-		dsc_cap->clk_per_slice = 340;
-		break;
-	case 2:
-		dsc_cap->max_slices = 2;
-		dsc_cap->clk_per_slice = 340;
-		break;
-	case 3:
-		dsc_cap->max_slices = 4;
-		dsc_cap->clk_per_slice = 340;
-		break;
-	case 4:
-		dsc_cap->max_slices = 8;
-		dsc_cap->clk_per_slice = 340;
-		break;
-	case 5:
-		dsc_cap->max_slices = 8;
-		dsc_cap->clk_per_slice = 400;
-		break;
-	case 6:
-		dsc_cap->max_slices = 12;
-		dsc_cap->clk_per_slice = 400;
-		break;
-	case 7:
-		dsc_cap->max_slices = 16;
-		dsc_cap->clk_per_slice = 400;
-		break;
-	case 0:
-	default:
-		dsc_cap->max_slices = 0;
-		dsc_cap->clk_per_slice = 0;
-	}
-}
-
-/* Sink Capability Data Structure, for compatibility with linux version < linux kernel 6.1 */
-static void parse_hdmi_forum_scds(struct rockchip_drm_dsc_cap *dsc_cap,
-				  u8 *max_frl_rate_per_lane, u8 *max_lanes,
-				  const u8 *hf_scds)
+/* Sink Capability Data Structure */
+static void parse_hdmi_forum_scds(struct rockchip_drm_hdmi21_data *hdmi21_data, const u8 *hf_scds)
 {
 	if (hf_scds[7]) {
 		u8 max_frl_rate;
 		u8 dsc_max_frl_rate;
 		u8 dsc_max_slices;
 
-		DRM_DEBUG_KMS("hdmi_21 sink detected. parsing edid\n");
 		max_frl_rate = (hf_scds[7] & DRM_EDID_MAX_FRL_RATE_MASK) >> 4;
-		get_max_frl_rate(max_frl_rate, max_lanes,
-				 max_frl_rate_per_lane);
-		dsc_cap->v_1p2 = hf_scds[11] & DRM_EDID_DSC_1P2;
+		if (max_frl_rate)
+			DRM_DEBUG_KMS("hdmi21 FRL detected. parsing edid....\n");
+		get_max_frl_rate(max_frl_rate, &hdmi21_data->max_lanes,
+				 &hdmi21_data->max_frl_rate_per_lane);
+		hdmi21_data->dsc_cap.v_1p2 = hf_scds[11] & DRM_EDID_DSC_1P2;
 
-		if (dsc_cap->v_1p2) {
-			dsc_cap->native_420 = hf_scds[11] & DRM_EDID_DSC_NATIVE_420;
-			dsc_cap->all_bpp = hf_scds[11] & DRM_EDID_DSC_ALL_BPP;
+		if (hdmi21_data->dsc_cap.v_1p2) {
+			hdmi21_data->dsc_cap.native_420 = hf_scds[11] & DRM_EDID_DSC_NATIVE_420;
+			hdmi21_data->dsc_cap.all_bpp = hf_scds[11] & DRM_EDID_DSC_ALL_BPP;
 
 			if (hf_scds[11] & DRM_EDID_DSC_16BPC)
-				dsc_cap->bpc_supported = 16;
+				hdmi21_data->dsc_cap.bpc_supported = 16;
 			else if (hf_scds[11] & DRM_EDID_DSC_12BPC)
-				dsc_cap->bpc_supported = 12;
+				hdmi21_data->dsc_cap.bpc_supported = 12;
 			else if (hf_scds[11] & DRM_EDID_DSC_10BPC)
-				dsc_cap->bpc_supported = 10;
+				hdmi21_data->dsc_cap.bpc_supported = 10;
 			else
 				/* Supports min 8 BPC if DSC 1.2 is supported*/
-				dsc_cap->bpc_supported = 8;
+				hdmi21_data->dsc_cap.bpc_supported = 8;
 
 			dsc_max_frl_rate = (hf_scds[12] & DRM_EDID_DSC_MAX_FRL_RATE_MASK) >> 4;
-			get_max_frl_rate(dsc_max_frl_rate, &dsc_cap->max_lanes,
-					 &dsc_cap->max_frl_rate_per_lane);
-			dsc_cap->total_chunk_kbytes = hf_scds[13] & DRM_EDID_DSC_TOTAL_CHUNK_KBYTES;
+			get_max_frl_rate(dsc_max_frl_rate, &hdmi21_data->dsc_cap.max_lanes,
+					 &hdmi21_data->dsc_cap.max_frl_rate_per_lane);
+			hdmi21_data->dsc_cap.total_chunk_kbytes =
+				hf_scds[13] & DRM_EDID_DSC_TOTAL_CHUNK_KBYTES;
 
 			dsc_max_slices = hf_scds[12] & DRM_EDID_DSC_MAX_SLICES;
 			switch (dsc_max_slices) {
 			case 1:
-				dsc_cap->max_slices = 1;
-				dsc_cap->clk_per_slice = 340;
+				hdmi21_data->dsc_cap.max_slices = 1;
+				hdmi21_data->dsc_cap.clk_per_slice = 340;
 				break;
 			case 2:
-				dsc_cap->max_slices = 2;
-				dsc_cap->clk_per_slice = 340;
+				hdmi21_data->dsc_cap.max_slices = 2;
+				hdmi21_data->dsc_cap.clk_per_slice = 340;
 				break;
 			case 3:
-				dsc_cap->max_slices = 4;
-				dsc_cap->clk_per_slice = 340;
+				hdmi21_data->dsc_cap.max_slices = 4;
+				hdmi21_data->dsc_cap.clk_per_slice = 340;
 				break;
 			case 4:
-				dsc_cap->max_slices = 8;
-				dsc_cap->clk_per_slice = 340;
+				hdmi21_data->dsc_cap.max_slices = 8;
+				hdmi21_data->dsc_cap.clk_per_slice = 340;
 				break;
 			case 5:
-				dsc_cap->max_slices = 8;
-				dsc_cap->clk_per_slice = 400;
+				hdmi21_data->dsc_cap.max_slices = 8;
+				hdmi21_data->dsc_cap.clk_per_slice = 400;
 				break;
 			case 6:
-				dsc_cap->max_slices = 12;
-				dsc_cap->clk_per_slice = 400;
+				hdmi21_data->dsc_cap.max_slices = 12;
+				hdmi21_data->dsc_cap.clk_per_slice = 400;
 				break;
 			case 7:
-				dsc_cap->max_slices = 16;
-				dsc_cap->clk_per_slice = 400;
+				hdmi21_data->dsc_cap.max_slices = 16;
+				hdmi21_data->dsc_cap.clk_per_slice = 400;
 				break;
 			case 0:
 			default:
-				dsc_cap->max_slices = 0;
-				dsc_cap->clk_per_slice = 0;
+				hdmi21_data->dsc_cap.max_slices = 0;
+				hdmi21_data->dsc_cap.clk_per_slice = 0;
 			}
 		}
 	}
-}
 
-enum {
-	VER_26_BYTE_V0,
-	VER_15_BYTE_V1,
-	VER_12_BYTE_V1,
-	VER_12_BYTE_V2,
-};
-
-static int check_next_hdr_version(const u8 *next_hdr_db)
-{
-	u16 ver;
-
-	ver = (next_hdr_db[5] & 0xf0) << 8 | next_hdr_db[0];
-
-	switch (ver) {
-	case 0x00f9:
-		return VER_26_BYTE_V0;
-	case 0x20ee:
-		return VER_15_BYTE_V1;
-	case 0x20eb:
-		return VER_12_BYTE_V1;
-	case 0x40eb:
-		return VER_12_BYTE_V2;
-	default:
-		return -ENOENT;
+	/* parse additional bytes */
+	if (cea_db_payload_len(hf_scds) >= 9) {
+		hdmi21_data->allm_supported = hf_scds[8] & DRM_EDID_ALLM;
+		hdmi21_data->vrr_cap.qms = hf_scds[8] & DRM_EDID_QMS;
+		hdmi21_data->vrr_cap.fva = hf_scds[8] & DRM_EDID_FVA;
+		hdmi21_data->vrr_cap.m_delta = hf_scds[8] & DRM_EDID_MDELTA;
+		hdmi21_data->vrr_cap.negm_vrr = hf_scds[8] & DRM_EDID_CNMVRR;
+		hdmi21_data->vrr_cap.cinema_vrr = hf_scds[8] & DRM_EDID_CINEMA_VRR;
 	}
-}
 
-static void parse_ver_26_v0_data(struct ver_26_v0 *hdr, const u8 *data)
-{
-	hdr->yuv422_12bit = data[5] & BIT(0);
-	hdr->support_2160p_60 = (data[5] & BIT(1)) >> 1;
-	hdr->global_dimming = (data[5] & BIT(2)) >> 2;
+	if (cea_db_payload_len(hf_scds) >= 11) {
+		hdmi21_data->vrr_cap.vrr_min = hf_scds[9] & DRM_EDID_VRR_MIN_MASK;
+		hdmi21_data->vrr_cap.vrr_max =
+			(hf_scds[9] & DRM_EDID_VRR_MAX_UPPER_MASK) << 2 | hf_scds[10];
+	}
 
-	hdr->dm_major_ver = (data[21] & 0xf0) >> 4;
-	hdr->dm_minor_ver = data[21] & 0xf;
-
-	hdr->t_min_pq = (data[19] << 4) | ((data[18] & 0xf0) >> 4);
-	hdr->t_max_pq = (data[20] << 4) | (data[18] & 0xf);
-
-	hdr->rx = (data[7] << 4) | ((data[6] & 0xf0) >> 4);
-	hdr->ry = (data[8] << 4) | (data[6] & 0xf);
-	hdr->gx = (data[10] << 4) | ((data[9] & 0xf0) >> 4);
-	hdr->gy = (data[11] << 4) | (data[9] & 0xf);
-	hdr->bx = (data[13] << 4) | ((data[12] & 0xf0) >> 4);
-	hdr->by = (data[14] << 4) | (data[12] & 0xf);
-	hdr->wx = (data[16] << 4) | ((data[15] & 0xf0) >> 4);
-	hdr->wy = (data[17] << 4) | (data[15] & 0xf);
-}
-
-static void parse_ver_15_v1_data(struct ver_15_v1 *hdr, const u8 *data)
-{
-	hdr->yuv422_12bit = data[5] & BIT(0);
-	hdr->support_2160p_60 = (data[5] & BIT(1)) >> 1;
-	hdr->global_dimming = data[6] & BIT(0);
-
-	hdr->dm_version = (data[5] & 0x1c) >> 2;
-
-	hdr->colorimetry = data[7] & BIT(0);
-
-	hdr->t_max_lum = (data[6] & 0xfe) >> 1;
-	hdr->t_min_lum = (data[7] & 0xfe) >> 1;
-
-	hdr->rx = data[9];
-	hdr->ry = data[10];
-	hdr->gx = data[11];
-	hdr->gy = data[12];
-	hdr->bx = data[13];
-	hdr->by = data[14];
-}
-
-static void parse_ver_12_v1_data(struct ver_12_v1 *hdr, const u8 *data)
-{
-	hdr->yuv422_12bit = data[5] & BIT(0);
-	hdr->support_2160p_60 = (data[5] & BIT(1)) >> 1;
-	hdr->global_dimming = data[6] & BIT(0);
-
-	hdr->dm_version = (data[5] & 0x1c) >> 2;
-
-	hdr->colorimetry = data[7] & BIT(0);
-
-	hdr->t_max_lum = (data[6] & 0xfe) >> 1;
-	hdr->t_min_lum = (data[7] & 0xfe) >> 1;
-
-	hdr->low_latency = data[8] & 0x3;
-
-	hdr->unique_rx = (data[11] & 0xf8) >> 3;
-	hdr->unique_ry = (data[11] & 0x7) << 2 | (data[10] & BIT(0)) << 1 |
-		(data[9] & BIT(0));
-	hdr->unique_gx = (data[9] & 0xfe) >> 1;
-	hdr->unique_gy = (data[10] & 0xfe) >> 1;
-	hdr->unique_bx = (data[8] & 0xe0) >> 5;
-	hdr->unique_by = (data[8] & 0x1c) >> 2;
-}
-
-static void parse_ver_12_v2_data(struct ver_12_v2 *hdr, const u8 *data)
-{
-	hdr->yuv422_12bit = data[5] & BIT(0);
-	hdr->backlt_ctrl = (data[5] & BIT(1)) >> 1;
-	hdr->global_dimming = (data[6] & BIT(2)) >> 2;
-
-	hdr->dm_version = (data[5] & 0x1c) >> 2;
-	hdr->backlt_min_luma = data[6] & 0x3;
-	hdr->interface = data[7] & 0x3;
-	hdr->yuv444_10b_12b = (data[8] & BIT(0)) << 1 | (data[9] & BIT(0));
-
-	hdr->t_min_pq_v2 = (data[6] & 0xf8) >> 3;
-	hdr->t_max_pq_v2 = (data[7] & 0xf8) >> 3;
-
-	hdr->unique_rx = (data[10] & 0xf8) >> 3;
-	hdr->unique_ry = (data[11] & 0xf8) >> 3;
-	hdr->unique_gx = (data[8] & 0xfe) >> 1;
-	hdr->unique_gy = (data[9] & 0xfe) >> 1;
-	hdr->unique_bx = data[10] & 0x7;
-	hdr->unique_by = data[11] & 0x7;
+	if (cea_db_payload_len(hf_scds) >= 12) {
+		hdmi21_data->vrr_cap.qms_tfr_min = hf_scds[11] & DRM_EDID_QMS_TFR_MIN;
+		hdmi21_data->vrr_cap.qms_tfr_max = hf_scds[11] & DRM_EDID_QMS_TFR_MAX;
+	}
 }
 
 static
-void parse_next_hdr_block(struct next_hdr_sink_data *sink_data,
-			  const u8 *next_hdr_db)
+int parse_dovi_block(u8 *sink_data, const u8 *dovi_db)
 {
-	int version;
+	u8 length = (dovi_db[0] & 0x1f) + 1;
 
-	version = check_next_hdr_version(next_hdr_db);
-	if (version < 0)
-		return;
+	if (length > DOVI_VSDB_LEN)
+		return -EINVAL;
 
-	sink_data->version = version;
-
-	switch (version) {
-	case VER_26_BYTE_V0:
-		parse_ver_26_v0_data(&sink_data->ver_26_v0, next_hdr_db);
-		break;
-	case VER_15_BYTE_V1:
-		parse_ver_15_v1_data(&sink_data->ver_15_v1, next_hdr_db);
-		break;
-	case VER_12_BYTE_V1:
-		parse_ver_12_v1_data(&sink_data->ver_12_v1, next_hdr_db);
-		break;
-	case VER_12_BYTE_V2:
-		parse_ver_12_v2_data(&sink_data->ver_12_v2, next_hdr_db);
-		break;
-	default:
-		break;
-	}
+	memcpy(sink_data, dovi_db, length);
+	return 0;
 }
 
-int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap,
-			       u8 *max_frl_rate_per_lane, u8 *max_lanes, u8 *add_func,
-			       const struct edid *edid)
+int rockchip_drm_parse_cea_ext(struct rockchip_drm_hdmi21_data *hdmi21_data,
+			       const struct edid *edid, int ext_block_num)
 {
 	const u8 *edid_ext;
-	int i, start, end;
+	int i, start, end, ext_index;
 
-	if (!dsc_cap || !max_frl_rate_per_lane || !max_lanes || !edid || !add_func)
+	if (!hdmi21_data || !edid)
 		return -EINVAL;
 
-	edid_ext = find_cea_extension(edid);
-	if (!edid_ext)
-		return -EINVAL;
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
 
-	if (cea_db_offsets(edid_ext, &start, &end))
-		return -EINVAL;
+		if (cea_db_offsets(edid_ext, &start, &end))
+			return -EINVAL;
 
-	for_each_cea_db(edid_ext, i, start, end) {
-		const u8 *db = &edid_ext[i];
+		for_each_cea_db(edid_ext, i, start, end) {
+			const u8 *db = &edid_ext[i];
 
-		if (cea_db_is_hdmi_forum_vsdb(db))
-			parse_edid_forum_vsdb(dsc_cap, max_frl_rate_per_lane,
-					      max_lanes, add_func, db);
-		else if (cea_db_is_hdmi_forum_scdb(db))
-			parse_hdmi_forum_scds(dsc_cap, max_frl_rate_per_lane,
-					      max_lanes, db);
+			if (cea_db_is_hdmi_forum_vsdb(db) || cea_db_is_hdmi_forum_scdb(db))
+				parse_hdmi_forum_scds(hdmi21_data, db);
+		}
 	}
 
 	return 0;
 }
 EXPORT_SYMBOL(rockchip_drm_parse_cea_ext);
 
-int rockchip_drm_parse_next_hdr(struct next_hdr_sink_data *sink_data,
-				const struct edid *edid)
+int rockchip_drm_parse_dovi(u8 *sink_data, const struct edid *edid, int ext_block_num)
 {
 	const u8 *edid_ext;
-	int i, start, end;
+	int i, start, end, ret, ext_index;
 
 	if (!sink_data || !edid)
 		return -EINVAL;
 
-	memset(sink_data, 0, sizeof(struct next_hdr_sink_data));
+	memset(sink_data, 0, DOVI_VSDB_LEN);
 
-	edid_ext = find_cea_extension(edid);
-	if (!edid_ext)
-		return -EINVAL;
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
 
-	if (cea_db_offsets(edid_ext, &start, &end))
-		return -EINVAL;
+		if (cea_db_offsets(edid_ext, &start, &end))
+			return -EINVAL;
 
-	for_each_cea_db(edid_ext, i, start, end) {
-		const u8 *db = &edid_ext[i];
+		for_each_cea_db(edid_ext, i, start, end) {
+			const u8 *db = &edid_ext[i];
 
-		if (cea_db_is_hdmi_next_hdr_block(db))
-			parse_next_hdr_block(sink_data, db);
+			if (cea_db_is_hdmi_dovi_block(db)) {
+				ret = parse_dovi_block(sink_data, db);
+				if (ret)
+					return ret;
+			}
+		}
 	}
 
 	return 0;
 }
-EXPORT_SYMBOL(rockchip_drm_parse_next_hdr);
+EXPORT_SYMBOL(rockchip_drm_parse_dovi);
 
 #define COLORIMETRY_DATA_BLOCK		0x5
 #define USE_EXTENDED_TAG		0x07
@@ -1189,34 +1631,99 @@ static bool cea_db_is_hdmi_colorimetry_data_block(const u8 *db)
 }
 
 int
-rockchip_drm_parse_colorimetry_data_block(u8 *colorimetry, const struct edid *edid)
+rockchip_drm_parse_colorimetry_data_block(u32 *colorimetry, const struct edid *edid,
+					  int ext_block_num)
 {
 	const u8 *edid_ext;
-	int i, start, end;
+	int i, start, end, ext_index;
 
 	if (!colorimetry || !edid)
 		return -EINVAL;
 
 	*colorimetry = 0;
 
-	edid_ext = find_cea_extension(edid);
-	if (!edid_ext)
-		return -EINVAL;
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
 
-	if (cea_db_offsets(edid_ext, &start, &end))
-		return -EINVAL;
+		if (cea_db_offsets(edid_ext, &start, &end))
+			return -EINVAL;
 
-	for_each_cea_db(edid_ext, i, start, end) {
-		const u8 *db = &edid_ext[i];
+		for_each_cea_db(edid_ext, i, start, end) {
+			const u8 *db = &edid_ext[i];
 
-		if (cea_db_is_hdmi_colorimetry_data_block(db))
-			/* As per CEA 861-G spec */
-			*colorimetry = ((db[3] & (0x1 << 7)) << 1) | db[2];
+			if (cea_db_is_hdmi_colorimetry_data_block(db))
+				/* As per CEA 861-G spec */
+				*colorimetry = ((db[3] & (0x1 << 7)) << 1) | db[2];
+			else
+				continue;
+
+			*colorimetry = *colorimetry << 3;
+			*colorimetry |= BIT(DRM_MODE_COLORIMETRY_DEFAULT) |
+				BIT(DRM_MODE_COLORIMETRY_BT709_YCC) |
+				BIT(DRM_MODE_COLORIMETRY_SMPTE_170M_YCC);
+			/*
+			 * The macro definitions of BT2020_RGB and BT2020_YCC in
+			 * DRM are in the opposite order to that in EDID.
+			 * so the values of two bits need to be exchanged.
+			 */
+			if ((*colorimetry & BIT(DRM_MODE_COLORIMETRY_BT2020_RGB)) !=
+			    ((*colorimetry & BIT(DRM_MODE_COLORIMETRY_BT2020_YCC)) >> 1))
+				*colorimetry ^= (BIT(DRM_MODE_COLORIMETRY_BT2020_RGB) |
+						 BIT(DRM_MODE_COLORIMETRY_BT2020_YCC));
+		}
 	}
 
 	return 0;
 }
 EXPORT_SYMBOL(rockchip_drm_parse_colorimetry_data_block);
+
+#define HDR10_PLUS_OUI 0x90848b
+
+static bool cea_db_is_hdr10_plus_block(const u8 *db)
+{
+	unsigned int oui;
+
+	if (cea_db_tag(db) != CTA_DB_EXTENDED_TAG)
+		return false;
+
+	if (cea_db_payload_len(db) < 5)
+		return false;
+
+	oui = db[4] << 16 | db[3] << 8 | db[2];
+	return oui == HDR10_PLUS_OUI;
+}
+
+u8 rockchip_drm_parse_hdr10_plus_vsdb(const struct edid *edid, int ext_block_num)
+{
+	const u8 *edid_ext;
+	int i, ext_index, start, end;
+	u8 hdr10_plus = 0;
+
+	if (!edid)
+		return 0;
+
+	for (ext_index = 0; ext_index <= ext_block_num; ext_index++) {
+		edid_ext = find_cea_extension(edid, ext_block_num, ext_index);
+		if (!edid_ext)
+			continue;
+
+		if (cea_db_offsets(edid_ext, &start, &end))
+			return 0;
+
+		for_each_cea_db(edid_ext, i, start, end) {
+			const u8 *db = &edid_ext[i];
+
+			if (cea_db_is_hdr10_plus_block(db))
+				/* As per CEA 861-G spec */
+				hdr10_plus = db[5];
+		}
+	}
+
+	return hdr10_plus;
+}
+EXPORT_SYMBOL(rockchip_drm_parse_hdr10_plus_vsdb);
 
 /*
  * Attach a (component) device to the shared drm dma mapping from master drm
@@ -1330,6 +1837,85 @@ void rockchip_unregister_crtc_funcs(struct drm_crtc *crtc)
 	priv->crtc_funcs[pipe] = NULL;
 }
 
+u16 rockchip_hdmi_vrr_tfr_match_to_vrefresh(u8 tfr)
+{
+	if (tfr < 0 || tfr >= TFR_MAX) {
+		DRM_ERROR("qms-vrr tfr is out of range\n");
+		return 0;
+	}
+
+	return tfr_vrefresh_table[tfr];
+}
+
+const struct
+mvrr_const_val *rockchip_hdmi_vrr_get_vrrconf_mconst(enum hdmi_brr_vic brr_vic, u16 vrefresh_khz)
+{
+	const struct mvrr_const_st **table_vic = NULL;
+	const struct mvrr_const_val *const *table_val = NULL;
+
+	for (table_vic = qms_const; *table_vic; table_vic++) {
+		if ((*table_vic)->brr_vic == brr_vic) {
+			table_val = (*table_vic)->val;
+			for (; *table_val; table_val++) {
+				if ((*table_val)->vrefresh_khz == vrefresh_khz)
+					break;
+			}
+			break;
+		}
+	}
+
+	if (!table_val) {
+		DRM_ERROR("%s[%d] not find brr_vic: %d vrefresh_khz: %d\n",
+			  __func__, __LINE__, brr_vic, vrefresh_khz);
+		return NULL;
+	}
+
+	return *table_val;
+}
+
+u16 rockchip_hdmi_vrr_calc_new_vtotal(const struct mvrr_const_val *mvrr, u32 frame_cnt)
+{
+	u32 pos;
+	u16 vtotal = 0;
+
+	if (!mvrr)
+		return vtotal;
+
+	vtotal = mvrr->vtotal_fixed;
+	/* if bit_len is 0, then means there is no fraction */
+	if (!mvrr->bit_len)
+		return vtotal;
+
+	/* calculate the fraction number */
+	pos = frame_cnt % mvrr->bit_len;
+	if (mvrr->frac_array[pos / 8] & (1 << (7 - (pos % 8))))
+		vtotal++;
+
+	return vtotal;
+}
+
+/*
+ * a high frequency of page faults will follow up, if
+ * there is a iommu fault, so it's better to limit the
+ * registers dump frequency to save log buffer
+ *
+ * Report no more than once every 10s, give userspace time
+ * to do recovery process, as for a serdes based display
+ * pipeline, the disable/enable time may very long.
+ */
+static DEFINE_RATELIMIT_STATE(fault_handler_rate, 10 * HZ, 1);
+
+static int fault_handler_rate_limit(void)
+{
+	return __ratelimit(&fault_handler_rate);
+}
+
+void rockchip_drm_reset_iommu_fault_handler_rate_limit(void)
+{
+	fault_handler_rate.begin = 0;
+	fault_handler_rate.printed = 0;
+}
+
 static int rockchip_drm_fault_handler(struct iommu_domain *iommu,
 				      struct device *dev,
 				      unsigned long iova, int flags, void *arg)
@@ -1337,10 +1923,26 @@ static int rockchip_drm_fault_handler(struct iommu_domain *iommu,
 	struct drm_device *drm_dev = arg;
 	struct rockchip_drm_private *priv = drm_dev->dev_private;
 	struct drm_crtc *crtc;
+	bool handled = false;
 
-	DRM_ERROR("iommu fault handler flags: 0x%x\n", flags);
+	DRM_ERROR("iommu fault handler flags: 0x%x: count: %lld\n",
+		  flags, ++priv->iommu_fault_count);
+
+	if (!fault_handler_rate_limit())
+		return 0;
+
 	drm_for_each_crtc(crtc, drm_dev) {
 		int pipe = drm_crtc_index(crtc);
+
+		/*
+		 * Only need to call iommu fault handler once for one iommu fault
+		 */
+		if (priv->crtc_funcs[pipe] &&
+		    priv->crtc_funcs[pipe]->iommu_fault_handler &&
+		    !handled) {
+			priv->crtc_funcs[pipe]->iommu_fault_handler(crtc, iommu);
+			handled = true;
+		}
 
 		if (priv->crtc_funcs[pipe] &&
 		    priv->crtc_funcs[pipe]->regs_dump)
@@ -1387,13 +1989,18 @@ static int rockchip_drm_init_iommu(struct drm_device *drm_dev)
 		 */
 		ret = iommu_map(private->domain, 0, 0, (size_t)SZ_2G,
 				IOMMU_WRITE | IOMMU_READ | IOMMU_PRIV);
-		if (ret)
+		if (ret) {
 			dev_err(drm_dev->dev, "failed to create 0-2G pre mapping\n");
+			return 0;
+		}
 
 		ret = iommu_map(private->domain, SZ_2G, SZ_2G, (size_t)SZ_2G,
 				IOMMU_WRITE | IOMMU_READ | IOMMU_PRIV);
-		if (ret)
+		if (ret) {
 			dev_err(drm_dev->dev, "failed to create 2G-4G pre mapping\n");
+			return 0;
+		}
+		dev_info(drm_dev->dev, "Enable iommu reserve map\n");
 	}
 
 	return ret;
@@ -1498,21 +2105,9 @@ static struct drm_info_list rockchip_debugfs_files[] = {
 
 static void rockchip_drm_debugfs_init(struct drm_minor *minor)
 {
-	struct drm_device *dev = minor->dev;
-	struct rockchip_drm_private *priv = dev->dev_private;
-	struct drm_crtc *crtc;
-
 	drm_debugfs_create_files(rockchip_debugfs_files,
 				 ARRAY_SIZE(rockchip_debugfs_files),
 				 minor->debugfs_root, minor);
-
-	drm_for_each_crtc(crtc, dev) {
-		int pipe = drm_crtc_index(crtc);
-
-		if (priv->crtc_funcs[pipe] &&
-		    priv->crtc_funcs[pipe]->debugfs_init)
-			priv->crtc_funcs[pipe]->debugfs_init(minor, crtc);
-	}
 }
 #endif
 
@@ -1528,7 +2123,7 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 	struct rockchip_drm_private *private = dev->dev_private;
 
 	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					 "EOTF", 0, 5);
+					 "EOTF", 0, HDMI_EOTF_DOVI);
 	if (!prop)
 		return -ENOMEM;
 	private->eotf_prop = prop;
@@ -1556,6 +2151,12 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 					ARRAY_SIZE(split_area));
 	private->split_area_prop = prop;
 
+	prop = drm_property_create(dev, DRM_MODE_PROP_BLOB | DRM_MODE_PROP_IMMUTABLE,
+				   "MODE_INFO", 0);
+	if (!prop)
+		return -ENOMEM;
+	private->mode_info_prop = prop;
+
 	prop = drm_property_create_object(dev,
 					  DRM_MODE_PROP_ATOMIC | DRM_MODE_PROP_IMMUTABLE,
 					  "SOC_ID", DRM_MODE_OBJECT_CRTC);
@@ -1566,12 +2167,21 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 					  "PORT_ID", DRM_MODE_OBJECT_CRTC);
 	private->port_id_prop = prop;
 
+	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
+					 "DOVI_INPUT_TYPE", 0, DOVI_ENHANCE_LAYER);
+	if (!prop)
+		return -ENOMEM;
+	private->dovi_input_type_prop = prop;
+
 	private->aclk_prop = drm_property_create_range(dev, 0, "ACLK", 0, UINT_MAX);
 	private->bg_prop = drm_property_create_range(dev, 0, "BACKGROUND", 0, UINT_MAX);
 	private->line_flag_prop = drm_property_create_range(dev, 0, "LINE_FLAG1", 0, UINT_MAX);
 	private->cubic_lut_prop = drm_property_create(dev, DRM_MODE_PROP_BLOB, "CUBIC_LUT", 0);
 	private->cubic_lut_size_prop = drm_property_create_range(dev, DRM_MODE_PROP_IMMUTABLE,
 								 "CUBIC_LUT_SIZE", 0, UINT_MAX);
+
+	private->dimming_data_prop = drm_property_create(dev, DRM_MODE_PROP_BLOB,
+							 "DIMMING_DATA", 0);
 
 	return drm_mode_create_tv_properties(dev, 0, NULL);
 }
@@ -1685,6 +2295,13 @@ static void rockchip_gem_pool_destroy(struct drm_device *drm)
 	gen_pool_destroy(private->secure_buffer_pool);
 }
 
+static void rockchip_drm_sysfs_dev_release(struct device *dev)
+{
+	kfree(dev);
+}
+
+static void rockchip_drm_sysfs_fini(struct drm_device *drm_dev);
+
 static int rockchip_drm_sysfs_init(struct drm_device *drm_dev)
 {
 	struct rockchip_drm_private *priv = drm_dev->dev_private;
@@ -1694,14 +2311,19 @@ static int rockchip_drm_sysfs_init(struct drm_device *drm_dev)
 
 	drm_for_each_crtc(crtc, drm_dev) {
 		dev = kzalloc(sizeof(struct device), GFP_KERNEL);
-		if (!dev)
-			return -ENOMEM;
+		if (!dev) {
+			ret = -ENOMEM;
+			goto cleanup;
+		}
 
 		ret = dev_set_name(dev, "%s", crtc->name);
-		if (ret)
+		if (ret) {
+			kfree(dev);
 			goto cleanup;
+		}
 
 		dev->parent = drm_dev->primary->kdev;
+		dev->release = rockchip_drm_sysfs_dev_release;
 		ret = device_register(dev);
 		if (ret) {
 			put_device(dev);
@@ -1717,9 +2339,8 @@ static int rockchip_drm_sysfs_init(struct drm_device *drm_dev)
 	}
 
 	return 0;
-
 cleanup:
-	kfree(dev);
+	rockchip_drm_sysfs_fini(drm_dev);
 	return ret;
 }
 
@@ -1738,9 +2359,367 @@ static void rockchip_drm_sysfs_fini(struct drm_device *drm_dev)
 			if (priv->crtc_funcs[pipe] && priv->crtc_funcs[pipe]->sysfs_fini)
 				priv->crtc_funcs[pipe]->sysfs_fini(dev, crtc);
 			device_unregister(dev);
-			kfree(dev);
 			priv->sysfs_devs[pipe] = NULL;
 		}
+	}
+}
+
+void rockchip_drm_send_error_event(struct rockchip_drm_private *priv,
+				   enum rockchip_drm_error_event_type event)
+{
+	struct rockchip_drm_error_event *error_event = &priv->error_event;
+	struct drm_event_vblank *e;
+	struct timespec64 tv;
+	unsigned long flags;
+
+	/*
+	 * Maybe the error thread has not be created.
+	 */
+	if (IS_ERR_OR_NULL(priv->error_event.thread))
+		return;
+
+	spin_lock_irqsave(&error_event->lock, flags);
+	tv = ktime_to_timespec64(ktime_get());
+	e = &error_event->event;
+	e->base.type = event;
+	e->base.length = sizeof(*e);
+	e->tv_sec = tv.tv_sec;
+	e->tv_usec = tv.tv_nsec / 1000;
+	e->sequence++;
+	error_event->error_state = true;
+	spin_unlock_irqrestore(&error_event->lock, flags);
+
+	wake_up_interruptible_all(&error_event->wait);
+}
+
+static int rockchip_drm_error_event_thread(void *data)
+{
+	struct drm_device *drm_dev = data;
+	struct rockchip_drm_private *priv = drm_dev->dev_private;
+	struct rockchip_drm_error_event *error_event = &priv->error_event;
+	struct drm_event_vblank *e;
+	int ret = 0;
+	int cnt = 0;
+
+	while (!kthread_should_stop()) {
+		e = &error_event->event;
+
+		error_event->error_state = false;
+		ret = wait_event_interruptible(error_event->wait, error_event->error_state);
+		if (!ret) {
+			sysfs_notify(&drm_dev->dev->kobj, NULL, "error_event");
+			drm_info(drm_dev, "rockchipdrm send_error_event_type: 0x%x, count:%d\n",
+				 e->base.type, ++cnt);
+		}
+	}
+
+	return 0;
+}
+
+static ssize_t rockchip_drm_error_event_show(struct device *dev,
+					     struct device_attribute *attr, char *buf)
+{
+	struct drm_device *drm_dev = dev_get_drvdata(dev);
+	struct rockchip_drm_private *priv = drm_dev->dev_private;
+	struct rockchip_drm_error_event *error_event = &priv->error_event;
+	struct drm_event_vblank *e;
+	uint32_t length = sizeof(*e);
+	unsigned long flags;
+
+	spin_lock_irqsave(&error_event->lock, flags);
+	e = &error_event->event;
+	memcpy(buf, e, length);
+	spin_unlock_irqrestore(&error_event->lock, flags);
+
+	return length;
+}
+static DEVICE_ATTR(error_event, 0444, rockchip_drm_error_event_show, NULL);
+
+static void rockchip_drm_error_event_init(struct drm_device *drm_dev)
+{
+	struct rockchip_drm_private *priv = drm_dev->dev_private;
+	int ret;
+
+	ret = device_create_file(drm_dev->dev, &dev_attr_error_event);
+	if (ret) {
+		dev_warn(drm_dev->dev, "failed to create vcnt event file\n");
+		return;
+	}
+
+	init_waitqueue_head(&priv->error_event.wait);
+	spin_lock_init(&priv->error_event.lock);
+	priv->error_event.thread = kthread_run(rockchip_drm_error_event_thread,
+					       drm_dev, "display-error-event-thread");
+	if (IS_ERR(priv->error_event.thread)) {
+		priv->error_event.thread = NULL;
+		drm_err(drm_dev, "failed to run display error_event thread\n");
+	} else {
+		sched_set_fifo_low(priv->error_event.thread);
+		drm_info(drm_dev, "run display error_event monitor\n");
+	}
+}
+
+static void rockchip_drm_error_event_fini(struct drm_device *drm_dev)
+{
+	struct rockchip_drm_private *priv = drm_dev->dev_private;
+
+	if (priv->error_event.thread)
+		kthread_stop(priv->error_event.thread);
+	device_remove_file(drm_dev->dev, &dev_attr_error_event);
+}
+
+int rockchip_drm_panel_loader_protect(struct drm_panel *panel, bool on)
+{
+	struct rockchip_drm_sub_dev *sub_dev;
+
+	if (!panel)
+		return -EINVAL;
+
+	sub_dev = rockchip_drm_get_sub_dev(panel->dev->of_node);
+	if (sub_dev && sub_dev->loader_protect)
+		return sub_dev->loader_protect(sub_dev, on);
+
+	return 0;
+}
+EXPORT_SYMBOL(rockchip_drm_panel_loader_protect);
+
+int rockchip_drm_bus_fmt_color_depth(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_RGB888_1X24:
+	case MEDIA_BUS_FMT_YUV8_1X24:
+	case MEDIA_BUS_FMT_UYVY8_1X16:
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
+		return 8;
+
+	case MEDIA_BUS_FMT_RGB101010_1X30:
+	case MEDIA_BUS_FMT_YUV10_1X30:
+	case MEDIA_BUS_FMT_UYVY10_1X20:
+	case MEDIA_BUS_FMT_YUYV10_1X20:
+	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
+		return 10;
+
+	case MEDIA_BUS_FMT_RGB121212_1X36:
+	case MEDIA_BUS_FMT_YUV12_1X36:
+	case MEDIA_BUS_FMT_UYVY12_1X24:
+	case MEDIA_BUS_FMT_YUYV12_1X24:
+	case MEDIA_BUS_FMT_UYYVYY12_0_5X36:
+		return 12;
+
+	case MEDIA_BUS_FMT_RGB161616_1X48:
+	case MEDIA_BUS_FMT_YUV16_1X48:
+	case MEDIA_BUS_FMT_UYYVYY16_0_5X48:
+		return 16;
+
+	default:
+		return 0;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_color_depth);
+
+int rockchip_drm_bus_fmt_to_color_format(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
+	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
+	case MEDIA_BUS_FMT_UYYVYY12_0_5X36:
+	case MEDIA_BUS_FMT_UYYVYY16_0_5X48:
+		return RK_IF_FORMAT_YCBCR420;
+
+	case MEDIA_BUS_FMT_YUV8_1X24:
+	case MEDIA_BUS_FMT_YUV10_1X30:
+	case MEDIA_BUS_FMT_YUV12_1X36:
+	case MEDIA_BUS_FMT_YUV16_1X48:
+		return RK_IF_FORMAT_YCBCR444;
+
+	case MEDIA_BUS_FMT_UYVY8_1X16:
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+	case MEDIA_BUS_FMT_UYVY10_1X20:
+	case MEDIA_BUS_FMT_YUYV10_1X20:
+	case MEDIA_BUS_FMT_UYVY12_1X24:
+	case MEDIA_BUS_FMT_YVYU12_1X24:
+		return RK_IF_FORMAT_YCBCR422;
+
+	case MEDIA_BUS_FMT_RGB888_1X24:
+	case MEDIA_BUS_FMT_RGB101010_1X30:
+	case MEDIA_BUS_FMT_RGB121212_1X36:
+	case MEDIA_BUS_FMT_RGB161616_1X48:
+	default:
+		return RK_IF_FORMAT_RGB;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_to_color_format);
+
+void rockchip_drm_parse_bus_format(u32 bus_format, u32 *format, u32 *colordepth)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_RGB101010_1X30:
+		*format = RK_IF_FORMAT_RGB;
+		*colordepth = 10;
+		break;
+	case MEDIA_BUS_FMT_YUV8_1X24:
+		*format = RK_IF_FORMAT_YCBCR444;
+		*colordepth = 8;
+		break;
+	case MEDIA_BUS_FMT_YUV10_1X30:
+		*format = RK_IF_FORMAT_YCBCR444;
+		*colordepth = 10;
+		break;
+	case MEDIA_BUS_FMT_UYVY10_1X20:
+	case MEDIA_BUS_FMT_YUYV10_1X20:
+		*format = RK_IF_FORMAT_YCBCR422;
+		*colordepth = 10;
+		break;
+	case MEDIA_BUS_FMT_UYVY8_1X16:
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+		*format = RK_IF_FORMAT_YCBCR422;
+		*colordepth = 8;
+		break;
+	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
+		*format = RK_IF_FORMAT_YCBCR420;
+		*colordepth = 8;
+		break;
+	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
+		*format = RK_IF_FORMAT_YCBCR420;
+		*colordepth = 10;
+		break;
+	default:
+		*format = RK_IF_FORMAT_RGB;
+		*colordepth = 8;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_parse_bus_format);
+
+bool rockchip_drm_bus_fmt_is_rgb(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_RGB888_1X24:
+	case MEDIA_BUS_FMT_RGB101010_1X30:
+	case MEDIA_BUS_FMT_RGB121212_1X36:
+	case MEDIA_BUS_FMT_RGB161616_1X48:
+		return true;
+
+	default:
+		return false;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_is_rgb);
+
+bool rockchip_drm_bus_fmt_is_yuv444(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_YUV8_1X24:
+	case MEDIA_BUS_FMT_YUV10_1X30:
+	case MEDIA_BUS_FMT_YUV12_1X36:
+	case MEDIA_BUS_FMT_YUV16_1X48:
+		return true;
+
+	default:
+		return false;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_is_yuv444);
+
+bool rockchip_drm_bus_fmt_is_yuv422(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_UYVY8_1X16:
+	case MEDIA_BUS_FMT_UYVY10_1X20:
+	case MEDIA_BUS_FMT_UYVY12_1X24:
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+	case MEDIA_BUS_FMT_YUYV10_1X20:
+	case MEDIA_BUS_FMT_YUYV12_1X24:
+		return true;
+
+	default:
+		return false;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_is_yuv422);
+
+bool rockchip_drm_bus_fmt_is_yuv420(unsigned int bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
+	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
+	case MEDIA_BUS_FMT_UYYVYY12_0_5X36:
+	case MEDIA_BUS_FMT_UYYVYY16_0_5X48:
+		return true;
+
+	default:
+	return false;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_bus_fmt_is_yuv420);
+
+unsigned int rockchip_drm_hdmi_get_tmdsclock(unsigned long output_bus_format,
+					     unsigned long pixelclock)
+{
+	unsigned int tmdsclock = pixelclock;
+	unsigned int depth =
+		rockchip_drm_bus_fmt_color_depth(output_bus_format);
+
+	if (!rockchip_drm_bus_fmt_is_yuv422(output_bus_format)) {
+		switch (depth) {
+		case 16:
+			tmdsclock = pixelclock * 2;
+			break;
+		case 12:
+			tmdsclock = pixelclock * 3 / 2;
+			break;
+		case 10:
+			tmdsclock = pixelclock * 5 / 4;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return tmdsclock;
+}
+EXPORT_SYMBOL(rockchip_drm_hdmi_get_tmdsclock);
+
+int rockchip_drm_atomic_replace_property_blob_from_id(struct drm_device *dev,
+						      struct drm_property_blob **blob,
+						      uint64_t blob_id, ssize_t expected_size,
+						      ssize_t expected_elem_size, bool *replaced)
+{
+	struct drm_property_blob *new_blob = NULL;
+
+	if (blob_id != 0) {
+		new_blob = drm_property_lookup_blob(dev, blob_id);
+		if (!new_blob)
+			goto out;
+
+		if (expected_size > 0 &&
+		    new_blob->length != expected_size) {
+			drm_property_blob_put(new_blob);
+			return -EINVAL;
+		}
+		if (expected_elem_size > 0 &&
+		    new_blob->length % expected_elem_size != 0) {
+			drm_property_blob_put(new_blob);
+			return -EINVAL;
+		}
+	}
+
+out:
+	*replaced |= drm_property_replace_blob(blob, new_blob);
+	drm_property_blob_put(new_blob);
+
+	return 0;
+}
+EXPORT_SYMBOL(rockchip_drm_atomic_replace_property_blob_from_id);
+
+static void rockchip_drm_fix_encoder_possible_clones(struct drm_encoder *encoder)
+{
+	struct drm_device *drm_dev = encoder->dev;
+	struct drm_encoder *other;
+
+	drm_for_each_encoder(other, drm_dev) {
+		if (other->possible_crtcs & encoder->possible_crtcs)
+			encoder->possible_clones |= drm_encoder_mask(other);
 	}
 }
 
@@ -1748,6 +2727,7 @@ static int rockchip_drm_bind(struct device *dev)
 {
 	struct drm_device *drm_dev;
 	struct rockchip_drm_private *private;
+	struct drm_encoder *encoder;
 	int ret;
 
 	/* Remove existing drivers that may own the framebuffer memory. */
@@ -1774,10 +2754,6 @@ static int rockchip_drm_bind(struct device *dev)
 	mutex_init(&private->ovl_lock);
 
 	drm_dev->dev_private = private;
-
-	INIT_LIST_HEAD(&private->psr_list);
-	mutex_init(&private->psr_list_lock);
-	mutex_init(&private->commit_lock);
 
 	private->hdmi_pll.pll = devm_clk_get_optional(dev, "hdmi-tmds-pll");
 	if (PTR_ERR(private->hdmi_pll.pll) == -EPROBE_DEFER) {
@@ -1841,6 +2817,9 @@ static int rockchip_drm_bind(struct device *dev)
 	if (ret)
 		goto err_kms_helper_poll_fini;
 
+	drm_for_each_encoder(encoder, drm_dev)
+		rockchip_drm_fix_encoder_possible_clones(encoder);
+
 	rockchip_drm_show_logo(drm_dev);
 
 	ret = rockchip_drm_fbdev_init(drm_dev);
@@ -1850,6 +2829,9 @@ static int rockchip_drm_bind(struct device *dev)
 	ret = rockchip_drm_sysfs_init(drm_dev);
 	if (ret)
 		goto err_drm_fbdev_fini;
+
+	rockchip_drm_error_event_init(drm_dev);
+	rockchip_clocks_loader_unprotect();
 
 	return 0;
 err_drm_fbdev_fini:
@@ -1875,6 +2857,7 @@ static void rockchip_drm_unbind(struct device *dev)
 {
 	struct drm_device *drm_dev = dev_get_drvdata(dev);
 
+	rockchip_drm_error_event_fini(drm_dev);
 	rockchip_drm_sysfs_fini(drm_dev);
 	rockchip_drm_fbdev_fini(drm_dev);
 	drm_dev_unregister(drm_dev);
@@ -2105,7 +3088,7 @@ struct dma_buf *rockchip_drm_gem_prime_export(struct drm_gem_object *obj,
 
 DEFINE_DRM_GEM_FOPS(rockchip_drm_driver_fops);
 
-static struct drm_driver rockchip_drm_driver = {
+static const struct drm_driver rockchip_drm_driver = {
 	.driver_features	= DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC | DRIVER_RENDER,
 	.postclose		= rockchip_drm_postclose,
 	.lastclose		= rockchip_drm_lastclose,
@@ -2309,7 +3292,7 @@ static int rockchip_drm_platform_probe(struct platform_device *pdev)
 	int ret;
 
 	ret = rockchip_drm_platform_of_probe(dev);
-#if !IS_ENABLED(CONFIG_DRM_ROCKCHIP_VVOP)
+#if !IS_ENABLED(CONFIG_DRM_ROCKCHIP_VKMS)
 	if (ret)
 		return ret;
 #endif
@@ -2381,8 +3364,8 @@ static int __init rockchip_drm_init(void)
 		return -ENODEV;
 
 	num_rockchip_sub_drivers = 0;
-#if IS_ENABLED(CONFIG_DRM_ROCKCHIP_VVOP)
-	ADD_ROCKCHIP_SUB_DRIVER(vvop_platform_driver, CONFIG_DRM_ROCKCHIP_VVOP);
+#if IS_ENABLED(CONFIG_DRM_ROCKCHIP_VKMS)
+	ADD_ROCKCHIP_SUB_DRIVER(rockchip_vkms_platform_driver, CONFIG_DRM_ROCKCHIP_VKMS);
 #else
 	ADD_ROCKCHIP_SUB_DRIVER(vop_platform_driver, CONFIG_ROCKCHIP_VOP);
 	ADD_ROCKCHIP_SUB_DRIVER(vop2_platform_driver, CONFIG_ROCKCHIP_VOP2);
@@ -2394,10 +3377,12 @@ static int __init rockchip_drm_init(void)
 	ADD_ROCKCHIP_SUB_DRIVER(cdn_dp_driver, CONFIG_ROCKCHIP_CDN_DP);
 	ADD_ROCKCHIP_SUB_DRIVER(dw_hdmi_rockchip_pltfm_driver,
 				CONFIG_ROCKCHIP_DW_HDMI);
+	ADD_ROCKCHIP_SUB_DRIVER(dw_hdmi_qp_rockchip_pltfm_driver,
+				CONFIG_ROCKCHIP_DW_HDMI_QP);
 	ADD_ROCKCHIP_SUB_DRIVER(dw_mipi_dsi_rockchip_driver,
 				CONFIG_ROCKCHIP_DW_MIPI_DSI);
 	ADD_ROCKCHIP_SUB_DRIVER(dw_mipi_dsi2_rockchip_driver,
-				CONFIG_ROCKCHIP_DW_MIPI_DSI);
+				CONFIG_ROCKCHIP_DW_MIPI_DSI2);
 	ADD_ROCKCHIP_SUB_DRIVER(inno_hdmi_driver, CONFIG_ROCKCHIP_INNO_HDMI);
 	ADD_ROCKCHIP_SUB_DRIVER(rk3066_hdmi_driver,
 				CONFIG_ROCKCHIP_RK3066_HDMI);

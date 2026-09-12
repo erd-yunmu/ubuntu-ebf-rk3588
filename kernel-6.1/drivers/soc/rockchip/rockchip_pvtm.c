@@ -2,7 +2,7 @@
 /*
  * Rockchip PVTM support.
  *
- * Copyright (c) 2016 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2016 Rockchip Electronics Co., Ltd.
  * Author: Finley Xiao <finley.xiao@rock-chips.com>
  */
 
@@ -17,6 +17,7 @@
 #include <linux/of_clk.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
 #include <linux/slab.h>
@@ -607,95 +608,6 @@ static const struct rockchip_pvtm_data rk3568_npupvtm = {
 	},
 };
 
-static const struct rockchip_pvtm_info rk3588_bigcore0_pvtm_infos[] = {
-	PVTM(0, "bigcore0", 7, 0, 1, 0x4, 0, 0x4),
-};
-
-static const struct rockchip_pvtm_data rk3588_bigcore0_pvtm = {
-	.con = 0x4,
-	.sta = 0x80,
-	.num_pvtms = ARRAY_SIZE(rk3588_bigcore0_pvtm_infos),
-	.infos = rk3588_bigcore0_pvtm_infos,
-	.ops = {
-		.get_value = rv1126_pvtm_get_value,
-		.set_ring_sel = rv1126_pvtm_set_ring_sel,
-	},
-};
-
-static const struct rockchip_pvtm_info rk3588_bigcore1_pvtm_infos[] = {
-	PVTM(1, "bigcore1", 7, 0, 1, 0x4, 0, 0x4),
-};
-
-static const struct rockchip_pvtm_data rk3588_bigcore1_pvtm = {
-	.con = 0x4,
-	.sta = 0x80,
-	.num_pvtms = ARRAY_SIZE(rk3588_bigcore1_pvtm_infos),
-	.infos = rk3588_bigcore1_pvtm_infos,
-	.ops = {
-		.get_value = rv1126_pvtm_get_value,
-		.set_ring_sel = rv1126_pvtm_set_ring_sel,
-	},
-};
-
-static const struct rockchip_pvtm_info rk3588_litcore_pvtm_infos[] = {
-	PVTM(2, "litcore", 7, 0, 1, 0x4, 0, 0x4),
-};
-
-static const struct rockchip_pvtm_data rk3588_litcore_pvtm = {
-	.con = 0x4,
-	.sta = 0x80,
-	.num_pvtms = ARRAY_SIZE(rk3588_litcore_pvtm_infos),
-	.infos = rk3588_litcore_pvtm_infos,
-	.ops = {
-		.get_value = rv1126_pvtm_get_value,
-		.set_ring_sel = rv1126_pvtm_set_ring_sel,
-	},
-};
-
-static const struct rockchip_pvtm_info rk3588_npu_pvtm_infos[] = {
-	PVTM(3, "npu", 2, 0, 1, 0x4, 0, 0x4),
-};
-
-static const struct rockchip_pvtm_data rk3588_npu_pvtm = {
-	.con = 0x4,
-	.sta = 0x80,
-	.num_pvtms = ARRAY_SIZE(rk3588_npu_pvtm_infos),
-	.infos = rk3588_npu_pvtm_infos,
-	.ops = {
-		.get_value = rv1126_pvtm_get_value,
-		.set_ring_sel = rv1126_pvtm_set_ring_sel,
-	},
-};
-
-static const struct rockchip_pvtm_info rk3588_gpu_pvtm_infos[] = {
-	PVTM(4, "gpu", 2, 0, 1, 0x4, 0, 0x4),
-};
-
-static const struct rockchip_pvtm_data rk3588_gpu_pvtm = {
-	.con = 0x4,
-	.sta = 0x80,
-	.num_pvtms = ARRAY_SIZE(rk3588_gpu_pvtm_infos),
-	.infos = rk3588_gpu_pvtm_infos,
-	.ops = {
-		.get_value = rv1126_pvtm_get_value,
-		.set_ring_sel = rv1126_pvtm_set_ring_sel,
-	},
-};
-
-static const struct rockchip_pvtm_info rk3588_pmu_pvtm_infos[] = {
-	PVTM(5, "pmu", 1, 0, 1, 0x4, 0, 0x4),
-};
-
-static const struct rockchip_pvtm_data rk3588_pmu_pvtm = {
-	.con = 0x4,
-	.sta = 0x80,
-	.num_pvtms = ARRAY_SIZE(rk3588_pmu_pvtm_infos),
-	.infos = rk3588_pmu_pvtm_infos,
-	.ops = {
-		.get_value = rv1126_pvtm_get_value,
-	},
-};
-
 static const struct rockchip_pvtm_info rv1106_corepvtm_infos[] = {
 	PVTM(0, "core", 2, 0, 1, 0x4, 0, 0x4),
 };
@@ -834,32 +746,6 @@ static const struct of_device_id rockchip_pvtm_match[] = {
 		.data = (void *)&rk3568_npupvtm,
 	},
 #endif
-#ifdef CONFIG_CPU_RK3588
-	{
-		.compatible = "rockchip,rk3588-bigcore0-pvtm",
-		.data = (void *)&rk3588_bigcore0_pvtm,
-	},
-	{
-		.compatible = "rockchip,rk3588-bigcore1-pvtm",
-		.data = (void *)&rk3588_bigcore1_pvtm,
-	},
-	{
-		.compatible = "rockchip,rk3588-litcore-pvtm",
-		.data = (void *)&rk3588_litcore_pvtm,
-	},
-	{
-		.compatible = "rockchip,rk3588-gpu-pvtm",
-		.data = (void *)&rk3588_gpu_pvtm,
-	},
-	{
-		.compatible = "rockchip,rk3588-npu-pvtm",
-		.data = (void *)&rk3588_npu_pvtm,
-	},
-	{
-		.compatible = "rockchip,rk3588-pmu-pvtm",
-		.data = (void *)&rk3588_pmu_pvtm,
-	},
-#endif
 #ifdef CONFIG_CPU_RV1106
 	{
 		.compatible = "rockchip,rv1106-core-pvtm",
@@ -983,13 +869,13 @@ static int rockchip_pvtm_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct device_node *np = pdev->dev.of_node;
 	struct device_node *node;
-	const struct of_device_id *match;
+	const struct rockchip_pvtm_data *data;
 	struct rockchip_pvtm *pvtm;
 	struct regmap *grf = NULL;
 	void __iomem *base = NULL;
 
-	match = of_match_device(dev->driver->of_match_table, dev);
-	if (!match || !match->data) {
+	data = device_get_match_data(dev);
+	if (!data) {
 		dev_err(dev, "missing pvtm data\n");
 		return -EINVAL;
 	}
@@ -1005,7 +891,7 @@ static int rockchip_pvtm_probe(struct platform_device *pdev)
 	}
 
 	for_each_available_child_of_node(np, node) {
-		pvtm = rockchip_pvtm_init(dev, node, match->data, grf, base);
+		pvtm = rockchip_pvtm_init(dev, node, data, grf, base);
 		if (!pvtm) {
 			dev_err(dev, "failed to handle node %s\n",
 				node->full_name);

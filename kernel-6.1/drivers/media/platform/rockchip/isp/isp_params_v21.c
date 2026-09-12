@@ -3318,6 +3318,8 @@ isp_bay3d_enable(struct rkisp_isp_params_vdev *params_vdev,
 		value = priv_val->buf_3dnr.dma_addr;
 		rkisp_iowrite32(params_vdev, value, ISP21_MI_BAY3D_WR_BASE);
 		rkisp_iowrite32(params_vdev, value, ISP21_MI_BAY3D_RD_BASE);
+		rkisp_iowrite32(params_vdev, 0, ISP21_MI_BAY3D_WR_LENGTH);
+		rkisp_iowrite32(params_vdev, 0, ISP21_MI_BAY3D_RD_LENGTH);
 
 		rkisp_set_bits(params_vdev->dev, MI_RD_CTRL2,
 			       BAY3D_RW_ONEADDR_EN, BAY3D_RW_ONEADDR_EN, false);
@@ -3991,11 +3993,11 @@ static void
 rkisp_params_first_cfg_v2x(struct rkisp_isp_params_vdev *params_vdev)
 {
 	struct rkisp_device *dev = params_vdev->dev;
-	struct rkisp_isp_params_val_v21 *priv_val =
-		(struct rkisp_isp_params_val_v21 *)params_vdev->priv_val;
+	struct rkisp_isp_params_val_v21 *priv_val = params_vdev->priv_val;
+	unsigned long flags = 0;
 
 	dev->is_bigmode = rkisp_params_check_bigmode_v21(params_vdev);
-	spin_lock(&params_vdev->config_lock);
+	spin_lock_irqsave(&params_vdev->config_lock, flags);
 	/* override the default things */
 	if (!params_vdev->isp21_params->module_cfg_update &&
 	    !params_vdev->isp21_params->module_en_update)
@@ -4014,7 +4016,7 @@ rkisp_params_first_cfg_v2x(struct rkisp_isp_params_vdev *params_vdev)
 		rkisp_set_bits(params_vdev->dev, ISP_CTRL1,
 			       ISP2X_SYS_BIGMODE_MANUAL | ISP2X_SYS_BIGMODE_FORCEEN,
 			       ISP2X_SYS_BIGMODE_MANUAL | ISP2X_SYS_BIGMODE_FORCEEN, false);
-	spin_unlock(&params_vdev->config_lock);
+	spin_unlock_irqrestore(&params_vdev->config_lock, flags);
 }
 
 static void rkisp_save_first_param_v2x(struct rkisp_isp_params_vdev *params_vdev, void *param)
@@ -4210,7 +4212,8 @@ ldch_data_abandon(struct rkisp_isp_params_vdev *params_vdev,
 		if (arg->buf_fd == priv_val->buf_ldch[i].dma_fd &&
 		    priv_val->buf_ldch[i].vaddr) {
 			ldch_head = (struct isp2x_ldch_head *)priv_val->buf_ldch[i].vaddr;
-			ldch_head->stat = LDCH_BUF_CHIPINUSE;
+			if (ldch_head->stat == LDCH_BUF_WAIT2CHIP)
+				ldch_head->stat = LDCH_BUF_INIT;
 			break;
 		}
 	}
@@ -4222,8 +4225,9 @@ rkisp_params_cfg_v2x(struct rkisp_isp_params_vdev *params_vdev,
 {
 	struct isp21_isp_params_cfg *new_params = NULL;
 	struct rkisp_buffer *cur_buf = params_vdev->cur_buf;
+	unsigned long flags = 0;
 
-	spin_lock(&params_vdev->config_lock);
+	spin_lock_irqsave(&params_vdev->config_lock, flags);
 	if (!params_vdev->streamon)
 		goto unlock;
 
@@ -4276,7 +4280,7 @@ rkisp_params_cfg_v2x(struct rkisp_isp_params_vdev *params_vdev,
 
 unlock:
 	params_vdev->cur_buf = cur_buf;
-	spin_unlock(&params_vdev->config_lock);
+	spin_unlock_irqrestore(&params_vdev->config_lock, flags);
 }
 
 static void

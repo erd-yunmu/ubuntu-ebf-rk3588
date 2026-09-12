@@ -4,6 +4,7 @@
  */
 #include <linux/cacheflush.h>
 #include <linux/delay.h>
+#include <linux/device.h>
 #include <linux/io.h>
 #include <linux/module.h>
 
@@ -110,19 +111,21 @@ static uint32_t cap_2_dev_size(uint32_t cap)
 
 static int dsmc_psram_id_detect(struct rockchip_dsmc *dsmc, uint32_t cs)
 {
-	uint32_t tmp, i;
+	uint32_t tmp[DSMC_MAX_SLAVE_NUM], i;
 	int ret = -1;
 	struct dsmc_map *region_map = &dsmc->cs_map[cs].region_map[0];
 	struct dsmc_config_cs *cfg = &dsmc->cfg.cs_cfg[cs];
 
-	tmp = readl(dsmc->regs + DSMC_MCR(cs));
+	for (i = 0; i < DSMC_MAX_SLAVE_NUM; i++) {
+		tmp[i] = readl(dsmc->regs + DSMC_MCR(i));
 
-	/* config to CR space */
-	REG_CLRSETBITS(dsmc, DSMC_MCR(cs),
-		       (MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT) |
-		       (MCR_CRT_MASK << MCR_CRT_SHIFT),
-		       (MCR_IOWIDTH_X8 << MCR_IOWIDTH_SHIFT) |
-		       (MCR_CRT_CR_SPACE << MCR_CRT_SHIFT));
+		/* config to CR space */
+		REG_CLRSETBITS(dsmc, DSMC_MCR(i),
+			       (MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT) |
+			       (MCR_CRT_MASK << MCR_CRT_SHIFT),
+			       (MCR_IOWIDTH_X8 << MCR_IOWIDTH_SHIFT) |
+			       (MCR_CRT_CR_SPACE << MCR_CRT_SHIFT));
+	}
 
 	if (cfg->protcl == OPI_XCCELA_PSRAM) {
 		uint8_t mid;
@@ -157,15 +160,17 @@ static int dsmc_psram_id_detect(struct rockchip_dsmc *dsmc, uint32_t cs)
 		}
 	}
 
-	/* config to memory space */
-	writel(tmp, dsmc->regs + DSMC_MCR(cs));
+	for (i = 0; i < DSMC_MAX_SLAVE_NUM; i++)
+		/* config to memory space */
+		writel(tmp[i], dsmc->regs + DSMC_MCR(i));
 
 	return ret;
 }
 
 static void dsmc_psram_bw_detect(struct rockchip_dsmc *dsmc, uint32_t cs)
 {
-	uint32_t tmp, col;
+	uint32_t i;
+	uint32_t tmp[DSMC_MAX_SLAVE_NUM], col;
 	uint16_t ir0_ir1;
 	struct dsmc_map *region_map = &dsmc->cs_map[cs].region_map[0];
 	struct dsmc_config_cs *cfg = &dsmc->cfg.cs_cfg[cs];
@@ -177,13 +182,15 @@ static void dsmc_psram_bw_detect(struct rockchip_dsmc *dsmc, uint32_t cs)
 		else
 			cfg->io_width = MCR_IOWIDTH_X8;
 	} else {
-		tmp = readl(dsmc->regs + DSMC_MCR(cs));
-		/* config to CR space */
-		REG_CLRSETBITS(dsmc, DSMC_MCR(cs),
-			       (MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT) |
-			       (MCR_CRT_MASK << MCR_CRT_SHIFT),
-			       (MCR_IOWIDTH_X8 << MCR_IOWIDTH_SHIFT) |
-			       (MCR_CRT_CR_SPACE << MCR_CRT_SHIFT));
+		for (i = 0; i < DSMC_MAX_SLAVE_NUM; i++) {
+			tmp[i] = readl(dsmc->regs + DSMC_MCR(i));
+			/* config to CR space */
+			REG_CLRSETBITS(dsmc, DSMC_MCR(i),
+				       (MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT) |
+				       (MCR_CRT_MASK << MCR_CRT_SHIFT),
+				       (MCR_IOWIDTH_X8 << MCR_IOWIDTH_SHIFT) |
+				       (MCR_CRT_CR_SPACE << MCR_CRT_SHIFT));
+		}
 
 		/* hyper psram get IR0 */
 		ir0_ir1 = hyper_read_mr(region_map, HYPER_PSRAM_IR0);
@@ -195,8 +202,9 @@ static void dsmc_psram_bw_detect(struct rockchip_dsmc *dsmc, uint32_t cs)
 		else
 			cfg->io_width = MCR_IOWIDTH_X8;
 
-		/* config to memory space */
-		writel(tmp, dsmc->regs + DSMC_MCR(cs));
+		for (i = 0; i < DSMC_MAX_SLAVE_NUM; i++)
+			/* config to memory space */
+			writel(tmp[i], dsmc->regs + DSMC_MCR(i));
 
 	}
 	cfg->col = col;
@@ -206,6 +214,7 @@ static int dsmc_psram_dectect(struct rockchip_dsmc *dsmc, uint32_t cs)
 {
 	uint32_t i = 0;
 	int ret = -1;
+	struct device *dev = dsmc->dev;
 	struct dsmc_config_cs *cfg = &dsmc->cfg.cs_cfg[cs];
 
 	/* axi read do not response error */
@@ -229,7 +238,7 @@ static int dsmc_psram_dectect(struct rockchip_dsmc *dsmc, uint32_t cs)
 		cfg->protcl = psram_info[i].protcl;
 		cfg->mtr_timing = psram_info[i].mtr_timing;
 		if (!dsmc_psram_id_detect(dsmc, cs)) {
-			pr_info("DSMC: The cs%d %s PSRAM ID: 0x%x\n", cs,
+			dev_info(dev, "The cs%d %s PSRAM ID: 0x%x\n", cs,
 				(cfg->protcl == OPI_XCCELA_PSRAM) ? "XCCELA" : "HYPER",
 				psram_info[i].id);
 			ret = 0;
@@ -237,16 +246,11 @@ static int dsmc_psram_dectect(struct rockchip_dsmc *dsmc, uint32_t cs)
 		}
 	}
 	if (i == ARRAY_SIZE(psram_info)) {
-		pr_err("DSMC: Unknown PSRAM device\n");
+		dev_err(dev, "Unknown PSRAM device\n");
 		ret = -1;
 	} else {
 		dsmc_psram_bw_detect(dsmc, cs);
 	}
-
-	/* recovery axi read response */
-	REG_CLRSETBITS(dsmc, DSMC_AXICTL,
-		       (AXICTL_RD_NO_ERR_MASK << AXICTL_RD_NO_ERR_SHIFT),
-		       (0x0 << AXICTL_RD_NO_ERR_SHIFT));
 
 	return ret;
 }
@@ -273,15 +277,20 @@ static int dsmc_ctrller_cfg_for_lb(struct rockchip_dsmc *dsmc, uint32_t cs)
 	       dsmc->regs + DSMC_MTR(cs));
 	writel(cfg->rgn_num / 2,
 	       dsmc->regs + DSMC_SLV_RGN_DIV(cs));
+
+	/* axi read do not response error */
+	REG_CLRSETBITS(dsmc, DSMC_AXICTL,
+		       (AXICTL_RD_NO_ERR_MASK << AXICTL_RD_NO_ERR_SHIFT),
+		       (0x1 << AXICTL_RD_NO_ERR_SHIFT));
 	for (i = 0; i < DSMC_LB_MAX_RGN; i++) {
 		slv_rgn = &cfg->slv_rgn[i];
 		if (!slv_rgn->status)
 			continue;
 
-		if (slv_rgn->dummy_clk_num >= 2)
+		if (slv_rgn->dummy_clk_num == 1)
 			value = (0x1 << RGNX_ATTR_DUM_CLK_EN_SHIFT) |
 				(0x1 << RGNX_ATTR_DUM_CLK_NUM_SHIFT);
-		else if (slv_rgn->dummy_clk_num >= 1)
+		else if (slv_rgn->dummy_clk_num == 0)
 			value = (0x1 << RGNX_ATTR_DUM_CLK_EN_SHIFT) |
 				(0x0 << RGNX_ATTR_DUM_CLK_NUM_SHIFT);
 		else
@@ -315,7 +324,8 @@ static int dsmc_slv_cmn_rgn_config(struct rockchip_dsmc *dsmc,
 				   uint32_t rgn, uint32_t cs)
 {
 	uint32_t tmp;
-	struct dsmc_map *region_map = &dsmc->cs_map[cs].region_map[0];
+	struct device *dev = dsmc->dev;
+	struct dsmc_map *region_map = &dsmc->cs_map[cs].region_map[rgn];
 	struct dsmc_config_cs *cfg = &dsmc->cfg.cs_cfg[cs];
 
 	tmp = lb_read_cmn(region_map, RGN_CMN_CON(rgn, 0));
@@ -324,21 +334,21 @@ static int dsmc_slv_cmn_rgn_config(struct rockchip_dsmc *dsmc,
 	} else if (slv_rgn->dummy_clk_num == 1) {
 		tmp |= slv_rgn->dummy_clk_num << WR_DATA_CYC_EXTENDED_SHIFT;
 	} else {
-		pr_err("DSMC: lb slave: dummy clk too large\n");
+		dev_err(dev, "lb slave: dummy clk too large\n");
 		return -1;
 	}
 	tmp &= ~(RD_LATENCY_CYC_MASK << RD_LATENCY_CYC_SHIFT);
 	if ((cfg->rd_latency == 1) || (cfg->rd_latency == 2)) {
 		tmp |= cfg->rd_latency << RD_LATENCY_CYC_SHIFT;
 	} else {
-		pr_err("DSMC: lb slave: read latency value error\n");
+		dev_err(dev, "lb slave: read latency value error\n");
 		return -1;
 	}
 	tmp &= ~(WR_LATENCY_CYC_MASK << WR_LATENCY_CYC_SHIFT);
 	if ((cfg->wr_latency == 1) || (cfg->wr_latency == 2)) {
 		tmp |= cfg->wr_latency << WR_LATENCY_CYC_SHIFT;
 	} else {
-		pr_err("DSMC: lb slave: write latency value error\n");
+		dev_err(dev, "lb slave: write latency value error\n");
 		return -1;
 	}
 	tmp &= ~(CA_CYC_MASK << CA_CYC_SHIFT);
@@ -353,10 +363,12 @@ static int dsmc_slv_cmn_rgn_config(struct rockchip_dsmc *dsmc,
 }
 
 static int dsmc_slv_cmn_config(struct rockchip_dsmc *dsmc,
-			       struct regions_config *slv_rgn, uint32_t cs)
+			       struct regions_config *slv_rgn,
+			       uint32_t rgn, uint32_t cs)
 {
 	uint32_t tmp;
-	struct dsmc_map *region_map = &dsmc->cs_map[cs].region_map[0];
+	struct device *dev = dsmc->dev;
+	struct dsmc_map *region_map = &dsmc->cs_map[cs].region_map[rgn];
 	struct dsmc_config_cs *cfg = &dsmc->cfg.cs_cfg[cs];
 
 	tmp = lb_read_cmn(region_map, CMN_CON(3));
@@ -371,7 +383,7 @@ static int dsmc_slv_cmn_config(struct rockchip_dsmc *dsmc,
 	} else if (slv_rgn->dummy_clk_num == 1) {
 		tmp |= slv_rgn->dummy_clk_num << WR_DATA_CYC_EXTENDED_SHIFT;
 	} else {
-		pr_err("DSMC: lb slave: dummy clk too large\n");
+		dev_err(dev, "lb slave: dummy clk too large\n");
 		return -1;
 	}
 
@@ -388,18 +400,20 @@ static int dsmc_slv_cmn_config(struct rockchip_dsmc *dsmc,
 
 static int dsmc_lb_cmn_config(struct rockchip_dsmc *dsmc, uint32_t cs)
 {
-	uint32_t tmp, i;
+	uint32_t tmp[DSMC_MAX_SLAVE_NUM], i;
 	struct dsmc_config_cs *cfg = &dsmc->cfg.cs_cfg[cs];
 	struct regions_config *slv_rgn;
 	int ret = 0;
 
-	tmp = readl(dsmc->regs + DSMC_MCR(cs));
-	/* config to CR space */
-	REG_CLRSETBITS(dsmc, DSMC_MCR(cs),
-		       (MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT) |
-		       (MCR_CRT_MASK << MCR_CRT_SHIFT),
-		       (MCR_IOWIDTH_X8 << MCR_IOWIDTH_SHIFT) |
-		       (MCR_CRT_CR_SPACE << MCR_CRT_SHIFT));
+	for (i = 0; i < DSMC_MAX_SLAVE_NUM; i++) {
+		tmp[i] = readl(dsmc->regs + DSMC_MCR(i));
+		/* config to CR space */
+		REG_CLRSETBITS(dsmc, DSMC_MCR(i),
+			       (MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT) |
+			       (MCR_CRT_MASK << MCR_CRT_SHIFT),
+			       (MCR_IOWIDTH_X8 << MCR_IOWIDTH_SHIFT) |
+			       (MCR_CRT_CR_SPACE << MCR_CRT_SHIFT));
+	}
 
 	for (i = 0; i < DSMC_LB_MAX_RGN; i++) {
 		slv_rgn = &cfg->slv_rgn[i];
@@ -408,13 +422,14 @@ static int dsmc_lb_cmn_config(struct rockchip_dsmc *dsmc, uint32_t cs)
 		ret = dsmc_slv_cmn_rgn_config(dsmc, slv_rgn, i, cs);
 		if (ret)
 			break;
+		ret = dsmc_slv_cmn_config(dsmc, slv_rgn, i, cs);
+		if (ret)
+			break;
 	}
 
-	slv_rgn = &cfg->slv_rgn[0];
-	ret = dsmc_slv_cmn_config(dsmc, slv_rgn, cs);
-
-	/* config to memory space */
-	writel(tmp, dsmc->regs + DSMC_MCR(cs));
+	for (i = 0; i < DSMC_MAX_SLAVE_NUM; i++)
+		/* config to memory space */
+		writel(tmp[i], dsmc->regs + DSMC_MCR(i));
 
 	for (i = 0; i < DSMC_LB_MAX_RGN; i++) {
 		slv_rgn = &cfg->slv_rgn[i];
@@ -429,10 +444,27 @@ static int dsmc_lb_cmn_config(struct rockchip_dsmc *dsmc, uint32_t cs)
 	return ret;
 }
 
-static void dsmc_lb_csr_config(struct rockchip_dsmc *dsmc, uint32_t cs)
+static int dsmc_lb_csr_config(struct rockchip_dsmc *dsmc, uint32_t cs)
 {
+	uint32_t i;
 	uint32_t mcr_tmp, rgn_attr_tmp;
-	struct dsmc_map *region_map = &dsmc->cs_map[cs].region_map[0];
+	struct dsmc_map *region_map = NULL;
+	struct regions_config *slv_rgn;
+	struct dsmc_config_cs *cfg = &dsmc->cfg.cs_cfg[cs];
+	struct device *dev = dsmc->dev;
+
+	for (i = 0; i < DSMC_LB_MAX_RGN; i++) {
+		slv_rgn = &cfg->slv_rgn[i];
+		if (slv_rgn->status) {
+			region_map = &dsmc->cs_map[cs].region_map[i];
+			break;
+		}
+	}
+
+	if (region_map == NULL) {
+		dev_err(dev, "Cannot find an enable region.\n");
+		return -ENODEV;
+	}
 
 	mcr_tmp = readl(dsmc->regs + DSMC_MCR(cs));
 	rgn_attr_tmp = readl(dsmc->regs + DSMC_RGN0_ATTR(cs));
@@ -455,6 +487,8 @@ static void dsmc_lb_csr_config(struct rockchip_dsmc *dsmc, uint32_t cs)
 	/* config to normal memory space */
 	writel(mcr_tmp, dsmc->regs + DSMC_MCR(cs));
 	writel(rgn_attr_tmp, dsmc->regs + DSMC_RGN0_ATTR(cs));
+
+	return 0;
 }
 
 static void dsmc_cfg_latency(uint32_t rd_ltcy, uint32_t wr_ltcy,
@@ -472,17 +506,20 @@ static void dsmc_cfg_latency(uint32_t rd_ltcy, uint32_t wr_ltcy,
 
 static int dsmc_psram_cfg(struct rockchip_dsmc *dsmc, uint32_t cs)
 {
-	uint32_t latency, mcr, tmp;
+	uint32_t i;
+	uint32_t latency, mcr[DSMC_MAX_SLAVE_NUM], tmp;
 	struct dsmc_map *region_map = &dsmc->cs_map[cs].region_map[0];
 	struct dsmc_config_cs *cs_cfg = &dsmc->cfg.cs_cfg[cs];
 
-	mcr = readl(dsmc->regs + DSMC_MCR(cs));
-	/* config to CR space */
-	REG_CLRSETBITS(dsmc, DSMC_MCR(cs),
-		       (MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT) |
-		       (MCR_CRT_MASK << MCR_CRT_SHIFT),
-		       (MCR_IOWIDTH_X8 << MCR_IOWIDTH_SHIFT) |
-		       (MCR_CRT_CR_SPACE << MCR_CRT_SHIFT));
+	for (i = 0; i < DSMC_MAX_SLAVE_NUM; i++) {
+		mcr[i] = readl(dsmc->regs + DSMC_MCR(i));
+		/* config to CR space */
+		REG_CLRSETBITS(dsmc, DSMC_MCR(i),
+			       (MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT) |
+			       (MCR_CRT_MASK << MCR_CRT_SHIFT),
+			       (MCR_IOWIDTH_X8 << MCR_IOWIDTH_SHIFT) |
+			       (MCR_CRT_CR_SPACE << MCR_CRT_SHIFT));
+	}
 	if (cs_cfg->protcl == OPI_XCCELA_PSRAM) {
 		/* Xccela psram init */
 		uint8_t mr_tmp, rbxen;
@@ -507,6 +544,9 @@ static int dsmc_psram_cfg(struct rockchip_dsmc *dsmc, uint32_t cs)
 
 		mr_tmp = (mr_tmp & (~(XCCELA_MR4_WL_MASK << XCCELA_MR4_WL_SHIFT))) |
 			 (tmp << XCCELA_MR4_WL_SHIFT);
+		/* set 0.5x refresh rate allow */
+		mr_tmp = (mr_tmp & (~(XCCELA_MR4_REFRESH_MASK << XCCELA_MR4_REFRESH_SHIFT))) |
+			 (XCCELA_MR4_0_5_REFRESH_RATE << XCCELA_MR4_REFRESH_SHIFT);
 
 		xccela_write_mr(region_map, 4, mr_tmp);
 
@@ -583,8 +623,9 @@ static int dsmc_psram_cfg(struct rockchip_dsmc *dsmc, uint32_t cs)
 			 (CR1_CLOCK_TYPE_DIFF_CLK << CR1_CLOCK_TYPE_SHIFT);
 		hyper_write_mr(region_map, HYPER_PSRAM_CR1, cr_tmp);
 	}
-	/* config to memory space */
-	writel(mcr, dsmc->regs + DSMC_MCR(cs));
+	for (i = 0; i < DSMC_MAX_SLAVE_NUM; i++)
+		/* config to memory space */
+		writel(mcr[i], dsmc->regs + DSMC_MCR(i));
 
 	return 0;
 }
@@ -593,6 +634,7 @@ static int dsmc_psram_cfg(struct rockchip_dsmc *dsmc, uint32_t cs)
 static int dsmc_psram_init(struct rockchip_dsmc *dsmc, uint32_t cs)
 {
 	uint32_t latency;
+	struct device *dev = dsmc->dev;
 	struct dsmc_config_cs *cs_cfg = &dsmc->cfg.cs_cfg[cs];
 	uint32_t mhz = dsmc->cfg.freq_hz / MHZ;
 
@@ -607,7 +649,7 @@ static int dsmc_psram_init(struct rockchip_dsmc *dsmc, uint32_t cs)
 	} else if (mhz <= 200) {
 		latency = 7;
 	} else {
-		pr_err("DSMC: PSRAM frequency do not support!\n");
+		dev_err(dev, "PSRAM frequency do not support!\n");
 		return -1;
 	}
 
@@ -646,6 +688,7 @@ static int dsmc_ctrller_cfg_for_psram(struct rockchip_dsmc *dsmc, uint32_t cs)
 
 static void dsmc_psram_remodify_timing(struct rockchip_dsmc *dsmc, uint32_t cs)
 {
+	uint32_t i;
 	uint32_t max_length = 511, tcmd = 3;
 	uint32_t tcsm, tmp;
 	uint32_t mhz = dsmc->cfg.freq_hz / MHZ;
@@ -670,13 +713,16 @@ static void dsmc_psram_remodify_timing(struct rockchip_dsmc *dsmc, uint32_t cs)
 	if (tmp > max_length)
 		tmp = max_length;
 
+	for (i = 0; i < DSMC_MAX_SLAVE_NUM; i++)
+		REG_CLRSETBITS(dsmc, DSMC_MCR(i),
+			       MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT,
+			       cs_cfg->io_width << MCR_IOWIDTH_SHIFT);
+
 	REG_CLRSETBITS(dsmc, DSMC_MCR(cs),
 		       (MCR_MAXEN_MASK << MCR_MAXEN_SHIFT) |
-		       (MCR_MAXLEN_MASK << MCR_MAXLEN_SHIFT) |
-		       (MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT),
+		       (MCR_MAXLEN_MASK << MCR_MAXLEN_SHIFT),
 		       (MCR_MAX_LENGTH_EN << MCR_MAXEN_SHIFT) |
-		       (tmp << MCR_MAXLEN_SHIFT) |
-		       (cs_cfg->io_width << MCR_IOWIDTH_SHIFT));
+		       (tmp << MCR_MAXLEN_SHIFT));
 
 	if (cs_cfg->io_width == MCR_IOWIDTH_X16)
 		tmp = cs_cfg->col - 2;
@@ -746,14 +792,33 @@ static int dsmc_dll_training_method(struct rockchip_dsmc_device *dsmc_dev, uint3
 				    uint32_t byte, uint32_t dll_num)
 {
 	uint32_t i, j;
-	uint32_t data;
+	uint32_t data, rgn;
 	uint32_t size = 0x100;
+	struct dsmc_map *map = NULL;
+	struct regions_config *slv_rgn;
 	const struct dsmc_ops *ops = dsmc_dev->ops;
 	struct dsmc_config_cs *cfg = &dsmc_dev->dsmc.cfg.cs_cfg[cs];
 	struct rockchip_dsmc *dsmc = &dsmc_dev->dsmc;
-	struct dsmc_map *map = &dsmc_dev->dsmc.cs_map[cs].region_map[0];
+	struct device *dev = dsmc->dev;
 	uint32_t pattern[] = {0x5aa5f00f, 0xffff0000};
 	uint32_t mask;
+
+	if (cfg->device_type == DSMC_LB_DEVICE) {
+		for (rgn = 0; rgn < DSMC_LB_MAX_RGN; rgn++) {
+			slv_rgn = &cfg->slv_rgn[rgn];
+			if (slv_rgn->status) {
+				map = &dsmc->cs_map[cs].region_map[rgn];
+				break;
+			}
+		}
+	} else {
+		rgn = 0;
+		map = &dsmc->cs_map[cs].region_map[rgn];
+	}
+	if (map == NULL) {
+		dev_err(dev, "Cannot find an enable region.\n");
+		return -ENODEV;
+	}
 
 	if (cfg->io_width == MCR_IOWIDTH_X8) {
 		mask = 0xffffffff;
@@ -770,7 +835,7 @@ static int dsmc_dll_training_method(struct rockchip_dsmc_device *dsmc_dev, uint3
 	for (j = 0; j < ARRAY_SIZE(pattern); j++) {
 		data_cpu_to_dsmc_io(&pattern[j]);
 		for (i = 0; i < size; i += 4)
-			ops->write(dsmc_dev, cs, 0, i, (pattern[j] + i) & mask);
+			ops->write(dsmc_dev, cs, rgn, i, (pattern[j] + i) & mask);
 
 #ifdef CONFIG_ARM64
 		dcache_clean_inval_poc((unsigned long)map->virt, (unsigned long)(map->virt + size));
@@ -779,7 +844,7 @@ static int dsmc_dll_training_method(struct rockchip_dsmc_device *dsmc_dev, uint3
 #endif
 
 		for (i = 0; i < size; i += 4) {
-			ops->read(dsmc_dev, cs, 0, i, &data);
+			ops->read(dsmc_dev, cs, rgn, i, &data);
 			if (data != ((pattern[j] + i) & mask))
 				return -EINVAL;
 		}
@@ -787,56 +852,92 @@ static int dsmc_dll_training_method(struct rockchip_dsmc_device *dsmc_dev, uint3
 	return 0;
 }
 
+static int dsmc_dll_full_range_training(struct rockchip_dsmc_device *dsmc_dev,
+				       uint32_t cs, uint32_t byte)
+{
+	uint32_t dll;
+	int result, best_dll;
+	int start = -1, best_start = -1, best_end = -1;
+	int max_length = 0, current_length = 0;
+	struct rockchip_dsmc *dsmc = &dsmc_dev->dsmc;
+	struct device *dev = dsmc->dev;
+	struct dsmc_config_cs *cfg = &dsmc_dev->dsmc.cfg.cs_cfg[cs];
+
+	for (dll = 0; dll <= 0xff; dll++) {
+		result = dsmc_dll_training_method(dsmc_dev, cs, byte, dll);
+
+		if (result == -ENODEV) {
+			return -ENODEV;
+		} else if (result == 0) {
+			if (start == -1)
+				start = dll;
+			current_length++;
+		} else {
+			if (start != -1) {
+				if (current_length > max_length) {
+					max_length = current_length;
+					best_start = start;
+					best_end = dll - 1;
+				}
+				start = -1;
+				current_length = 0;
+			}
+		}
+	}
+
+	/* Check if the last window extends to the end */
+	if (start != -1 && current_length > max_length) {
+		max_length = current_length;
+		best_start = start;
+		best_end = 0xff;
+	}
+
+	if (best_start == -1) {
+		/* No passing window found */
+		dev_err(dev, "DSMC: cs%d byte%d no valid DLL window found\n", cs, byte);
+		return -EINVAL;
+	}
+
+	best_dll = (best_start + best_end) / 2;
+
+	dev_info(dev, "cs%d byte%d: DLL window [0x%x-0x%x] length=0x%x, current=0x%x\n",
+		 cs, byte, best_start, best_end, max_length, best_dll);
+
+	REG_CLRSETBITS(dsmc, DSMC_RDS_DLL_CTL(cs, byte),
+		       RDS_DLL0_CTL_RDS_0_CLK_DELAY_NUM_MASK,
+		       best_dll << RDS_DLL0_CTL_RDS_0_CLK_DELAY_NUM_SHIFT);
+
+	/* Verify the selected value */
+	if (dsmc_dll_training_method(dsmc_dev, cs, byte, best_dll) != 0) {
+		dev_err(dev, "DSMC: cs%d byte%d current DLL 0x%x verification failed\n",
+			cs, byte, best_dll);
+		return -EIO;
+	}
+
+	cfg->dll_num[byte] = best_dll;
+
+	return 0;
+}
+
 int rockchip_dsmc_dll_training(struct rockchip_dsmc_device *priv)
 {
-	uint32_t cs, byte, dir;
-	uint32_t dll_max = 0xff, dll_min = 0;
-	int dll, dll_step = 10;
+	uint32_t cs, byte;
 	struct dsmc_config_cs *cfg;
 	struct rockchip_dsmc *dsmc = &priv->dsmc;
+	struct device *dev = dsmc->dev;
 	int ret;
 
 	for (cs = 0; cs < DSMC_MAX_SLAVE_NUM; cs++) {
 		cfg = &priv->dsmc.cfg.cs_cfg[cs];
 		if (cfg->device_type == DSMC_UNKNOWN_DEVICE)
 			continue;
+
 		for (byte = MCR_IOWIDTH_X8; byte <= cfg->io_width; byte++) {
-			dir = 0;
-			dll = cfg->dll_num[byte];
-			while ((dll >= 0x0 && dll <= 0xff)) {
-				ret = dsmc_dll_training_method(priv, cs, byte, dll);
-				if (ret) {
-					if (dir)
-						dll_max = dll - dll_step;
-					else
-						dll_min = dll + dll_step;
-					dll = cfg->dll_num[byte];
-					dir++;
-				} else if (((dll + dll_step) > 0xff) || ((dll - dll_step) < 0)) {
-					if (dir)
-						dll_max = dll;
-					else
-						dll_min = dll;
-					dll = cfg->dll_num[byte];
-					dir++;
-				}
-				if (dir > 1)
-					break;
-				if (dir)
-					dll += dll_step;
-				else
-					dll -= dll_step;
+			ret = dsmc_dll_full_range_training(priv, cs, byte);
+			if (ret) {
+				dev_err(dev, "DSMC: cs%d byte%d dll training failed\n", cs, byte);
+				return ret;
 			}
-			dll = (dll_max + dll_min) / 2;
-			if ((dll >= 0xff) || (dll <= 0)) {
-				pr_err("DSMC: cs%d byte%d dll training error(0x%x)\n",
-				       cs, byte, dll);
-				return -1;
-			}
-			pr_info("DSMC: cs%d byte%d dll delay line result 0x%x\n", cs, byte, dll);
-			REG_CLRSETBITS(dsmc, DSMC_RDS_DLL_CTL(cs, byte),
-				       RDS_DLL0_CTL_RDS_0_CLK_DELAY_NUM_MASK,
-				       dll << RDS_DLL0_CTL_RDS_0_CLK_DELAY_NUM_SHIFT);
 		}
 	}
 
@@ -942,6 +1043,7 @@ EXPORT_SYMBOL(rockchip_dsmc_psram_reinit);
 
 int rockchip_dsmc_ctrller_init(struct rockchip_dsmc *dsmc, uint32_t cs)
 {
+	uint32_t i;
 	struct dsmc_config_cs *cfg = &dsmc->cfg.cs_cfg[cs];
 
 	writel(MRGTCR_READ_WRITE_MERGE_EN,
@@ -953,17 +1055,21 @@ int rockchip_dsmc_ctrller_init(struct rockchip_dsmc *dsmc, uint32_t cs)
 	       (cfg->dll_num[1] << RDS_DLL1_CTL_RDS_1_CLK_DELAY_NUM_SHIFT),
 	       dsmc->regs + DSMC_RDS_DLL1_CTL(cs));
 
+	/* all io_width should set the same value in diff cs */
+	for (i = 0; i < DSMC_MAX_SLAVE_NUM; i++)
+		REG_CLRSETBITS(dsmc, DSMC_MCR(cs),
+			       MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT,
+			       cfg->io_width << MCR_IOWIDTH_SHIFT);
+
 	REG_CLRSETBITS(dsmc, DSMC_MCR(cs),
 		       (MCR_ACS_MASK << MCR_ACS_SHIFT) |
 		       (MCR_DEVTYPE_MASK << MCR_DEVTYPE_SHIFT) |
-		       (MCR_IOWIDTH_MASK << MCR_IOWIDTH_SHIFT) |
 		       (MCR_EXCLUSIVE_DQS_MASK << MCR_EXCLUSIVE_DQS_SHIFT) |
 		       (MCR_WRAPSIZE_MASK << MCR_WRAPSIZE_SHIFT) |
 		       (MCR_MAXEN_MASK << MCR_MAXEN_SHIFT) |
 		       (MCR_MAXLEN_MASK << MCR_MAXLEN_SHIFT),
 		       (cfg->acs << MCR_ACS_SHIFT) |
 		       (MCR_DEVTYPE_HYPERRAM << MCR_DEVTYPE_SHIFT) |
-		       (cfg->io_width << MCR_IOWIDTH_SHIFT) |
 		       (cfg->exclusive_dqs << MCR_EXCLUSIVE_DQS_SHIFT) |
 		       (cfg->wrap_size << MCR_WRAPSIZE_SHIFT) |
 		       (cfg->max_length_en << MCR_MAXEN_SHIFT) |
@@ -990,11 +1096,27 @@ int rockchip_dsmc_lb_init(struct rockchip_dsmc *dsmc, uint32_t cs)
 	ret = dsmc_lb_cmn_config(dsmc, cs);
 	if (ret)
 		return ret;
-	dsmc_lb_csr_config(dsmc, cs);
+	ret = dsmc_lb_csr_config(dsmc, cs);
 
 	return ret;
 }
 EXPORT_SYMBOL(rockchip_dsmc_lb_init);
+
+int rockchip_dsmc_status_check(struct rockchip_dsmc_device *priv)
+{
+	uint32_t csr;
+	struct rockchip_dsmc *dsmc = &priv->dsmc;
+	struct device *dev = dsmc->dev;
+
+	csr = readl(dsmc->regs + DSMC_CSR);
+	if (csr) {
+		dev_err(dev, "DSMC: csr status error(0x%x)!\n", csr);
+		return -ENODEV;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(rockchip_dsmc_status_check);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Zhihuan He <huan.he@rock-chips.com>");

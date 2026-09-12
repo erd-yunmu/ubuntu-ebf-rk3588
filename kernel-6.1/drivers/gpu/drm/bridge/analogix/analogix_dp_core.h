@@ -105,11 +105,6 @@ enum dynamic_range {
 	CEA
 };
 
-enum pll_status {
-	PLL_UNLOCKED,
-	PLL_LOCKED
-};
-
 enum clock_recovery_m_value_type {
 	CALCULATED_M,
 	REGISTER_M
@@ -158,8 +153,11 @@ struct link_train {
 	u8 link_rate;
 	u8 lane_count;
 	u8 training_lane[4];
+	u8 max_link_rate;
+	u8 max_lane_count;
 	bool ssc;
 	bool enhanced_framing;
+	bool assr;
 
 	enum link_training_state lt_state;
 };
@@ -204,10 +202,15 @@ struct analogix_dp_device {
 	struct analogix_dp_plat_data *plat_data;
 	struct extcon_dev *extcon;
 	struct analogix_dp_compliance compliance;
+	struct drm_property_blob *mode_infos_blob_ptr;
 
 	u32 split_area;
 
 	const struct analogix_dp_output_format *output_fmt;
+
+	bool dp_mode;
+
+	bool dynamic_pm_ctrl;
 };
 
 /* analogix_dp_reg.c */
@@ -220,7 +223,7 @@ void analogix_dp_swreset(struct analogix_dp_device *dp);
 void analogix_dp_config_interrupt(struct analogix_dp_device *dp);
 void analogix_dp_mute_hpd_interrupt(struct analogix_dp_device *dp);
 void analogix_dp_unmute_hpd_interrupt(struct analogix_dp_device *dp);
-enum pll_status analogix_dp_get_pll_lock_status(struct analogix_dp_device *dp);
+int analogix_dp_wait_pll_locked(struct analogix_dp_device *dp);
 void analogix_dp_set_pll_power_down(struct analogix_dp_device *dp, bool enable);
 void analogix_dp_set_analog_power_down(struct analogix_dp_device *dp,
 				       enum analog_power_block block,
@@ -279,5 +282,7 @@ void analogix_dp_init(struct analogix_dp_device *dp);
 void analogix_dp_irq_handler(struct analogix_dp_device *dp);
 void analogix_dp_phy_test(struct analogix_dp_device *dp);
 void analogix_dp_check_device_service_irq(struct analogix_dp_device *dp);
+void analogix_dp_enable_assr_mode(struct analogix_dp_device *dp, bool enable);
+bool analogix_dp_get_assr_mode(struct analogix_dp_device *dp);
 
 #endif /* _ANALOGIX_DP_CORE_H */

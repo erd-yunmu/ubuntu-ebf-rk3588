@@ -119,6 +119,15 @@
 		};
 	};
 
+	sai_dais: sai-dais {
+		status = "disabled";
+		compatible = "rockchip,multi-dais";
+		dais = <&sai1>, <&sai4>;
+		capture,channel-mapping = <2 2>;
+		playback,channel-mapping = <2 0>;
+		mclk-fs-mapping = <256 1024>;
+	};
+
 	es8388_sound: es8388-sound {
 		status = "disabled";
 		compatible = "rockchip,multicodecs-card";
@@ -141,6 +150,32 @@
 			"RINPUT2", "Main Mic";
 		pinctrl-names = "default";
 		pinctrl-0 = <&spk_ctrl>;
+	};
+
+	rk730_sound: rk730-sound {
+		status = "disabled";
+		compatible = "rockchip,multicodecs-card";
+		rockchip,card-name = "rockchip-rk730";
+		/* There is no hp-det and hp-con on evb1 */
+		spk-con-gpio = <&gpio1 RK_PC6 GPIO_ACTIVE_HIGH>;
+		rockchip,pre-power-on-delay-ms = <30>;
+		rockchip,post-power-down-delay-ms = <40>;
+		rockchip,format = "i2s";
+		rockchip,mclk-fs = <256>;
+		rockchip,mclk-fs-mapping = <256 1024>;
+		rockchip,cpu = <&sai_dais>;
+		rockchip,codec = <&rk730>, <&audio_codec>;
+		rockchip,audio-routing =
+			"Headphone", "LOUT2",
+			"Headphone", "ROUT2",
+			"Speaker", "LOUT1",
+			"Speaker", "ROUT1",
+			"Headphone", "Headphone Power",
+			"Headphone", "Headphone Power",
+			"Speaker", "Speaker Power",
+			"Speaker", "Speaker Power",
+			"MIC2", "Main Mic",
+			"MIC1", "Headset Mic";
 	};
 
 	fiq_debugger: fiq-debugger {
@@ -318,6 +353,19 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&rm_io8_sai1_mclk>;
 	};
+
+	rk730: rk730@17 {
+		status = "disabled";
+		#sound-dai-cells = <0>;
+		compatible = "rockchip,rk730";
+		reg = <0x17>;
+		clocks = <&mclkout_sai1>;
+		clock-names = "mclk";
+		assigned-clocks = <&mclkout_sai1>;
+		assigned-clock-rates = <12288000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&sai1_mclk_pins>;
+	};
 };
 
 &mmc {
@@ -410,18 +458,48 @@
 		| RKPM_PWREN_SLEEP_GPIO0A0 | RKPM_PWREN_SLEEP_ACT_LOW
 		)
 	>;
+
+#define GPIO0_IOC_GPIO0A_PULL_REG	0xff950200
+#define GPIO0_IOC_GPIO0B_PULL_REG	0xff950204
+#define GPIO0_IOC_GPIO0C_PULL_REG	0xff950208
+#define IOC0_GPIO0C5_SMT_REG		0xff950408
+
+#define GPIO0A02_PULL_Z			0x00330000
+#define GPIO0A3_PULL_DOWN		0x00c00080
+#define GPIO0B0_PULL_DOWN		0x00030002
+#define GPIO0C5_PULL_Z			0x0c000000
+#define GPIO0C5_SMT_DISABLE		0x00200000
+
+	/* Note: support max 16 pairs */
+	rockchip,sleep-io-config = <
+		GPIO0_IOC_GPIO0C_PULL_REG GPIO0C5_PULL_Z    /* PWM0_CH0_CPU */
+		IOC0_GPIO0C5_SMT_REG GPIO0C5_SMT_DISABLE    /* PWM0_CH0_CPU */
+		GPIO0_IOC_GPIO0A_PULL_REG GPIO0A02_PULL_Z   /* PWRCTRL0, PWRCTRL1 */
+		GPIO0_IOC_GPIO0A_PULL_REG GPIO0A3_PULL_DOWN /* PWM0_CH2_LCD_BL */
+		GPIO0_IOC_GPIO0B_PULL_REG GPIO0B0_PULL_DOWN /* SAI1_MCLK */
+	>;
+};
+
+&sai_dais {
+	status = "okay";
 };
 
 &sai1 {
-	pinctrl-names = "default";
+	rockchip,mclk-no-set;
+	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&rm_io9_sai1_sclk
 		     &rm_io10_sai1_lrck
 		     &rm_io11_sai1_sdi
 		     &rm_io12_sai1_sdo0>;
+	pinctrl-1 = <&rm_io9_idle_pins
+		     &rm_io10_idle_pins
+		     &rm_io11_idle_pins
+		     &rm_io12_idle_pins>;
 };
 
 &sai4 {
 	status = "okay";
+	rockchip,mclk-no-set;
 };
 
 &saradc {

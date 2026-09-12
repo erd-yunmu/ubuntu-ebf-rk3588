@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2021 Rockchip Co.,Ltd.
+ * Copyright (C) 2021 Rockchip Electronics Co., Ltd.
  * Author: Wang Jie <dave.wang@rock-chips.com>
  *
  * Hynetek Husb311 Type-C Chip Driver
@@ -11,6 +11,7 @@
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/pm_wakeup.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/usb/tcpci.h>
@@ -33,6 +34,7 @@ struct husb311_chip {
 	struct regulator *vbus;
 	struct mutex lock; /* lock for sharing chip states */
 	struct delayed_work pm_work;
+	struct wakeup_source *ws; /* keep wakeup during tcpm reset */
 	bool vbus_on;
 	bool charge_on;
 	bool suspended;
@@ -243,6 +245,11 @@ static int husb311_check_revision(struct i2c_client *i2c)
 	return 0;
 }
 
+static void husb311_wakeup_source_destroy(void *data)
+{
+	wakeup_source_unregister((struct wakeup_source *)(data));
+}
+
 static int husb311_probe(struct i2c_client *client,
 			 const struct i2c_device_id *i2c_id)
 {
@@ -269,6 +276,15 @@ static int husb311_probe(struct i2c_client *client,
 
 	mutex_init(&chip->lock);
 	INIT_DELAYED_WORK(&chip->pm_work, husb311_pm_work);
+
+	chip->ws = wakeup_source_register(chip->dev, "husb311");
+	if (!chip->ws)
+		return -ENOMEM;
+
+	ret = devm_add_action_or_reset(chip->dev, husb311_wakeup_source_destroy,
+				       chip->ws);
+	if (ret)
+		return ret;
 
 	chip->vbus = devm_regulator_get_optional(chip->dev, "vbus");
 	if (IS_ERR(chip->vbus)) {
@@ -324,7 +340,6 @@ static void husb311_shutdown(struct i2c_client *client)
 
 	disable_irq(client->irq);
 	cancel_delayed_work_sync(&chip->pm_work);
-	tcpci_unregister_port(chip->tcpci);
 }
 
 static int husb311_pm_suspend(struct device *dev)
@@ -332,10 +347,12 @@ static int husb311_pm_suspend(struct device *dev)
 	struct husb311_chip *chip = dev->driver_data;
 	struct i2c_client *client = to_i2c_client(dev);
 
-	if (device_may_wakeup(dev) && (!chip->vbus_on || chip->wakeup))
+	disable_irq(client->irq);
+
+	if (device_may_wakeup(dev) && (!chip->vbus_on || chip->wakeup)) {
+		dev_dbg(chip->dev, "enable irq wake\n");
 		enable_irq_wake(client->irq);
-	else
-		disable_irq(client->irq);
+	}
 
 	if (!chip->suspended) {
 		chip->suspended = 1;
@@ -345,6 +362,45 @@ static int husb311_pm_suspend(struct device *dev)
 	return 0;
 }
 
+static int match_fwnode(struct device *dev, void *data)
+{
+	return dev_fwnode(dev) == data;
+}
+
+static bool is_partner_altmode_device_registered(struct device *dev)
+{
+	struct device *port, *partner, *altmode;
+	struct fwnode_handle *fwnode;
+	char device_name[20];
+
+	/* get typec port device */
+	fwnode = device_get_named_child_node(dev, "connector");
+	if (!fwnode)
+		return false;
+
+	port = device_find_child(dev, fwnode, match_fwnode);
+	fwnode_handle_put(fwnode);
+	if (!port)
+		return false;
+
+	/* get the partner device */
+	snprintf(device_name, sizeof(device_name), "%s-partner", dev_name(port));
+	partner = device_find_child_by_name(port, device_name);
+	put_device(port);
+	if (!partner)
+		return false;
+
+	/* get the altmode device, now only dp register */
+	snprintf(device_name, sizeof(device_name), "%s.0", dev_name(partner));
+	altmode = device_find_child_by_name(partner, device_name);
+	put_device(partner);
+	if (!altmode)
+		return false;
+	put_device(altmode);
+
+	return true;
+}
+
 static int husb311_pm_resume(struct device *dev)
 {
 	struct husb311_chip *chip = dev->driver_data;
@@ -352,10 +408,12 @@ static int husb311_pm_resume(struct device *dev)
 	int ret = 0;
 	u8 filter;
 
-	if (device_may_wakeup(dev) && (!chip->vbus_on || chip->wakeup))
+	if (device_may_wakeup(dev) && irqd_is_wakeup_set(irq_get_irq_data(client->irq))) {
+		dev_dbg(chip->dev, "disable irq wake\n");
 		disable_irq_wake(client->irq);
-	else
-		enable_irq(client->irq);
+	}
+
+	enable_irq(client->irq);
 
 	/*
 	 * When the power of husb311 is lost or i2c read failed in PM S/R
@@ -366,14 +424,16 @@ static int husb311_pm_resume(struct device *dev)
 	 * husb311 powered off in suspend, the value would reset to default.
 	 */
 	ret = husb311_read8(chip, HUSB311_TCPC_FILTER, &filter);
-	if (filter != 0x0F || ret < 0) {
+	if (filter != 0x0F || ret < 0 || is_partner_altmode_device_registered(dev)) {
 		ret = husb311_sw_reset(chip);
 		if (ret < 0) {
 			dev_err(chip->dev, "fail to soft reset, ret = %d\n", ret);
 			return ret;
 		}
 
+		dev_info(chip->dev, "Keep wakeup for 2 seconds during TCPM reset\n");
 		tcpm_tcpc_reset(tcpci_get_tcpm_port(chip->tcpci));
+		__pm_wakeup_event(chip->ws, 2000);
 	}
 
 	return 0;

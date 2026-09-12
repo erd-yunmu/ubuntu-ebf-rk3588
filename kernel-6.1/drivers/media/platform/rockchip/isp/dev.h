@@ -72,7 +72,7 @@
 
 enum rkisp_isp_state {
 	ISP_FRAME_END = BIT(0),
-	ISP_FRAME_IN = BIT(1),
+	ISP_FRAME_BNR = BIT(1),
 	ISP_FRAME_VS = BIT(2),
 	ISP_FRAME_MP = BIT(3),
 	ISP_FRAME_SP = BIT(4),
@@ -80,6 +80,7 @@ enum rkisp_isp_state {
 	ISP_FRAME_BP = BIT(6),
 	ISP_FRAME_LDC = BIT(7),
 	ISP_FRAME_VPSS = BIT(8),
+	ISP_FRAME_VPSL = BIT(9),
 
 	ISP_STOP = BIT(16),
 	ISP_START = BIT(17),
@@ -129,13 +130,17 @@ enum {
 	ISP_UNITE_RIGHT,
 	ISP_UNITE_LEFT_B,
 	ISP_UNITE_RIGHT_B,
-	ISP_UNITE_MAX,
+
+	ISP_UNITE_MAX = RKISP_UNITE_WIN_MAX,
 };
 
 enum {
 	ISP_UNITE_DIV1 = 1,
 	ISP_UNITE_DIV2 = 2,
+	ISP_UNITE_DIV3 = 3,
 	ISP_UNITE_DIV4 = 4,
+	ISP_UNITE_DIV6 = 6,
+	ISP_UNITE_DIV9 = 9,
 };
 
 /*
@@ -213,6 +218,9 @@ struct rkisp_device {
 	struct device *dev;
 	char name[128];
 	void *sw_base_addr;
+	void *sw_vpsl_base_addr;
+	u32 sw_base_size;
+	u32 sw_vpsl_base_size;
 	struct rkisp_hw_dev *hw_dev;
 	struct v4l2_device v4l2_dev;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -229,7 +237,7 @@ struct rkisp_device {
 	struct rkisp_csi_device csi_dev;
 	struct rkisp_bridge_device br_dev;
 	struct rkisp_luma_vdev luma_vdev;
-	struct rkisp_pdaf_vdev pdaf_vdev;
+	struct rkisp_pdaf_vdev *pdaf_vdev;
 	struct rkisp_procfs procfs;
 	struct rkisp_pipeline pipe;
 	enum rkisp_isp_ver isp_ver;
@@ -266,6 +274,8 @@ struct rkisp_device {
 	unsigned int skip_frame;
 	unsigned int irq_ends;
 	unsigned int irq_ends_mask;
+	unsigned int irq_f_ends;
+	unsigned int irq_f_ends_mask;
 	bool send_fbcgain;
 	struct rkisp_ispp_buf *cur_fbcgain;
 	struct rkisp_buffer *cur_spbuf;
@@ -274,6 +284,7 @@ struct rkisp_device {
 
 	struct work_struct rdbk_work;
 	struct kfifo rdbk_kfifo;
+	struct kfifo rdbk_be_kfifo;
 	spinlock_t rdbk_lock;
 	int rdbk_cnt;
 	int rdbk_cnt_x1;
@@ -292,10 +303,13 @@ struct rkisp_device {
 	struct rkisp_aiisp_cfg aiisp_cfg;
 	struct rkisp_fpn_cfg fpn_cfg;
 
+	struct rkisp_unite_info unite;
+
 	bool is_cmsk_upd;
 	bool is_hw_link;
 	bool is_bigmode;
 	bool is_rdbk_auto;
+	bool is_m_online;
 	bool is_pre_on;
 	bool is_first_double;
 	bool is_probe_end;
@@ -305,8 +319,27 @@ struct rkisp_device {
 	bool is_suspend_one_frame;
 	bool is_aiisp_en;
 	bool is_aiisp_upd;
+	bool is_aiisp_stopping;
+	bool is_aiisp_stop;
+	bool is_aiisp_sync;
+	bool is_aiisp_yuv;
+	bool is_aiisp_first_frame;
+	bool is_aiisp_l2;
+	bool is_aiisp_l2_st;
+	bool is_aiisp_l2_buf;
+	bool is_frm_rd;
+	bool is_multi_one_sync;
+	bool is_wait_aiq;
+	bool is_wait_aiq_isp_end;
+	bool is_first_frame;
+	bool is_rdbk_no_trigger;
 
 	struct rkisp_vicap_input vicap_in;
+	struct rkisp_vicap_sof vicap_sof;
+	u32 hdr_wrap_line;
+
+	u32 aiisp_stop_seq;
+	u32 aiisp_fe_seq;
 
 	u8 multi_mode;
 	u8 multi_index;
@@ -314,6 +347,9 @@ struct rkisp_device {
 	u8 unite_index;
 	u8 unite_div;
 };
+
+void rkisp_vicap_hw_link(struct rkisp_device *dev, int on);
+void rkisp_online_update_reg(struct rkisp_device *dev, bool is_init, bool is_reset);
 
 static inline void
 rkisp_unite_write(struct rkisp_device *dev, u32 reg, u32 val, bool is_direct)

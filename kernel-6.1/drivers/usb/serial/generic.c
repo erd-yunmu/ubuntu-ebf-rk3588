@@ -31,11 +31,8 @@ MODULE_PARM_DESC(vendor, "User specified USB idVendor");
 
 module_param(product, ushort, 0);
 MODULE_PARM_DESC(product, "User specified USB idProduct");
-#ifdef CONFIG_SUPPORT_TDTECH_MODULES
-static struct usb_device_id generic_device_ids[10];
-#else
+
 static struct usb_device_id generic_device_ids[2]; /* Initially all zeroes. */
-#endif
 
 static int usb_serial_generic_probe(struct usb_serial *serial,
 					const struct usb_device_id *id)
@@ -88,30 +85,11 @@ int usb_serial_generic_register(void)
 	int retval = 0;
 
 #ifdef CONFIG_USB_SERIAL_GENERIC
-
-#ifdef CONFIG_SUPPORT_TDTECH_MODULE
- 	int i = 0;
- 	const __u16 vid_pid_group[][2] = {
- 	{vendor, product},
- 	{0x3466, 0x3301}
- 	};
- 	if (sizeof(generic_device_ids)/sizeof(generic_device_ids[0]) <
-	sizeof(vid_pid_group)/sizeof(vid_pid_group[0])) {
- 	printk(KERN_ERR"%s : generic_device_ids[] overflow!\n",__func__);
- 	return -1;
- 	}
- 	for (; i < sizeof(vid_pid_group)/sizeof(vid_pid_group[0]); i++)
- 	{
- 	generic_device_ids[i].idVendor = vid_pid_group[i][0];
- 	generic_device_ids[i].idProduct = vid_pid_group[i][1];
- 	generic_device_ids[i].match_flags = USB_DEVICE_ID_MATCH_VENDOR | USB_DEVICE_ID_MATCH_PRODUCT;
- 	}
-#else
 	generic_device_ids[0].idVendor = vendor;
 	generic_device_ids[0].idProduct = product;
 	generic_device_ids[0].match_flags =
 		USB_DEVICE_ID_MATCH_VENDOR | USB_DEVICE_ID_MATCH_PRODUCT;
-#endif
+
 	retval = usb_serial_register_drivers(serial_drivers,
 			"usbserial_generic", generic_device_ids);
 #endif

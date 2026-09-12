@@ -62,14 +62,20 @@ static void panthor_devfreq_update_utilization(struct panthor_devfreq *pdevfreq)
 static int panthor_devfreq_target(struct device *dev, unsigned long *freq,
 				  u32 flags)
 {
+	struct panthor_device *ptdev = dev_get_drvdata(dev);
 	struct dev_pm_opp *opp;
+	int err;
 
 	opp = devfreq_recommended_opp(dev, freq, flags);
 	if (IS_ERR(opp))
 		return PTR_ERR(opp);
 	dev_pm_opp_put(opp);
 
-	return dev_pm_opp_set_rate(dev, *freq);
+	err = dev_pm_opp_set_rate(dev, *freq);
+	if (!err)
+		ptdev->current_frequency = *freq;
+
+	return err;
 }
 
 static void panthor_devfreq_reset(struct panthor_devfreq *pdevfreq)
@@ -116,6 +122,42 @@ static struct devfreq_dev_profile panthor_devfreq_profile = {
 	.get_dev_status = panthor_devfreq_get_dev_status,
 };
 
+static int panthor_devfreq_config_clks(struct device *dev,
+				       struct opp_table *opp_table,
+				       struct dev_pm_opp *opp,
+				       void *data, bool scaling_down)
+{
+	struct panthor_device *ptdev = dev_get_drvdata(dev);
+	unsigned long *target = data;
+	unsigned long freq;
+	int ret = 0;
+
+	if (!pm_runtime_enabled(dev))
+		return 0;
+
+	/* One of target and opp must be available */
+	if (target) {
+		freq = *target;
+	} else if (opp) {
+		freq = dev_pm_opp_get_freq(opp);
+	} else {
+		WARN_ON(1);
+		return -EINVAL;
+	}
+
+	pm_runtime_get_noresume(dev);
+
+	if (!pm_runtime_suspended(dev)) {
+		ret = clk_set_rate(ptdev->clks.core, freq);
+		if (ret)
+			dev_err(dev, "failed to set clock rate: %lu\n", freq);
+	}
+
+	pm_runtime_put_noidle(dev);
+
+	return ret;
+}
+
 int panthor_devfreq_init(struct panthor_device *ptdev)
 {
 	/* There's actually 2 regulators (mali and sram), but the OPP core only
@@ -125,11 +167,17 @@ int panthor_devfreq_init(struct panthor_device *ptdev)
 	 * the coupling logic deal with voltage updates.
 	 */
 	static const char * const reg_names[] = { "mali", NULL };
+	static const char * const clk_names[] = { "core", NULL };
+	struct dev_pm_opp_config config = {
+		.clk_names = clk_names,
+		.config_clks = panthor_devfreq_config_clks,
+	};
 	struct thermal_cooling_device *cooling;
 	struct device *dev = ptdev->base.dev;
 	struct panthor_devfreq *pdevfreq;
 	struct dev_pm_opp *opp;
 	unsigned long cur_freq;
+	unsigned long freq = ULONG_MAX;
 	int ret;
 
 	pdevfreq = drmm_kzalloc(&ptdev->base, sizeof(*ptdev->devfreq), GFP_KERNEL);
@@ -146,6 +194,10 @@ int panthor_devfreq_init(struct panthor_device *ptdev)
 		return ret;
 	}
 
+	ret = devm_pm_opp_set_config(dev, &config);
+	if (ret)
+		return ret;
+
 	ret = devm_pm_opp_of_add_table(dev);
 	if (ret)
 		return ret;
@@ -155,12 +207,6 @@ int panthor_devfreq_init(struct panthor_device *ptdev)
 	panthor_devfreq_reset(pdevfreq);
 
 	cur_freq = clk_get_rate(ptdev->clks.core);
-
-	opp = devfreq_recommended_opp(dev, &cur_freq, 0);
-	if (IS_ERR(opp))
-		return PTR_ERR(opp);
-
-	panthor_devfreq_profile.initial_freq = cur_freq;
 
 	/* Regulator coupling only takes care of synchronizing/balancing voltage
 	 * updates, but the coupled regulator needs to be enabled manually.
@@ -192,15 +238,29 @@ int panthor_devfreq_init(struct panthor_device *ptdev)
 		return ret;
 	}
 
+	opp = devfreq_recommended_opp(dev, &cur_freq, 0);
+	if (IS_ERR(opp))
+		return PTR_ERR(opp);
+
+	panthor_devfreq_profile.initial_freq = cur_freq;
+	ptdev->current_frequency = cur_freq;
+
 	/*
 	 * Set the recommend OPP this will enable and configure the regulator
 	 * if any and will avoid a switch off by regulator_late_cleanup()
 	 */
 	ret = dev_pm_opp_set_opp(dev, opp);
+	dev_pm_opp_put(opp);
 	if (ret) {
 		DRM_DEV_ERROR(dev, "Couldn't set recommended OPP\n");
 		return ret;
 	}
+
+	/* Find the fastest defined rate  */
+	opp = dev_pm_opp_find_freq_floor(dev, &freq);
+	if (IS_ERR(opp))
+		return PTR_ERR(opp);
+	ptdev->fast_rate = freq;
 
 	dev_pm_opp_put(opp);
 
@@ -228,26 +288,26 @@ int panthor_devfreq_init(struct panthor_device *ptdev)
 	return 0;
 }
 
-int panthor_devfreq_resume(struct panthor_device *ptdev)
+void panthor_devfreq_resume(struct panthor_device *ptdev)
 {
 	struct panthor_devfreq *pdevfreq = ptdev->devfreq;
 
 	if (!pdevfreq->devfreq)
-		return 0;
+		return;
 
 	panthor_devfreq_reset(pdevfreq);
 
-	return devfreq_resume_device(pdevfreq->devfreq);
+	drm_WARN_ON(&ptdev->base, devfreq_resume_device(pdevfreq->devfreq));
 }
 
-int panthor_devfreq_suspend(struct panthor_device *ptdev)
+void panthor_devfreq_suspend(struct panthor_device *ptdev)
 {
 	struct panthor_devfreq *pdevfreq = ptdev->devfreq;
 
 	if (!pdevfreq->devfreq)
-		return 0;
+		return;
 
-	return devfreq_suspend_device(pdevfreq->devfreq);
+	drm_WARN_ON(&ptdev->base, devfreq_suspend_device(pdevfreq->devfreq));
 }
 
 void panthor_devfreq_record_busy(struct panthor_device *ptdev)

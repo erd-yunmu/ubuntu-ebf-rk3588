@@ -1847,7 +1847,7 @@ DECLARE_EVENT_CLASS(btrfs__prelim_ref,
 	TP_PROTO(const struct btrfs_fs_info *fs_info,
 		 const struct prelim_ref *oldref,
 		 const struct prelim_ref *newref, u64 tree_size),
-	TP_ARGS(fs_info, newref, oldref, tree_size),
+	TP_ARGS(fs_info, oldref, newref, tree_size),
 
 	TP_STRUCT__entry_btrfs(
 		__field(	u64,  root_id		)
@@ -2315,6 +2315,14 @@ DEFINE_EVENT(btrfs__space_info_update, update_bytes_may_use,
 );
 
 DEFINE_EVENT(btrfs__space_info_update, update_bytes_pinned,
+
+	TP_PROTO(const struct btrfs_fs_info *fs_info,
+		 const struct btrfs_space_info *sinfo, u64 old, s64 diff),
+
+	TP_ARGS(fs_info, sinfo, old, diff)
+);
+
+DEFINE_EVENT(btrfs__space_info_update, update_bytes_zone_unusable,
 
 	TP_PROTO(const struct btrfs_fs_info *fs_info,
 		 const struct btrfs_space_info *sinfo, u64 old, s64 diff),

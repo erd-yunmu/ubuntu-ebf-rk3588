@@ -229,6 +229,10 @@
 	status = "okay";
 };
 
+&avsd {
+	status = "okay";
+};
+
 /* CPU */
 
 &cpu_l0 {
@@ -241,9 +245,21 @@
 	mem-supply = <&vdd_cpu_big0_mem_s0>;
 };
 
+&cpu_b1 {
+	cpu-supply = <&vdd_cpu_big0_s0>;
+	mem-supply = <&vdd_cpu_big0_mem_s0>;
+	#cooling-cells = <2>;
+};
+
 &cpu_b2 {
 	cpu-supply = <&vdd_cpu_big1_s0>;
 	mem-supply = <&vdd_cpu_big1_mem_s0>;
+};
+
+&cpu_b3 {
+	cpu-supply = <&vdd_cpu_big1_s0>;
+	mem-supply = <&vdd_cpu_big1_mem_s0>;
+	#cooling-cells = <2>;
 };
 
 /* GPU */
@@ -453,7 +469,7 @@
 	status = "okay";
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
 	status = "okay";
 };
 
@@ -505,11 +521,11 @@
 };
 
 &display_subsystem {
-	clocks = <&hdptxphy_hdmi0>;
+	clocks = <&hdptxphy0>;
 	clock-names = "hdmi0_phy_pll";
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
 	status = "okay";
 };
 

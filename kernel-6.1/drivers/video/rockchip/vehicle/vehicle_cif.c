@@ -813,6 +813,8 @@ static const struct csi2dphy_reg rk3568_csi2dphy_regs[] = {
 	[CSI2PHY_LANE3_CALIB_ENABLE] = CSI2PHY_REG(CSI2_DPHY_LANE3_CALIB_EN),
 	[CSI2PHY_CLK1_THS_SETTLE] = CSI2PHY_REG(CSI2_DPHY_CLK1_WR_THS_SETTLE),
 	[CSI2PHY_CLK1_CALIB_ENABLE] = CSI2PHY_REG(CSI2_DPHY_CLK1_CALIB_EN),
+	[CSI2PHY_CLK_CONTINUE_MODE] = CSI2PHY_REG(CSI2_DPHY_CLK_CONTINUE_MODE),
+	[CSI2PHY_CLK1_CONTINUE_MODE] = CSI2PHY_REG(CSI2_DPHY_CLK1_CONTINUE_MODE),
 };
 
 static const struct grf_reg rk3588_grf_dphy_regs[] = {
@@ -848,6 +850,8 @@ static const struct csi2dphy_reg rk3588_csi2dphy_regs[] = {
 	[CSI2PHY_CLK1_THS_SETTLE] = CSI2PHY_REG(CSI2_DPHY_CLK1_WR_THS_SETTLE),
 	[CSI2PHY_CLK1_CALIB_ENABLE] = CSI2PHY_REG(CSI2_DPHY_CLK1_CALIB_EN),
 	[CSI2PHY_CLK1_LANE_ENABLE] = CSI2PHY_REG(CSI2_DPHY_CLK1_LANE_EN),
+	[CSI2PHY_CLK_CONTINUE_MODE] = CSI2PHY_REG(CSI2_DPHY_CLK_CONTINUE_MODE),
+	[CSI2PHY_CLK1_CONTINUE_MODE] = CSI2PHY_REG(CSI2_DPHY_CLK1_CONTINUE_MODE),
 };
 
 static const struct grf_reg rk3588_grf_dcphy_regs[] = {
@@ -952,6 +956,8 @@ static const struct csi2dphy_reg rk3562_csi2dphy_regs[] = {
 	[CSI2PHY_CLK1_THS_SETTLE] = CSI2PHY_REG(CSI2_DPHY_CLK1_WR_THS_SETTLE),
 	[CSI2PHY_CLK1_CALIB_ENABLE] = CSI2PHY_REG(CSI2_DPHY_CLK1_CALIB_EN),
 	[CSI2PHY_CLK1_LANE_ENABLE] = CSI2PHY_REG(CSI2_DPHY_CLK1_LANE_EN),
+	[CSI2PHY_CLK_CONTINUE_MODE] = CSI2PHY_REG(CSI2_DPHY_CLK_CONTINUE_MODE),
+	[CSI2PHY_CLK1_CONTINUE_MODE] = CSI2PHY_REG(CSI2_DPHY_CLK1_CONTINUE_MODE),
 };
 
 static const struct grf_reg rk3576_grf_dphy_regs[] = {
@@ -1769,6 +1775,44 @@ static int rkcif_dvp_get_input_yuv_order(struct vehicle_cfg *cfg)
 	return mask;
 }
 
+static int rkcif_dvp_get_input_yuv_order_rk3576(struct vehicle_cfg *cfg)
+{
+	unsigned int mask;
+
+	switch (cfg->mbus_code) {
+	case MEDIA_BUS_FMT_UYVY8_2X8:
+		mask = CSI_YUV_INPUT_ORDER_UYVY;
+		break;
+	case MEDIA_BUS_FMT_VYUY8_2X8:
+		mask = CSI_YUV_INPUT_ORDER_VYUY;
+		break;
+	case MEDIA_BUS_FMT_YUYV8_2X8:
+		mask = CSI_YUV_INPUT_ORDER_YUYV;
+		break;
+	case MEDIA_BUS_FMT_YVYU8_2X8:
+		mask = CSI_YUV_INPUT_ORDER_YVYU;
+		break;
+	default:
+		mask = CSI_YUV_INPUT_ORDER_UYVY;
+		break;
+	}
+	return mask;
+}
+
+static u32 rkcif_determine_input_mode(struct vehicle_cif *cif)
+{
+	struct vehicle_cfg *cfg = &cif->cif_cfg;
+	u32 mode = cfg->input_mode << 2;
+
+	if (cif->chip_id == CHIP_RK3568_VEHICLE_CIF &&
+	   cfg->input_mode == CIF_INPUT_MODE_BT1120_YUV)
+		mode = INPUT_MODE_BT1120;
+	if (cif->chip_id == CHIP_RK3576_VEHICLE_CIF)
+		mode = mode << 2;
+
+	return mode;
+}
+
 static int cif_stream_setup(struct vehicle_cif *cif)
 {
 	struct vehicle_cfg *cfg = &cif->cif_cfg;
@@ -1791,27 +1835,56 @@ static int cif_stream_setup(struct vehicle_cif *cif)
 	else
 		rkvehicle_cif_cfg_dvp_clk_sampling_edge(cif, RKCIF_CLK_FALLING);
 
-	inputmode = cfg->input_format<<2; //INPUT_MODE_YUV or INPUT_MODE_BT656_YUV422
+	inputmode = rkcif_determine_input_mode(cif); //INPUT_MODE_YUV or INPUT_MODE_BT656_YUV422
 	//YUV_INPUT_ORDER_UYVY, MEDIA_BUS_FMT_UYVY8_2X8, CCIR_INPUT_ORDER_ODD
-	input_format = (cfg->yuv_order<<5) | YUV_INPUT_422 | (cfg->field_order<<9);
+
+	input_format = (cfg->yuv_order << 5) | YUV_INPUT_422 | (cfg->field_order << 9);
 	if (cfg->output_format == CIF_OUTPUT_FORMAT_420)
 		output_format = YUV_OUTPUT_420 | UV_STORAGE_ORDER_UVUV;
 	else
 		output_format = YUV_OUTPUT_422 | UV_STORAGE_ORDER_UVUV;
 
 	if (cif->chip_id == CHIP_RK3568_VEHICLE_CIF) {
-		val = cfg->vsync | (cfg->href<<1) | inputmode | mipimode
+		if (cfg->input_format == CIF_INPUT_FORMAT_PAL ||
+		   cfg->input_format == CIF_INPUT_FORMAT_NTSC)
+			xfer_mode = BT1120_TRANSMIT_INTERFACE;
+		else
+			xfer_mode = BT1120_TRANSMIT_PROGRESS;
+	} else if (cif->chip_id == CHIP_RK3588_VEHICLE_CIF) {
+		if (cfg->input_format == CIF_INPUT_FORMAT_PAL ||
+		   cfg->input_format == CIF_INPUT_FORMAT_NTSC)
+			xfer_mode = BT1120_TRANSMIT_INTERFACE_RK3588;
+		else
+			xfer_mode = BT1120_TRANSMIT_PROGRESS_RK3588;
+	} else {
+		if (cfg->input_format == CIF_INPUT_FORMAT_PAL ||
+		   cfg->input_format == CIF_INPUT_FORMAT_NTSC)
+			xfer_mode = BT1120_TRANSMIT_INTERFACE_RK3576;
+		else
+			xfer_mode = BT1120_TRANSMIT_PROGRESS_RK3576;
+	}
+
+	if (cif->chip_id == CHIP_RK3568_VEHICLE_CIF) {
+		val = cfg->vsync | (cfg->href << 1) | inputmode | mipimode
 		   | input_format | output_format
 		   | xfer_mode | yc_swap | multi_id_en
 		   | multi_id_sel | multi_id_mode | bt1120_edge_mode;
-	} else {
+	} else if (cif->chip_id == CHIP_RK3588_VEHICLE_CIF) {
 		out_fmt_mask = (CSI_WRDDR_TYPE_YUV420SP_RK3588 << 11) |
 				(CSI_YUV_OUTPUT_ORDER_UYVY << 1);
 		in_fmt_yuv_order = rkcif_dvp_get_input_yuv_order(cfg);
-		val = cfg->vsync | (cfg->href<<1) | inputmode
-		   | in_fmt_yuv_order | out_fmt_mask
+		val = cfg->vsync | (cfg->href << 1) | inputmode
+		   | in_fmt_yuv_order | out_fmt_mask | xfer_mode
 		   | yc_swap | multi_id_en | multi_id_sel
 		   | sav_detect | multi_id_mode | bt1120_edge_mode;
+	} else {
+		out_fmt_mask = (CSI_WRDDR_TYPE_YUV420SP_RK3588 << 15) |
+				CSI_YUV_OUTPUT_ORDER_UYVY;
+		in_fmt_yuv_order = rkcif_dvp_get_input_yuv_order_rk3576(cfg);
+		val = cfg->vsync | (cfg->href << 1) | inputmode
+		   | in_fmt_yuv_order | out_fmt_mask | xfer_mode
+		   | yc_swap | multi_id_en | multi_id_sel
+		   | multi_id_mode | (bt1120_edge_mode >> 8);
 	}
 
 	if (cif->chip_id >= CHIP_RK3576_VEHICLE_CIF)
@@ -1919,15 +1992,18 @@ static void csi2_dphy_config_dual_mode(struct vehicle_cif *cif)
 
 static int vehicle_csi2_dphy_stream_start(struct vehicle_cif *cif)
 {
+	struct vehicle_cfg *cfg = &cif->cif_cfg;
 	struct csi2_dphy_hw *hw = cif->dphy_hw;
 	const struct hsfreq_range *hsfreq_ranges = hw->hsfreq_ranges;
 	int num_hsfreq_ranges = hw->num_hsfreq_ranges;
 	int i, hsfreq = 0;
 	u32 val = 0, pre_val;
 
-
 	mutex_lock(&hw->mutex);
 
+	/* Reset dphy digital part */
+	write_csi2_dphy_reg(hw, CSI2PHY_DUAL_CLK_EN, 0x1e);
+	write_csi2_dphy_reg(hw, CSI2PHY_DUAL_CLK_EN, 0x1f);
 	/* set data lane num and enable clock lane */
 	/*
 	 * for rk356x: dphy0 is used just for full mode,
@@ -1938,6 +2014,10 @@ static int vehicle_csi2_dphy_stream_start(struct vehicle_cif *cif)
 	val |= (GENMASK(cif->cif_cfg.lanes - 1, 0) <<
 		CSI2_DPHY_CTRL_DATALANE_ENABLE_OFFSET_BIT) |
 		(0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT);
+
+	if (cfg->mbus_flags & V4L2_MBUS_CSI2_CONTINUOUS_CLOCK)
+		write_csi2_dphy_reg_mask(hw, CSI2PHY_CLK_CONTINUE_MODE,
+					0x30, CSI2PHY_CLK_CONTINUE_MODE_MASK);
 
 	val |= pre_val;
 	write_csi2_dphy_reg(hw, CSI2PHY_REG_CTRL_LANE_ENABLE, val);
@@ -3221,7 +3301,10 @@ static int vehicle_cif_stream_start(struct vehicle_cif *cif)
 
 	/* just need init virtual channel 0 */
 	channel = &cif->channels[0];
-	channel->id = 0;
+	channel->id = cif->vc;
+
+	VEHICLE_INFO("@%s channel->id: %d.\n", __func__, channel->id);
+
 	vehicle_cif_csi_channel_init(cif, channel);
 	if (cif->chip_id < CHIP_RK3588_VEHICLE_CIF)
 		vehicle_cif_csi_channel_set(cif, channel, V4L2_MBUS_CSI2_DPHY);
@@ -3570,7 +3653,7 @@ static int vehicle_cif_csi2_s_stream_v1(struct vehicle_cif *cif,
 				val |= CSI_UVDS_EN;
 			rkcif_write_reg(cif, get_reg_index_of_id_ctrl0(channel->id), val);
 
-			val = channel->data_type << 2;
+			val = channel->id | channel->data_type << 2;
 			rkcif_write_reg(cif, get_reg_index_of_id_ctrl1(channel->id), val);
 
 		}
@@ -5118,11 +5201,19 @@ static int cif_parse_dt(struct vehicle_cif *cif)
 		VEHICLE_INFO("%s:Get cif, drop-frames failed!\n", __func__);
 		cif->drop_frames = 0; //default drop frames;
 	}
-
 	if (of_property_read_u32(dev->of_node, "cif,chip-id",
 				 &cif->chip_id)) {
 		VEHICLE_INFO("%s:Get cif, chip_id failed!\n", __func__);
 		cif->chip_id = CHIP_RK3588_VEHICLE_CIF; //default rk3588;
+	}
+	if (of_property_read_u32(dev->of_node, "cif,virtual-channel",
+				 &cif->vc)) {
+		VEHICLE_INFO("%s:Get cif, virtual-channel failed!\n", __func__);
+		cif->vc = 0; //default virtual channel;
+	}
+	if ((cif->vc < 0) || (cif->vc > 3)) {
+		VEHICLE_DGERR("virtual-channel over range, use default 0!\n");
+		cif->vc = 0;
 	}
 
 	cif_node = of_parse_phandle(dev->of_node, "rockchip,cif", 0);

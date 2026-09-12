@@ -85,12 +85,8 @@
 	status = "okay";
 };
 
-&hdptxphy_hdmi {
-	status = "disabled";
-};
-
 &route_edp {
-	status = "disabled";
+	status = "okay";
 	connect = <&vp0_out_edp>;
 };
 

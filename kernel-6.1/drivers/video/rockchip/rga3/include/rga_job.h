@@ -13,8 +13,6 @@
 
 #include "rga_drv.h"
 
-#define RGA_CMD_REG_SIZE 256 /* 32 * 8 bit */
-
 enum job_flags {
 	RGA_JOB_DONE			= 1 << 0,
 	RGA_JOB_ASYNC			= 1 << 1,
@@ -27,7 +25,7 @@ enum job_flags {
 void rga_job_scheduler_dump_info(struct rga_scheduler_t *scheduler);
 void rga_job_next(struct rga_scheduler_t *scheduler);
 struct rga_job *rga_job_done(struct rga_scheduler_t *scheduler);
-int rga_job_commit(struct rga_req *rga_command_base, struct rga_request *request);
+int rga_job_commit(struct rga_req *task_list, size_t task_count, struct rga_request *request);
 int rga_job_mpi_commit(struct rga_req *rga_command_base, struct rga_request *request);
 
 int rga_job_assign(struct rga_job *job);

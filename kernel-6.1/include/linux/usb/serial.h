@@ -21,9 +21,6 @@
 #define USB_SERIAL_WRITE_BUSY	0
 #define USB_SERIAL_THROTTLED	1
 
-/* td-tech: support for tdtech Module */
-#define CONFIG_SUPPORT_TDTECH_MODULE
-
 /**
  * usb_serial_port: structure for the specific ports of a device.
  * @serial: pointer back to the struct usb_serial owner of this port.

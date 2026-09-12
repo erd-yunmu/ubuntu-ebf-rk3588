@@ -938,10 +938,10 @@ static void os05a20_get_module_inf(struct os05a20 *os05a20,
 				  struct rkmodule_inf *inf)
 {
 	memset(inf, 0, sizeof(*inf));
-	strlcpy(inf->base.sensor, OS05A20_NAME, sizeof(inf->base.sensor));
-	strlcpy(inf->base.module, os05a20->module_name,
+	strscpy(inf->base.sensor, OS05A20_NAME, sizeof(inf->base.sensor));
+	strscpy(inf->base.module, os05a20->module_name,
 		sizeof(inf->base.module));
-	strlcpy(inf->base.lens, os05a20->len_name, sizeof(inf->base.lens));
+	strscpy(inf->base.lens, os05a20->len_name, sizeof(inf->base.lens));
 }
 
 static int os05a20_set_hdrae(struct os05a20 *os05a20,
@@ -1934,9 +1934,6 @@ static struct i2c_driver os05a20_i2c_driver = {
 	.id_table	= os05a20_match_id,
 };
 
-#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
-module_i2c_driver(os05a20_i2c_driver);
-#else
 static int __init sensor_mod_init(void)
 {
 	return i2c_add_driver(&os05a20_i2c_driver);
@@ -1947,9 +1944,12 @@ static void __exit sensor_mod_exit(void)
 	i2c_del_driver(&os05a20_i2c_driver);
 }
 
+#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP)
+subsys_initcall(sensor_mod_init);
+#else
 device_initcall_sync(sensor_mod_init);
-module_exit(sensor_mod_exit);
 #endif
+module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("OmniVision os05a20 sensor driver");
 MODULE_LICENSE("GPL v2");

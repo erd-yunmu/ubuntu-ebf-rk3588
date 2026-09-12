@@ -2234,10 +2234,10 @@ static void ov12d2q_get_module_inf(struct ov12d2q *ov12d2q,
 				  struct rkmodule_inf *inf)
 {
 	memset(inf, 0, sizeof(*inf));
-	strlcpy(inf->base.sensor, OV12D2Q_NAME, sizeof(inf->base.sensor));
-	strlcpy(inf->base.module, ov12d2q->module_name,
+	strscpy(inf->base.sensor, OV12D2Q_NAME, sizeof(inf->base.sensor));
+	strscpy(inf->base.module, ov12d2q->module_name,
 		sizeof(inf->base.module));
-	strlcpy(inf->base.lens, ov12d2q->len_name, sizeof(inf->base.lens));
+	strscpy(inf->base.lens, ov12d2q->len_name, sizeof(inf->base.lens));
 }
 
 static long ov12d2q_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
@@ -3194,9 +3194,6 @@ static struct i2c_driver ov12d2q_i2c_driver = {
 	.id_table	= ov12d2q_match_id,
 };
 
-#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
-module_i2c_driver(ov12d2q_i2c_driver);
-#else
 static int __init sensor_mod_init(void)
 {
 	return i2c_add_driver(&ov12d2q_i2c_driver);
@@ -3207,9 +3204,12 @@ static void __exit sensor_mod_exit(void)
 	i2c_del_driver(&ov12d2q_i2c_driver);
 }
 
+#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP)
+subsys_initcall(sensor_mod_init);
+#else
 device_initcall_sync(sensor_mod_init);
-module_exit(sensor_mod_exit);
 #endif
+module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("OmniVision ov12d2q sensor driver");
 MODULE_LICENSE("GPL v2");

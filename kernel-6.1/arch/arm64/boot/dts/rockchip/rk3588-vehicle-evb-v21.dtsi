@@ -108,6 +108,7 @@
 
 	wireless_bluetooth: wireless-bluetooth {
 		compatible = "bluetooth-platdata";
+		bt_port = "/dev/ttyS9";
 		clocks = <&hym8563>;
 		clock-names = "ext_clock";
 		uart_rts_gpios = <&gpio4 RK_PA0 GPIO_ACTIVE_LOW>;
@@ -363,11 +364,11 @@
 };
 
 &u2phy0 {
-	rockchip,sel-pipe-phystatus;
 	status = "okay";
 };
 
 &u2phy0_otg {
+	rockchip,sel-pipe-phystatus;
 	rockchip,dis-u2-susphy;
 	status = "okay";
 };
@@ -426,5 +427,6 @@
 	dr_mode = "host";
 	maximum-speed = "high-speed";
 	snps,dis_u2_susphy_quirk;
+	snps,usb2-lpm-disable;
 	status = "okay";
 };

@@ -733,7 +733,7 @@ static int spi_nor_wait_till_ready_with_timeout_and_msleep(struct spi_nor *nor,
  *
  * Return: 0 on success, -errno otherwise.
  */
-int spi_nor_wait_till_ready_with_msleep(struct spi_nor *nor)
+static int spi_nor_wait_till_ready_with_msleep(struct spi_nor *nor)
 {
 	return spi_nor_wait_till_ready_with_timeout_and_msleep(nor,
 							       DEFAULT_READY_WAIT_JIFFIES);
@@ -1647,8 +1647,10 @@ int spi_nor_sr2_bit1_quad_enable(struct spi_nor *nor)
 {
 	int ret;
 
-	if (nor->flags & SNOR_F_NO_READ_CR)
+	if (nor->flags & SNOR_F_NO_READ_CR) {
+		dev_warn(nor->dev, "it is recommended to optimize the SNOR_F_NO_READ_CR!\n");
 		return spi_nor_write_16bit_cr_and_check(nor, SR2_QUAD_EN_BIT1);
+	}
 
 	ret = spi_nor_read_cr(nor, nor->bouncebuf);
 	if (ret)
@@ -1753,29 +1755,78 @@ int spi_nor_sr2_bit2_quad_enable(struct spi_nor *nor)
 }
 
 static const struct spi_nor_manufacturer *manufacturers[] = {
+#ifdef CONFIG_MTD_SPI_NOR_ATMEL
 	&spi_nor_atmel,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_BOYA
 	&spi_nor_boya,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_CATALYST
 	&spi_nor_catalyst,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_DOSILICON
 	&spi_nor_dosilicon,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_EON
 	&spi_nor_eon,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_ESMT
 	&spi_nor_esmt,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_EVERSPIN
 	&spi_nor_everspin,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_FMSH
 	&spi_nor_fmsh,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_FUJITSU
 	&spi_nor_fujitsu,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_GIGADEVICE
 	&spi_nor_gigadevice,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_NORMEM
 	&spi_nor_normem,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_INTEL
 	&spi_nor_intel,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_ISSI
 	&spi_nor_issi,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_MACRONIX
 	&spi_nor_macronix,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_STMICRO
 	&spi_nor_micron,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_PUYA
 	&spi_nor_puya,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_STMICRO
 	&spi_nor_st,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_SPANSION
 	&spi_nor_spansion,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_SST
 	&spi_nor_sst,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_WINBOND
 	&spi_nor_winbond,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_XILINX
 	&spi_nor_xilinx,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_XMC
 	&spi_nor_xmc,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_XTX
 	&spi_nor_xtx,
+#endif
+#ifdef CONFIG_MTD_SPI_NOR_ZBIT
+	&spi_nor_zbit,
+#endif
 };
 
 static const struct flash_info *spi_nor_match_id(struct spi_nor *nor,
@@ -1819,6 +1870,76 @@ static const struct flash_info *spi_nor_detect(struct spi_nor *nor)
 	return info;
 }
 
+/*
+ * On Octal DTR capable flashes, reads cannot start or end at an odd
+ * address in Octal DTR mode. Extra bytes need to be read at the start
+ * or end to make sure both the start address and length remain even.
+ */
+static int spi_nor_octal_dtr_read(struct spi_nor *nor, loff_t from, size_t len,
+				  u_char *buf)
+{
+	u_char *tmp_buf;
+	size_t tmp_len;
+	loff_t start, end;
+	int ret, bytes_read;
+
+	if (IS_ALIGNED(from, 2) && IS_ALIGNED(len, 2))
+		return spi_nor_read_data(nor, from, len, buf);
+	else if (IS_ALIGNED(from, 2) && len > PAGE_SIZE)
+		return spi_nor_read_data(nor, from, round_down(len, PAGE_SIZE),
+					 buf);
+
+	tmp_buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!tmp_buf)
+		return -ENOMEM;
+
+	start = round_down(from, 2);
+	end = round_up(from + len, 2);
+
+	/*
+	 * Avoid allocating too much memory. The requested read length might be
+	 * quite large. Allocating a buffer just as large (slightly bigger, in
+	 * fact) would put unnecessary memory pressure on the system.
+	 *
+	 * For example if the read is from 3 to 1M, then this will read from 2
+	 * to 4098. The reads from 4098 to 1M will then not need a temporary
+	 * buffer so they can proceed as normal.
+	 */
+	tmp_len = min_t(size_t, end - start, PAGE_SIZE);
+
+	ret = spi_nor_read_data(nor, start, tmp_len, tmp_buf);
+	if (ret == 0) {
+		ret = -EIO;
+		goto out;
+	}
+	if (ret < 0)
+		goto out;
+
+	/*
+	 * More bytes are read than actually requested, but that number can't be
+	 * reported to the calling function or it will confuse its calculations.
+	 * Calculate how many of the _requested_ bytes were read.
+	 */
+	bytes_read = ret;
+
+	if (from != start)
+		ret -= from - start;
+
+	/*
+	 * Only account for extra bytes at the end if they were actually read.
+	 * For example, if the total length was truncated because of temporary
+	 * buffer size limit then the adjustment for the extra bytes at the end
+	 * is not needed.
+	 */
+	if (start + bytes_read == end)
+		ret -= end - (from + len);
+
+	memcpy(buf, tmp_buf + (from - start), ret);
+out:
+	kfree(tmp_buf);
+	return ret;
+}
+
 static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 			size_t *retlen, u_char *buf)
 {
@@ -1836,7 +1957,11 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 
 		addr = spi_nor_convert_addr(nor, addr);
 
-		ret = spi_nor_read_data(nor, addr, len, buf);
+		if (nor->read_proto == SNOR_PROTO_8_8_8_DTR)
+			ret = spi_nor_octal_dtr_read(nor, addr, len, buf);
+		else
+			ret = spi_nor_read_data(nor, addr, len, buf);
+
 		if (ret == 0) {
 			/* We shouldn't see 0-length reads */
 			ret = -EIO;
@@ -1855,6 +1980,68 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 
 read_err:
 	spi_nor_unlock_and_unprep(nor);
+	return ret;
+}
+
+/*
+ * On Octal DTR capable flashes, writes cannot start or end at an odd address
+ * in Octal DTR mode. Extra 0xff bytes need to be appended or prepended to
+ * make sure the start address and end address are even. 0xff is used because
+ * on NOR flashes a program operation can only flip bits from 1 to 0, not the
+ * other way round. 0 to 1 flip needs to happen via erases.
+ */
+static int spi_nor_octal_dtr_write(struct spi_nor *nor, loff_t to, size_t len,
+				   const u8 *buf)
+{
+	u8 *tmp_buf;
+	size_t bytes_written;
+	loff_t start, end;
+	int ret;
+
+	if (IS_ALIGNED(to, 2) && IS_ALIGNED(len, 2))
+		return spi_nor_write_data(nor, to, len, buf);
+
+	tmp_buf = kmalloc(nor->params->page_size, GFP_KERNEL);
+	if (!tmp_buf)
+		return -ENOMEM;
+
+	memset(tmp_buf, 0xff, nor->params->page_size);
+
+	start = round_down(to, 2);
+	end = round_up(to + len, 2);
+
+	memcpy(tmp_buf + (to - start), buf, len);
+
+	ret = spi_nor_write_data(nor, start, end - start, tmp_buf);
+	if (ret == 0) {
+		ret = -EIO;
+		goto out;
+	}
+	if (ret < 0)
+		goto out;
+
+	/*
+	 * More bytes are written than actually requested, but that number can't
+	 * be reported to the calling function or it will confuse its
+	 * calculations. Calculate how many of the _requested_ bytes were
+	 * written.
+	 */
+	bytes_written = ret;
+
+	if (to != start)
+		ret -= to - start;
+
+	/*
+	 * Only account for extra bytes at the end if they were actually
+	 * written. For example, if for some reason the controller could only
+	 * complete a partial write then the adjustment for the extra bytes at
+	 * the end is not needed.
+	 */
+	if (start + bytes_written == end)
+		ret -= end - (to + len);
+
+out:
+	kfree(tmp_buf);
 	return ret;
 }
 
@@ -1902,7 +2089,12 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		if (ret)
 			goto write_err;
 
-		ret = spi_nor_write_data(nor, addr, page_remain, buf + i);
+		if (nor->write_proto == SNOR_PROTO_8_8_8_DTR)
+			ret = spi_nor_octal_dtr_write(nor, addr, page_remain,
+						      buf + i);
+		else
+			ret = spi_nor_write_data(nor, addr, page_remain,
+						 buf + i);
 		if (ret < 0)
 			goto write_err;
 		written = ret;
@@ -3423,6 +3615,7 @@ static void spi_nor_shutdown(struct spi_mem *spimem)
 {
 	struct spi_nor *nor = spi_mem_get_drvdata(spimem);
 
+	mutex_lock(&nor->lock);
 	spi_nor_restore(nor);
 }
 

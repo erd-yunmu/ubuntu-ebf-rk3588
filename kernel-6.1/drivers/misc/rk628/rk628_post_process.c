@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 /*
- * Copyright (c) 2021 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2021 Rockchip Electronics Co., Ltd.
  *
  * Author: Wyon Bi <bivvy.bi@rock-chips.com>
  */
@@ -44,8 +44,12 @@
 /* r,g,b color temp div coef, range [-128,128] for 10bit data */
 #define PQ_CSC_TEMP_OFFSET_DIV_COEF		2
 
+#ifndef MAX
 #define	MAX(a, b)				((a) > (b) ? (a) : (b))
+#endif
+#ifndef MIN
 #define	MIN(a, b)				((a) < (b) ? (a) : (b))
+#endif
 #define	CLIP(x, min_v, max_v)			MIN(MAX(x, min_v), max_v)
 
 #define V4L2_COLORSPACE_BT709F	0xfe

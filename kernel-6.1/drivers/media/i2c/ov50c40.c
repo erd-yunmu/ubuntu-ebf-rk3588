@@ -3914,6 +3914,7 @@ static const struct regval ov50c40_10bit_8192x6144_dphy_12fps_regs[] = {
 	{REG_NULL, 0x00},
 };
 
+#ifdef DEBUG
 static const struct regval ov50c40_10bit_4096x3072_cphy_regs[] = {
 	{0x0103, 0x01},
 	{0x0301, 0xc0},
@@ -4504,6 +4505,7 @@ static const struct regval ov50c40_10bit_4096x3072_cphy_regs[] = {
 	{0x5d45, 0x05},
 	{REG_NULL, 0x00},
 };
+#endif
 
 static const struct regval ov50c40_10bit_4096x3072_cphy_30fps_regs[] = {
 	{0x0103, 0x01},
@@ -5828,6 +5830,7 @@ static const struct ov50c40_mode supported_modes_dphy[] = {
 };
 
 static const struct ov50c40_mode supported_modes_cphy[] = {
+#ifdef DEBUG
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
 		.width = 4096,
@@ -5846,6 +5849,7 @@ static const struct ov50c40_mode supported_modes_cphy[] = {
 		.spd = &ov50c40_spd,
 		.vc[PAD0] = 0,
 	},
+#endif
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
 		.width = 4096,
@@ -7252,9 +7256,6 @@ static struct i2c_driver ov50c40_i2c_driver = {
 	.id_table	= ov50c40_match_id,
 };
 
-#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
-module_i2c_driver(ov50c40_i2c_driver);
-#else
 static int __init sensor_mod_init(void)
 {
 	return i2c_add_driver(&ov50c40_i2c_driver);
@@ -7265,9 +7266,12 @@ static void __exit sensor_mod_exit(void)
 	i2c_del_driver(&ov50c40_i2c_driver);
 }
 
+#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP)
+subsys_initcall(sensor_mod_init);
+#else
 device_initcall_sync(sensor_mod_init);
-module_exit(sensor_mod_exit);
 #endif
+module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("OmniVision ov50c40 sensor driver");
 MODULE_LICENSE("GPL v2");

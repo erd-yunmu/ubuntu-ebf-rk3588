@@ -143,21 +143,25 @@ static void RGA3_set_reg_win0_info(u8 *base, struct rga3_req *msg)
 
 	switch (msg->win0.format) {
 	case RGA_FORMAT_RGBA_8888:
+	case RGA_FORMAT_RGBX_8888:
 		win_format = 0x8;
 		pixel_width = 4;
 		win_interleaved = 2;
 		break;
 	case RGA_FORMAT_BGRA_8888:
+	case RGA_FORMAT_BGRX_8888:
 		win_format = 0x6;
 		pixel_width = 4;
 		win_interleaved = 2;
 		break;
 	case RGA_FORMAT_ARGB_8888:
+	case RGA_FORMAT_XRGB_8888:
 		win_format = 0x9;
 		pixel_width = 4;
 		win_interleaved = 2;
 		break;
 	case RGA_FORMAT_ABGR_8888:
+	case RGA_FORMAT_XBGR_8888:
 		win_format = 0x7;
 		pixel_width = 4;
 		win_interleaved = 2;
@@ -526,21 +530,25 @@ static void RGA3_set_reg_win1_info(u8 *base, struct rga3_req *msg)
 
 	switch (msg->win1.format) {
 	case RGA_FORMAT_RGBA_8888:
+	case RGA_FORMAT_RGBX_8888:
 		win_format = 0x8;
 		pixel_width = 4;
 		win_interleaved = 2;
 		break;
 	case RGA_FORMAT_BGRA_8888:
+	case RGA_FORMAT_BGRX_8888:
 		win_format = 0x6;
 		pixel_width = 4;
 		win_interleaved = 2;
 		break;
 	case RGA_FORMAT_ARGB_8888:
+	case RGA_FORMAT_XRGB_8888:
 		win_format = 0x9;
 		pixel_width = 4;
 		win_interleaved = 2;
 		break;
 	case RGA_FORMAT_ABGR_8888:
+	case RGA_FORMAT_XBGR_8888:
 		win_format = 0x7;
 		pixel_width = 4;
 		win_interleaved = 2;
@@ -700,7 +708,7 @@ static void RGA3_set_reg_win1_info(u8 *base, struct rga3_req *msg)
 		((reg & (~m_RGA3_WIN1_RD_CTRL_SW_WIN1_YUV10B_COMPACT)) |
 		 (s_RGA3_WIN1_RD_CTRL_SW_WIN1_YUV10B_COMPACT(1)));
 
-	/* Only on roster mode, yuv 10bit can change to compact or set endian */
+	/* Only on raster mode, yuv 10bit can change to compact or set endian */
 	if (msg->win1.rd_mode == 0 && yuv10 == 1) {
 		reg =
 			((reg & (~m_RGA3_WIN1_RD_CTRL_SW_WIN1_YUV10B_COMPACT)) |
@@ -817,15 +825,28 @@ static void RGA3_set_reg_wr_info(u8 *base, struct rga3_req *msg)
 
 	switch (msg->wr.format) {
 	case RGA_FORMAT_RGBA_8888:
+	case RGA_FORMAT_RGBX_8888:
 		wr_format = 0x6;
 		pixel_width = 4;
 		wr_interleaved = 2;
-		wr_pix_swp = 1;
+
+		/* fbc default RGBA8888, raster default BGRA8888 */
+		if (msg->wr.rd_mode == 1)
+			wr_pix_swp = 0;
+		else
+			wr_pix_swp = 1;
 		break;
 	case RGA_FORMAT_BGRA_8888:
+	case RGA_FORMAT_BGRX_8888:
 		wr_format = 0x6;
 		pixel_width = 4;
 		wr_interleaved = 2;
+
+		/* fbc default BGRA8888, raster default RGBA8888 */
+		if (msg->wr.rd_mode == 1)
+			wr_pix_swp = 1;
+		else
+			wr_pix_swp = 0;
 		break;
 	case RGA_FORMAT_RGB_888:
 		wr_format = 0x5;
@@ -938,7 +959,7 @@ static void RGA3_set_reg_wr_info(u8 *base, struct rga3_req *msg)
 		((reg & (~m_RGA3_WR_CTRL_SW_WR_YUV10B_COMPACT)) |
 		 (s_RGA3_WR_CTRL_SW_WR_YUV10B_COMPACT(1)));
 
-	/* Only on roster mode, yuv 10bit can change to compact or set endian */
+	/* Only on raster mode, yuv 10bit can change to compact or set endian */
 	if (msg->wr.rd_mode == 0 && yuv10 == 1) {
 		reg =
 			((reg & (~m_RGA3_WR_CTRL_SW_WR_YUV10B_COMPACT)) |
@@ -1244,21 +1265,25 @@ static void RGA3_set_reg_overlap_info(u8 *base, struct rga3_req *msg)
 		break;
 	}
 
-	if (!config->enable && msg->abb_alpha_pass) {
+	if (!config->enable) {
 		/*
 		 * enabled by default bot_blend_m1 && bot_alpha_cal_m1 for src channel(win0)
 		 * In ABB mode, the number will be fetched according to 16*16, so it needs to
 		 * be enabled top_blend_m1 && top_alpha_cal_m1 for dst channel(wr).
 		 */
-		top_color_ctrl.bits.color_mode = RGA_ALPHA_PRE_MULTIPLIED;
+		if (msg->fg_alpha_pass) {
+			top_color_ctrl.bits.color_mode = RGA_ALPHA_PRE_MULTIPLIED;
 
-		top_alpha_ctrl.bits.blend_mode = RGA_ALPHA_PER_PIXEL;
-		top_alpha_ctrl.bits.alpha_cal_mode = RGA_ALPHA_NO_SATURATION;
+			top_alpha_ctrl.bits.blend_mode = RGA_ALPHA_PER_PIXEL;
+			top_alpha_ctrl.bits.alpha_cal_mode = RGA_ALPHA_NO_SATURATION;
+		}
 
-		bottom_color_ctrl.bits.color_mode = RGA_ALPHA_PRE_MULTIPLIED;
+		if (msg->bg_alpha_pass) {
+			bottom_color_ctrl.bits.color_mode = RGA_ALPHA_PRE_MULTIPLIED;
 
-		bottom_alpha_ctrl.bits.blend_mode = RGA_ALPHA_PER_PIXEL;
-		bottom_alpha_ctrl.bits.alpha_cal_mode = RGA_ALPHA_NO_SATURATION;
+			bottom_alpha_ctrl.bits.blend_mode = RGA_ALPHA_PER_PIXEL;
+			bottom_alpha_ctrl.bits.alpha_cal_mode = RGA_ALPHA_NO_SATURATION;
+		}
 	} else {
 		top_color_ctrl.bits.color_mode =
 			config->fg_pre_multiplied ?
@@ -1467,18 +1492,6 @@ static void rga_cmd_to_rga3_cmd(struct rga_req *req_rga, struct rga3_req *req)
 		break;
 	}
 
-	req->win0_a_global_val = req_rga->alpha_global_value;
-	req->win1_a_global_val = req_rga->alpha_global_value;
-
-	/* fixup yuv/rgb convert to rgba missing alpha channel */
-	if (!(req_rga->alpha_rop_flag & 1)) {
-		if (!rga_is_alpha_format(req_rga->src.format) &&
-		    rga_is_alpha_format(req_rga->dst.format)) {
-			req->alpha_config.fg_global_alpha_value = 0xff;
-			req->alpha_config.bg_global_alpha_value = 0xff;
-		}
-	}
-
 	/* simple win can not support dst offset */
 	if ((!((req_rga->alpha_rop_flag) & 1)) &&
 	    (req_rga->dst.x_offset == 0 && req_rga->dst.y_offset == 0) &&
@@ -1488,14 +1501,6 @@ static void rga_cmd_to_rga3_cmd(struct rga_req *req_rga, struct rga3_req *req)
 		 *     src => win0
 		 *     dst => wr
 		 */
-
-		/*
-		 * enabled by default bot_blend_m1 && bot_alpha_cal_m1 for src channel(win0)
-		 * In ABB mode, the number will be fetched according to 16*16, so it needs to
-		 * be enabled top_blend_m1 && top_alpha_cal_m1 for dst channel(wr).
-		 */
-		if (rga_is_alpha_format(req_rga->src.format))
-			req->abb_alpha_pass = true;
 
 		set_win_info(&req->win0, &req_rga->src);
 
@@ -1518,14 +1523,6 @@ static void rga_cmd_to_rga3_cmd(struct rga_req *req_rga, struct rga3_req *req)
 		 *     src1/dst => win0
 		 *     dst => wr
 		 */
-
-		/*
-		 * enabled by default top_blend_m1 && top_alpha_cal_m1 for src channel(win1)
-		 * In ABB mode, the number will be fetched according to 16*16, so it needs to
-		 * be enabled bot_blend_m1 && bot_alpha_cal_m1 for src1/dst channel(win0).
-		 */
-		if (rga_is_alpha_format(req_rga->src.format))
-			req->abb_alpha_pass = true;
 
 		if (req_rga->pat.yrgb_addr != 0) {
 			if (req_rga->src.yrgb_addr == req_rga->dst.yrgb_addr) {
@@ -1586,9 +1583,6 @@ static void rga_cmd_to_rga3_cmd(struct rga_req *req_rga, struct rga3_req *req)
 			set_win_info(&req->win0, &req_rga->dst);
 			addr_copy(&req->win0, &req_rga->dst);
 			req->win0.format = req_rga->dst.format;
-
-			/* only win1 && wr support fbcd, win0 default raster */
-			req->win0.rd_mode = 0;
 
 			/* set win0 dst size */
 			req->win0.dst_act_w = req_rga->dst.act_w;
@@ -1665,6 +1659,31 @@ static void rga_cmd_to_rga3_cmd(struct rga_req *req_rga, struct rga3_req *req)
 			}
 
 			req->alpha_config.mode = req_rga->PD_mode;
+		}
+	} else {
+		/*
+		 * top/bottom Layer binding:
+		 *     top/fg => win1/wr
+		 *     bottom/bg => win0
+		 *   The alpha channel of RGA3 is controlled by the overlap register, choosing
+		 * to use globalAlpha or perpixelAlpha.
+		 *   When the input/output format does not have alpha, need to use globalAlpha to
+		 * control the output alpha to '0xff'.
+		 */
+		if (req->win1.enable) {
+			req->bg_alpha_pass = true;
+
+			if (rga_is_alpha_format(req->win1.format) &&
+			    rga_is_alpha_format(req->wr.format))
+				req->fg_alpha_pass = true;
+			else
+				req->alpha_config.fg_global_alpha_value = 0xff;
+		} else {
+			if (rga_is_alpha_format(req->win0.format) &&
+			    rga_is_alpha_format(req->wr.format))
+				req->bg_alpha_pass = true;
+			else
+				req->alpha_config.bg_global_alpha_value = 0xff;
 		}
 	}
 
@@ -1765,8 +1784,8 @@ static int rga3_scale_check(struct rga_job *job, const struct rga3_req *req)
 				win0_daw = req->win0.dst_act_h;
 				win0_dah = req->win0.dst_act_w;
 
-				win1_saw = req->win1.dst_act_w;
-				win1_sah = req->win1.dst_act_h;
+				win1_saw = req->win1.src_act_w;
+				win1_sah = req->win1.src_act_h;
 				win1_daw = req->win1.dst_act_h;
 				win1_dah = req->win1.dst_act_w;
 			} else {
@@ -1908,61 +1927,65 @@ static int rga3_check_param(struct rga_job *job, const struct rga_hw_data *data,
 	return 0;
 }
 
-static void print_debug_info(struct rga_job *job, struct rga3_req *req)
+static void print_debug_info(struct rga_job *job, struct rga3_req *req, int task_index)
 {
-	rga_job_log(job, "render_mode:%s, bitblit_mode=%d, rotate_mode:%x\n",
-		rga_get_render_mode_str(req->render_mode), req->bitblt_mode,
+	rga_job_log(job, "task[%d]: render_mode:%s, bitblit_mode=%d, rotate_mode:%x\n",
+		task_index, rga_get_render_mode_str(req->render_mode), req->bitblt_mode,
 		req->rotate_mode);
-	rga_job_log(job, "win0: y = %lx uv = %lx v = %lx src_w = %d src_h = %d\n",
-		req->win0.yrgb_addr, req->win0.uv_addr, req->win0.v_addr,
+	rga_job_log(job, "task[%d]: win0: y = %lx uv = %lx v = %lx src_w = %d src_h = %d\n",
+		task_index, req->win0.yrgb_addr, req->win0.uv_addr, req->win0.v_addr,
 		req->win0.src_act_w, req->win0.src_act_h);
-	rga_job_log(job, "win0: vw = %d vh = %d xoff = %d yoff = %d format = %s\n",
-		req->win0.vir_w, req->win0.vir_h,
+	rga_job_log(job, "task[%d]: win0: vw = %d vh = %d xoff = %d yoff = %d format = %s\n",
+		task_index, req->win0.vir_w, req->win0.vir_h,
 		req->win0.x_offset, req->win0.y_offset,
 		rga_get_format_name(req->win0.format));
-	rga_job_log(job, "win0: dst_w = %d, dst_h = %d, rd_mode = %d\n",
-		req->win0.dst_act_w, req->win0.dst_act_h, req->win0.rd_mode);
-	rga_job_log(job, "win0: rot_mode = %d, en = %d, compact = %d, endian = %d\n",
-		req->win0.rotate_mode, req->win0.enable,
+	rga_job_log(job, "task[%d]: win0: dst_w = %d, dst_h = %d, rd_mode = %d\n",
+		task_index, req->win0.dst_act_w, req->win0.dst_act_h, req->win0.rd_mode);
+	rga_job_log(job, "task[%d]: win0: rot_mode = %d, en = %d, compact = %d, endian = %d\n",
+		task_index, req->win0.rotate_mode, req->win0.enable,
 		req->win0.is_10b_compact, req->win0.is_10b_endian);
 
 	if (req->win1.yrgb_addr != 0 || req->win1.uv_addr != 0
 		|| req->win1.v_addr != 0) {
-		rga_job_log(job, "win1: y = %lx uv = %lx v = %lx src_w = %d src_h = %d\n",
-			req->win1.yrgb_addr, req->win1.uv_addr,
+		rga_job_log(job, "task[%d]: win1: y = %lx uv = %lx v = %lx src_w = %d src_h = %d\n",
+			task_index, req->win1.yrgb_addr, req->win1.uv_addr,
 			req->win1.v_addr, req->win1.src_act_w,
 			req->win1.src_act_h);
-		rga_job_log(job, "win1: vw = %d vh = %d xoff = %d yoff = %d format = %s\n",
-			req->win1.vir_w, req->win1.vir_h,
+		rga_job_log(job, "task[%d]: win1: vw = %d vh = %d xoff = %d yoff = %d format = %s\n",
+			task_index, req->win1.vir_w, req->win1.vir_h,
 			req->win1.x_offset, req->win1.y_offset,
 			rga_get_format_name(req->win1.format));
-		rga_job_log(job, "win1: dst_w = %d, dst_h = %d, rd_mode = %d\n",
-			req->win1.dst_act_w, req->win1.dst_act_h,
+		rga_job_log(job, "task[%d]: win1: dst_w = %d, dst_h = %d, rd_mode = %d\n",
+			task_index, req->win1.dst_act_w, req->win1.dst_act_h,
 			req->win1.rd_mode);
-		rga_job_log(job, "win1: rot_mode = %d, en = %d, compact = %d, endian = %d\n",
-			req->win1.rotate_mode, req->win1.enable,
+		rga_job_log(job, "task[%d]: win1: rot_mode = %d, en = %d, compact = %d, endian = %d\n",
+			task_index, req->win1.rotate_mode, req->win1.enable,
 			req->win1.is_10b_compact, req->win1.is_10b_endian);
 	}
 
-	rga_job_log(job, "wr: y = %lx uv = %lx v = %lx vw = %d vh = %d\n",
-		req->wr.yrgb_addr, req->wr.uv_addr, req->wr.v_addr,
+	rga_job_log(job, "task[%d]: wr: y = %lx uv = %lx v = %lx vw = %d vh = %d\n",
+		task_index, req->wr.yrgb_addr, req->wr.uv_addr, req->wr.v_addr,
 		req->wr.vir_w, req->wr.vir_h);
-	rga_job_log(job, "wr: ovlp_xoff = %d ovlp_yoff = %d format = %s rdmode = %d\n",
-		req->wr.x_offset, req->wr.y_offset,
+	rga_job_log(job, "task[%d]: wr: ovlp_xoff = %d ovlp_yoff = %d format = %s rdmode = %d\n",
+		task_index, req->wr.x_offset, req->wr.y_offset,
 		rga_get_format_name(req->wr.format), req->wr.rd_mode);
 
-	rga_job_log(job, "mmu: win0 = %.2x win1 = %.2x wr = %.2x\n",
+	rga_job_log(job, "task[%d]: mmu: win0 = %.2x win1 = %.2x wr = %.2x\n",
+		task_index,
 		req->mmu_info.src0_mmu_flag, req->mmu_info.src1_mmu_flag,
 		req->mmu_info.dst_mmu_flag);
-	rga_job_log(job, "alpha: flag %x mode=%s\n",
+	rga_job_log(job, "task[%d]: alpha: flag %x mode=%s\n",
+		task_index,
 		req->alpha_rop_flag, rga_get_blend_mode_str(req->alpha_config.mode));
-	rga_job_log(job, "alpha: pre_multi=[%d,%d] pixl=[%d,%d] glb=[%d,%d]\n",
+	rga_job_log(job, "task[%d]: alpha: pre_multi=[%d,%d] pixl=[%d,%d] glb=[%d,%d]\n",
+		task_index,
 		req->alpha_config.fg_pre_multiplied, req->alpha_config.bg_pre_multiplied,
 		req->alpha_config.fg_pixel_alpha_en, req->alpha_config.bg_pixel_alpha_en,
 		req->alpha_config.fg_global_alpha_en, req->alpha_config.bg_global_alpha_en);
-	rga_job_log(job, "alpha: fg_global_alpha=%x bg_global_alpha=%x\n",
+	rga_job_log(job, "task[%d]: alpha: fg_global_alpha=%x bg_global_alpha=%x\n",
+		task_index,
 		req->alpha_config.fg_global_alpha_value, req->alpha_config.bg_global_alpha_value);
-	rga_job_log(job, "yuv2rgb mode is %x\n", req->yuv2rgb_mode);
+	rga_job_log(job, "task[%d]: yuv2rgb mode is %x\n", task_index, req->yuv2rgb_mode);
 }
 
 static int rga3_align_check(struct rga_job *job, struct rga3_req *req)
@@ -1988,8 +2011,11 @@ static int rga3_align_check(struct rga_job *job, struct rga3_req *req)
 
 static int rga3_init_reg(struct rga_job *job)
 {
-	struct rga3_req req;
 	int ret = 0;
+	int i;
+	uint32_t *cmd_base = NULL;
+	struct rga_req *user_req = NULL;
+	struct rga3_req req;
 	struct rga_scheduler_t *scheduler = NULL;
 	ktime_t timestamp = ktime_get();
 
@@ -1999,26 +2025,31 @@ static int rga3_init_reg(struct rga_job *job)
 		return -EINVAL;
 	}
 
-	memset(&req, 0x0, sizeof(req));
+	for (i = 0; i < job->task_count; i++) {
+		user_req = &job->task_list[i];
+		cmd_base = (uint32_t *)job->cmd_buf->vaddr + i * scheduler->data->cmd_reg_size;
 
-	rga_cmd_to_rga3_cmd(&job->rga_command_base, &req);
+		memset(&req, 0x0, sizeof(req));
 
-	/* check value if legal */
-	ret = rga3_check_param(job, scheduler->data, &req);
-	if (ret == -EINVAL) {
-		rga_job_err(job, "req argument is inval\n");
-		return ret;
-	}
+		rga_cmd_to_rga3_cmd(user_req, &req);
 
-	rga3_align_check(job, &req);
+		/* for debug */
+		if (DEBUGGER_EN(MSG))
+			print_debug_info(job, &req, i);
 
-	/* for debug */
-	if (DEBUGGER_EN(MSG))
-		print_debug_info(job, &req);
+		/* check value if legal */
+		ret = rga3_check_param(job, scheduler->data, &req);
+		if (ret == -EINVAL) {
+			rga_job_err(job, "req argument is inval\n");
+			return ret;
+		}
 
-	if (rga3_gen_reg_info((uint8_t *) job->cmd_buf->vaddr, &req) == -1) {
-		rga_job_err(job, "RKA: gen reg info error\n");
-		return -EINVAL;
+		rga3_align_check(job, &req);
+
+		if (rga3_gen_reg_info((uint8_t *) cmd_base, &req) == -1) {
+			rga_job_err(job, "RKA: gen reg info error\n");
+			return -EINVAL;
+		}
 	}
 
 	if (DEBUGGER_EN(TIME))
@@ -2028,83 +2059,134 @@ static int rga3_init_reg(struct rga_job *job)
 	return ret;
 }
 
+static void rga3_dump_read_back_sys_reg(struct rga_job *job, struct rga_scheduler_t *scheduler)
+{
+	int i;
+	unsigned long flags;
+	uint32_t sys_reg[RGA3_SYS_REG_SIZE] = {0};
+
+	spin_lock_irqsave(&scheduler->irq_lock, flags);
+
+	for (i = 0; i < ARRAY_SIZE(sys_reg); i++)
+		sys_reg[i] = rga_read(RGA3_SYS_REG_BASE + i * 4, scheduler);
+
+	spin_unlock_irqrestore(&scheduler->irq_lock, flags);
+
+	rga_job_log(job, "SYS_READ_BACK_REG\n");
+	for (i = 0; i < ARRAY_SIZE(sys_reg) / 4; i++)
+		rga_job_log(job, "0x%04x : %.8x %.8x %.8x %.8x\n",
+			RGA3_SYS_REG_BASE + i * 0x10,
+			sys_reg[0 + i * 4], sys_reg[1 + i * 4],
+			sys_reg[2 + i * 4], sys_reg[3 + i * 4]);
+}
+
 static void rga3_dump_read_back_reg(struct rga_job *job, struct rga_scheduler_t *scheduler)
 {
 	int i;
 	unsigned long flags;
-	uint32_t cmd_reg[48] = {0};
+	uint32_t cmd_reg[RGA3_CMD_REG_SIZE] = {0};
 
 	spin_lock_irqsave(&scheduler->irq_lock, flags);
 
-	for (i = 0; i < 48; i++)
-		cmd_reg[i] = rga_read(0x100 + i * 4, scheduler);
+	for (i = 0; i < ARRAY_SIZE(cmd_reg); i++)
+		cmd_reg[i] = rga_read(RGA3_CMD_REG_BASE + i * 4, scheduler);
 
 	spin_unlock_irqrestore(&scheduler->irq_lock, flags);
 
 	rga_job_log(job, "CMD_READ_BACK_REG\n");
-	for (i = 0; i < 12; i++)
-		rga_job_log(job, "i = %x : %.8x %.8x %.8x %.8x\n", i,
+	for (i = 0; i < ARRAY_SIZE(cmd_reg) / 4; i++)
+		rga_job_log(job, "0x%04x : %.8x %.8x %.8x %.8x\n",
+			RGA3_CMD_REG_BASE + i * 0x10,
+			cmd_reg[0 + i * 4], cmd_reg[1 + i * 4],
+			cmd_reg[2 + i * 4], cmd_reg[3 + i * 4]);
+}
+
+static void rga3_dump_read_back_iommu_reg(struct rga_job *job, struct rga_scheduler_t *scheduler)
+{
+	int i;
+	unsigned long flags;
+	uint32_t cmd_reg[RGA3_IOMMU_REG_SIZE] = {0};
+
+	spin_lock_irqsave(&scheduler->irq_lock, flags);
+
+	for (i = 0; i < ARRAY_SIZE(cmd_reg); i++)
+		cmd_reg[i] = rga_read(RGA3_IOMMU_REG_BASE + i * 4, scheduler);
+
+	spin_unlock_irqrestore(&scheduler->irq_lock, flags);
+
+	rga_job_log(job, "IOMMU_READ_BACK_REG\n");
+	for (i = 0; i < ARRAY_SIZE(cmd_reg) / 4; i++)
+		rga_job_log(job, "0x%04x : %.8x %.8x %.8x %.8x\n",
+			RGA3_IOMMU_REG_BASE + i * 0x10,
 			cmd_reg[0 + i * 4], cmd_reg[1 + i * 4],
 			cmd_reg[2 + i * 4], cmd_reg[3 + i * 4]);
 }
 
 static int rga3_set_reg(struct rga_job *job, struct rga_scheduler_t *scheduler)
 {
-	int i;
+	int i, j;
 	bool master_mode_en;
 	uint32_t sys_ctrl;
+	uint32_t int_en;
 	uint32_t *cmd;
 	ktime_t now = ktime_get();
-
-	cmd = job->cmd_buf->vaddr;
 
 	/*
 	 * Currently there is no iova allocated for storing cmd for the IOMMU device,
 	 * so the iommu device needs to use the slave mode.
 	 */
-	if (scheduler->data->mmu != RGA_IOMMU)
+	if (scheduler->data->mmu != RGA_IOMMU || job->task_count > 1)
 		master_mode_en = true;
 	else
 		master_mode_en = false;
 
 	if (DEBUGGER_EN(REG)) {
-		rga_job_log(job, "CMD_REG\n");
-		for (i = 0; i < 12; i++)
-			rga_job_log(job, "i = %x : %.8x %.8x %.8x %.8x\n", i,
-				cmd[0 + i * 4], cmd[1 + i * 4],
-				cmd[2 + i * 4], cmd[3 + i * 4]);
+		rga3_dump_read_back_sys_reg(job, scheduler);
+
+		for (i = 0; i < job->task_count; i++) {
+			cmd = (uint32_t *)job->cmd_buf->vaddr + i * scheduler->data->cmd_reg_size;
+			rga_job_log(job, "CMD_REG task[%d]\n", i);
+
+			for (j = 0; j < ALIGN_DOWN(scheduler->data->cmd_reg_size, 4) / 4; j++)
+				rga_job_log(job, "0x%04x : %.8x %.8x %.8x %.8x\n",
+					RGA3_CMD_REG_BASE + j * 0x10,
+					cmd[0 + j * 4], cmd[1 + j * 4],
+					cmd[2 + j * 4], cmd[3 + j * 4]);
+		}
+
+		rga3_dump_read_back_iommu_reg(job, scheduler);
 	}
+
+	sys_ctrl = m_RGA3_SYS_CTRL_FRMEND_AUTO_RSTN_EN;
 
 	/* All CMD finish int */
-	rga_write(m_RGA3_INT_FRM_DONE | m_RGA3_INT_CMD_LINE_FINISH | m_RGA3_INT_ERROR_MASK,
-		  RGA3_INT_EN, scheduler);
+	if (master_mode_en)
+		int_en = m_RGA3_INT_CMD_LINE_FINISH | m_RGA3_INT_ERROR_MASK;
+	else
+		int_en = m_RGA3_INT_FRM_DONE | m_RGA3_INT_CMD_LINE_FINISH | m_RGA3_INT_ERROR_MASK;
+	rga_write(int_en, RGA3_INT_EN, scheduler);
 
 	if (master_mode_en) {
-		/* master mode */
-		sys_ctrl = s_RGA3_SYS_CTRL_CMD_MODE(1);
-
 		rga_write(job->cmd_buf->dma_addr, RGA3_CMD_ADDR, scheduler);
-		rga_write(sys_ctrl, RGA3_SYS_CTRL, scheduler);
-		rga_write(m_RGA3_CMD_CTRL_CMD_LINE_ST_P, RGA3_CMD_CTRL, scheduler);
+		/* master mode */
+		rga_write(sys_ctrl | s_RGA3_SYS_CTRL_CMD_MODE(1), RGA3_SYS_CTRL, scheduler);
+		rga_write(s_RGA3_CMD_CTRL_CMD_INCR_NUM(job->task_count - 1) |
+			  s_RGA3_CMD_CTRL_CMD_STOP_MODE(0) |
+			  m_RGA3_CMD_CTRL_CMD_LINE_ST_P,
+			  RGA3_CMD_CTRL, scheduler);
 	} else {
 		/* slave mode */
-		sys_ctrl = s_RGA3_SYS_CTRL_CMD_MODE(0) | m_RGA3_SYS_CTRL_RGA_SART;
+		rga_write(sys_ctrl | s_RGA3_SYS_CTRL_CMD_MODE(0), RGA3_SYS_CTRL, scheduler);
+		rga_write(0, RGA3_CMD_ADDR, scheduler);
+		rga_write(0, RGA3_CMD_CTRL, scheduler);
 
-		for (i = 0; i <= 50; i++)
+		cmd = job->cmd_buf->vaddr;
+		for (i = 0; i < scheduler->data->cmd_reg_size; i++)
 			rga_write(cmd[i], 0x100 + i * 4, scheduler);
 
-		rga_write(sys_ctrl, RGA3_SYS_CTRL, scheduler);
-	}
-
-	if (DEBUGGER_EN(REG)) {
-		rga_job_log(job, "sys_ctrl = 0x%x, int_en = 0x%x, int_raw = 0x%x\n",
-			rga_read(RGA3_SYS_CTRL, scheduler),
-			rga_read(RGA3_INT_EN, scheduler),
-			rga_read(RGA3_INT_RAW, scheduler));
-
-		rga_job_log(job, "hw_status = 0x%x, cmd_status = 0x%x\n",
-			rga_read(RGA3_STATUS0, scheduler),
-			rga_read(RGA3_CMD_STATE, scheduler));
+		rga_write(sys_ctrl |
+			  s_RGA3_SYS_CTRL_CMD_MODE(0) |
+			  m_RGA3_SYS_CTRL_RGA_SART, RGA3_SYS_CTRL, scheduler);
 	}
 
 	if (DEBUGGER_EN(TIME))
@@ -2115,8 +2197,11 @@ static int rga3_set_reg(struct rga_job *job, struct rga_scheduler_t *scheduler)
 	job->timestamp.hw_recode = now;
 	job->session->last_active = now;
 
-	if (DEBUGGER_EN(REG))
+	if (DEBUGGER_EN(REG)) {
+		rga3_dump_read_back_sys_reg(job, scheduler);
 		rga3_dump_read_back_reg(job, scheduler);
+		rga3_dump_read_back_iommu_reg(job, scheduler);
+	}
 
 	return 0;
 }
@@ -2165,6 +2250,7 @@ static void rga3_clear_intr(struct rga_scheduler_t *scheduler)
 
 static int rga3_irq(struct rga_scheduler_t *scheduler)
 {
+	uint32_t cmd_cur_num;
 	struct rga_job *job = scheduler->running_job;
 
 	if (job == NULL) {
@@ -2182,19 +2268,51 @@ static int rga3_irq(struct rga_scheduler_t *scheduler)
 	}
 
 	scheduler->ops->read_status(job, scheduler);
+	if (v_RGA3_SYS_CTRL_CMD_MODE(rga_read(RGA3_SYS_CTRL, scheduler)) == 0)
+		cmd_cur_num = 1;
+	else
+		cmd_cur_num = v_RGA3_CMD_STATE_CMD_CNT_CUR(job->cmd_status);
 
-	if (DEBUGGER_EN(INT_FLAG))
+	if (DEBUGGER_EN(INT_FLAG)) {
+		rga_job_log(job, "current cmd %d/%zu\n", cmd_cur_num, job->task_count);
 		rga_job_log(job, "irq handler, INTR[0x%x], HW_STATUS[0x%x], CMD_STATUS[0x%x]\n",
 			job->intr_status, job->hw_status, job->cmd_status);
+	}
 
-	if (job->intr_status & (m_RGA3_INT_FRM_DONE | m_RGA3_INT_CMD_LINE_FINISH)) {
-		set_bit(RGA_JOB_STATE_FINISH, &job->state);
-	} else if (job->intr_status & m_RGA3_INT_ERROR_MASK) {
+	if (job->intr_status & m_RGA3_INT_ERROR_MASK) {
 		set_bit(RGA_JOB_STATE_INTR_ERR, &job->state);
+		job->finished_count = cmd_cur_num > 0 ? cmd_cur_num - 1 : 0;
 
 		rga_job_err(job, "irq handler err! INTR[0x%x], HW_STATUS[0x%x], CMD_STATUS[0x%x]\n",
 		       job->intr_status, job->hw_status, job->cmd_status);
+
 		scheduler->ops->soft_reset(scheduler);
+	} else if (job->intr_status & (m_RGA3_INT_FRM_DONE | m_RGA3_INT_CMD_LINE_FINISH)) {
+		if (job->task_count == 1) {
+			set_bit(RGA_JOB_STATE_FINISH, &job->state);
+			job->finished_count = cmd_cur_num;
+		} else {
+			if (rga_read(RGA3_CMD_CTRL, scheduler) & m_RGA3_CMD_CTRL_CMD_STOP_MODE &&
+			    v_RGA3_CMD_STATE_CMD_CNT_CUR(job->cmd_status) < job->task_count) {
+				rga_write(m_RGA3_INT_FRM_DONE | m_RGA3_INT_CMD_LINE_FINISH,
+					  RGA3_INT_CLR, scheduler);
+				rga_write(rga_read(RGA3_CMD_CTRL, scheduler) |
+					  m_RGA3_CMD_CTRL_CMD_INCR_VALID_P,
+					  RGA3_CMD_CTRL, scheduler);
+
+				return IRQ_HANDLED;
+			}
+
+			if ((job->intr_status & m_RGA3_INT_CMD_LINE_FINISH) == 0) {
+				/* clear current frame done interrupt */
+				rga_write(m_RGA3_INT_FRM_DONE, RGA3_INT_CLR, scheduler);
+
+				return IRQ_HANDLED;
+			}
+
+			set_bit(RGA_JOB_STATE_FINISH, &job->state);
+			job->finished_count = cmd_cur_num;
+		}
 	}
 
 	rga3_clear_intr(scheduler);

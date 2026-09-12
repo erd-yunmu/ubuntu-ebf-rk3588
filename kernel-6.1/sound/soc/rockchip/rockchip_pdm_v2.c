@@ -2,7 +2,7 @@
 /*
  * Rockchip PDM ALSA SoC Digital Audio Interface(DAI)  driver
  *
- * Copyright (C) 2024 Rockchip Electronics Co., Ltd
+ * Copyright (C) 2024 Rockchip Electronics Co., Ltd.
  */
 
 #include <linux/module.h>
@@ -29,11 +29,32 @@
 #define PDM_V2_START_DELAY_MS_MIN	(0)
 #define PDM_V2_START_DELAY_MS_MAX	(1000)
 #define PDM_V2_REF_CLK_MAX		61440000
+#define PDM_V2_CHANNEL_MAX		8
 
 #define QUIRK_ALWAYS_ON			BIT(0)
 
 #define RK3506_PDM			0x2311
 #define RK3576_PDM			0x2302
+#define RV1126B_PDM			0x2411
+
+#define PDM_SELECT_LINE0_1	0 /* select line 0 & 1 as a group, and 2 & 3 as another group */
+#define PDM_SELECT_LINE0_2	1 /* select line 0 & 2 as a group, and 1 & 3 as another group */
+#define PDM_SELECT_LINE0_3	2 /* select line 0 & 3 as a group, and 1 & 2 as another group */
+
+/* Data select in one group */
+#define PDM_DATA_01_LL	0 /* select line 0 left channel as left, line 1 left channel as right */
+#define PDM_DATA_01_LR	1 /* select line 0 left channel as left, line 1 right channel as right */
+#define PDM_DATA_01_RL	2 /* select line 0 right channel as left, line 1 left channel as right */
+#define PDM_DATA_01_RR	3 /* select line 0 right channel as left, line 1 right channel as right */
+#define PDM_DATA_10_LL	4 /* select line 1 left channel as left, line 0 left channel as right */
+#define PDM_DATA_10_LR	5 /* select line 1 left channel as left, line 0 right channel as right */
+#define PDM_DATA_10_RL	6 /* select line 1 right channel as left, line 0 left channel as right */
+#define PDM_DATA_10_RR	7 /* select line 1 right channel as left, line 0 right channel as right */
+
+#define PDM_OLOC_PARA_MAX	(3)
+#define PDM_OLOC_MODE		(0)
+#define PDM_OLOC_PATH0		(1)
+#define PDM_OLOC_PATH1		(2)
 
 struct rk_pdm_v2_clkref {
 	unsigned int sr;
@@ -73,6 +94,8 @@ struct rk_pdm_v2_dev {
 	unsigned int clk_ref_frq;
 	unsigned int quirks;
 	unsigned int version;
+	unsigned int data_shift[PDM_V2_CHANNEL_MAX];
+	unsigned int split_en;
 };
 
 static int get_pdm_v2_clkref(struct rk_pdm_v2_dev *pdm, unsigned int sr)
@@ -121,13 +144,19 @@ static void rockchip_pdm_v2_rxctrl(struct rk_pdm_v2_dev *pdm, int on)
 		regmap_update_bits(pdm->regmap, PDM_V2_SYSCONFIG,
 				   PDM_V2_RX_MSK | PDM_V2_RX_CLR_MSK | PDM_V2_NUM_MSK,
 				   PDM_V2_RX_STOP | PDM_V2_RX_CLR_WR | PDM_V2_NUM_STOP);
+		if (pdm->version >= RV1126B_PDM) {
+			regmap_update_bits(pdm->regmap, PDM_V2_DATA_SHIFT0,
+					   0xffffffff, 0x0);
+			regmap_update_bits(pdm->regmap, PDM_V2_DATA_SHIFT1,
+					   0xffffffff, 0x0);
+		}
 	}
 }
 
 static int rockchip_pdm_v2_set_samplerate(struct rk_pdm_v2_dev *pdm, unsigned int samplerate)
 {
 	unsigned int upsamplerate, mclk, ratio, scale = 0;
-	int index, ret = 0;
+	int i, index, ret = 0;
 
 	index = get_pdm_v2_clkref(pdm, samplerate);
 	if (index < 0)
@@ -142,6 +171,17 @@ static int rockchip_pdm_v2_set_samplerate(struct rk_pdm_v2_dev *pdm, unsigned in
 	ret = clk_set_rate(pdm->clk_out, upsamplerate);
 	if (ret)
 		return ret;
+
+	if (pdm->version >= RV1126B_PDM) {
+		/* calculate the data shift if not set by dts.
+		 * Set default phase offset of 180 degrees.
+		 */
+		mclk = clk_get_rate(pdm->clk);
+		if (pdm->data_shift[0] == 0) {
+			for (i = 0; i < PDM_V2_CHANNEL_MAX; i++)
+				pdm->data_shift[i] = (mclk / upsamplerate / 2) + 1;
+		}
+	}
 
 	ratio = upsamplerate / samplerate / 2;
 	switch (ratio) {
@@ -209,7 +249,7 @@ static int rockchip_pdm_v2_hw_params(struct snd_pcm_substream *substream,
 				     struct snd_soc_dai *dai)
 {
 	struct rk_pdm_v2_dev *pdm = to_info(dai);
-	unsigned int val = 0;
+	unsigned int i, n = 0, val = 0;
 
 	regmap_update_bits(pdm->regmap, PDM_V2_CTRL,
 			   PDM_V2_SJM_SEL_MSK, PDM_V2_SJM_SEL_L);
@@ -223,9 +263,42 @@ static int rockchip_pdm_v2_hw_params(struct snd_pcm_substream *substream,
 		regmap_update_bits(pdm->regmap, PDM_V2_FILTER_CTRL,
 				   PDM_V2_HPF_R_MSK | PDM_V2_HPF_L_MSK | PDM_V2_HPF_FREQ_MSK,
 				   PDM_V2_HPF_R_EN | PDM_V2_HPF_L_EN | PDM_V2_HPF_FREQ_60);
+	} else if (pdm->version >= RV1126B_PDM) {
+		/* Move the hpf after cic filter */
+		regmap_update_bits(pdm->regmap, PDM_V2_FILTER_CTRL1,
+				   PDM_V2_FILT1_HPF_V2_R_MSK | PDM_V2_FILT1_HPF_V2_L_MSK |
+				   PDM_V2_FILT1_HPF_V2_FREQ_MSK,
+				   PDM_V2_FILT1_HPF_V2_R_EN | PDM_V2_FILT1_HPF_V2_L_EN |
+				   PDM_V2_FILT1_HPF_V2_FREQ_60);
 	}
 
 	rockchip_pdm_v2_set_samplerate(pdm, params_rate(params));
+	if (pdm->version >= RV1126B_PDM) {
+		/* PDM data shift */
+		n = params_channels(params);
+
+		if (n > PDM_V2_CHANNEL_MAX / 2) {
+			for (i = 0; i < PDM_V2_CHANNEL_MAX / 2; i++)
+				val += pdm->data_shift[i] << (i * 8);
+
+			regmap_update_bits(pdm->regmap, PDM_V2_DATA_SHIFT0,
+					   0xffffffff, val);
+			val = 0;
+			for (i = 0; i < (n - PDM_V2_CHANNEL_MAX / 2); i++)
+				val += pdm->data_shift[i + PDM_V2_CHANNEL_MAX / 2] << (i * 8);
+
+			regmap_update_bits(pdm->regmap, PDM_V2_DATA_SHIFT1,
+					   0xffffffff, val);
+		} else {
+			for (i = 0; i < n; i++)
+				val += pdm->data_shift[i] << (i * 8);
+
+			regmap_update_bits(pdm->regmap, PDM_V2_DATA_SHIFT0,
+					   0xffffffff, val);
+		}
+	}
+
+	val = 0;
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S16_LE:
 		val |= PDM_V2_VDW(16);
@@ -248,10 +321,16 @@ static int rockchip_pdm_v2_hw_params(struct snd_pcm_substream *substream,
 		val |= PDM_V2_PATH2_EN;
 		fallthrough;
 	case 4:
-		val |= PDM_V2_PATH1_EN;
+		if (pdm->split_en)
+			val |= PDM_V2_PATH3_EN | PDM_V2_PATH2_EN;
+		else
+			val |= PDM_V2_PATH1_EN;
 		fallthrough;
 	case 2:
-		val |= PDM_V2_PATH0_EN;
+		if (pdm->split_en)
+			val |= PDM_V2_PATH1_EN | PDM_V2_PATH0_EN;
+		else
+			val |= PDM_V2_PATH0_EN;
 		break;
 	default:
 		dev_err(pdm->dev, "invalid channel: %d\n",
@@ -336,6 +415,7 @@ static int rockchip_pdm_v2_prepare(struct snd_pcm_substream *substream,
 
 static const struct snd_kcontrol_new rk3506_controls[];
 static const struct snd_kcontrol_new rk3576_controls[];
+static const struct snd_kcontrol_new rv1126b_controls[];
 
 static int rockchip_pdm_v2_dai_probe(struct snd_soc_dai *dai)
 {
@@ -347,6 +427,8 @@ static int rockchip_pdm_v2_dai_probe(struct snd_soc_dai *dai)
 		snd_soc_add_component_controls(dai->component, rk3506_controls, 1);
 	else if (pdm->version == RK3576_PDM)
 		snd_soc_add_component_controls(dai->component, rk3576_controls, 1);
+	else if (pdm->version >= RV1126B_PDM)
+		snd_soc_add_component_controls(dai->component, rv1126b_controls, 1);
 
 	return 0;
 }
@@ -446,6 +528,8 @@ static SOC_ENUM_SINGLE_DECL(hpf_cutoff_enum, PDM_V2_FILTER_CTRL,
 			    19, hpf_cutoff_text);
 static SOC_ENUM_SINGLE_DECL(hpf_v2_cutoff_enum, PDM_V2_FILTER_CTRL,
 			    21, hpf_v2_cutoff_text);
+static SOC_ENUM_SINGLE_DECL(hpf1_v2_cutoff_enum, PDM_V2_FILTER_CTRL1,
+			    2, hpf_v2_cutoff_text);
 static const DECLARE_TLV_DB_SCALE(pdm_v2_digtal_gain_tlv, -6563, 75, 0);
 
 static const struct snd_kcontrol_new rockchip_pdm_v2_controls[] = {
@@ -487,6 +571,36 @@ static const struct snd_kcontrol_new rk3576_controls[] = {
 	SOC_SINGLE("HPFR Switch", PDM_V2_FILTER_CTRL, 21, 1, 0),
 };
 
+static const struct snd_kcontrol_new rv1126b_controls[] = {
+	SOC_SINGLE_RANGE_TLV("Gain Volume 0",
+			     PDM_V2_GAIN_CTRL,
+			     1,
+			     PDM_V2_GAIN_CTRL_MIN,
+			     PDM_V2_GAIN_CTRL_MAX,
+			     0, pdm_v2_digtal_gain_tlv),
+	SOC_SINGLE_RANGE_TLV("Gain Volume 1",
+			     PDM_V2_GAIN_CTRL,
+			     9,
+			     PDM_V2_GAIN_CTRL_MIN,
+			     PDM_V2_GAIN_CTRL_MAX,
+			     0, pdm_v2_digtal_gain_tlv),
+	SOC_SINGLE_RANGE_TLV("Gain Volume 2",
+			     PDM_V2_GAIN_CTRL,
+			     17,
+			     PDM_V2_GAIN_CTRL_MIN,
+			     PDM_V2_GAIN_CTRL_MAX,
+			     0, pdm_v2_digtal_gain_tlv),
+	SOC_SINGLE_RANGE_TLV("Gain Volume 3",
+			     PDM_V2_GAIN_CTRL,
+			     25,
+			     PDM_V2_GAIN_CTRL_MIN,
+			     PDM_V2_GAIN_CTRL_MAX,
+			     0, pdm_v2_digtal_gain_tlv),
+	SOC_ENUM("HPF Cutoff", hpf1_v2_cutoff_enum),
+	SOC_SINGLE("HPFL Switch", PDM_V2_FILTER_CTRL1, 1, 1, 0),
+	SOC_SINGLE("HPFR Switch", PDM_V2_FILTER_CTRL1, 0, 1, 0),
+};
+
 static const struct snd_soc_component_driver rockchip_pdm_v2_component = {
 	.name = "rockchip-pdm-v2",
 	.controls = rockchip_pdm_v2_controls,
@@ -507,16 +621,7 @@ static int rockchip_pdm_v2_pinctrl_select_clk_state(struct device *dev)
 	 */
 	udelay(10);
 
-	/*
-	 * Must disable the clk to avoid clk glitch
-	 * when pinctrl switch from gpio to pdm clk.
-	 */
-
-	rockchip_utils_clk_gate_endisable(pdm->dev, pdm->clk_out, 0);
-	udelay(10);
 	pinctrl_select_state(pdm->pinctrl, pdm->clk_state);
-	udelay(10);
-	rockchip_utils_clk_gate_endisable(pdm->dev, pdm->clk_out, 1);
 
 	return 0;
 }
@@ -540,6 +645,7 @@ static int rockchip_pdm_v2_runtime_resume(struct device *dev)
 	struct rk_pdm_v2_dev *pdm = dev_get_drvdata(dev);
 	int ret;
 
+	rockchip_pdm_v2_pinctrl_select_clk_state(dev);
 	ret = clk_prepare_enable(pdm->clk_out);
 	if (ret)
 		goto err_clk_out;
@@ -559,8 +665,6 @@ static int rockchip_pdm_v2_runtime_resume(struct device *dev)
 		goto err_regmap;
 
 	rockchip_pdm_v2_rxctrl(pdm, 0);
-
-	rockchip_pdm_v2_pinctrl_select_clk_state(dev);
 
 	return 0;
 
@@ -583,6 +687,10 @@ static bool rockchip_pdm_v2_wr_reg(struct device *dev, unsigned int reg)
 	case PDM_V2_FIFO_CTRL:
 	case PDM_V2_RXFIFO_DATA:
 	case PDM_V2_DATA_VALID:
+	case PDM_V2_GAIN_CTRL:
+	case PDM_V2_DATA_SHIFT0:
+	case PDM_V2_DATA_SHIFT1:
+	case PDM_V2_FILTER_CTRL1:
 		return true;
 	default:
 		return false;
@@ -599,6 +707,10 @@ static bool rockchip_pdm_v2_rd_reg(struct device *dev, unsigned int reg)
 	case PDM_V2_DATA_VALID:
 	case PDM_V2_RXFIFO_DATA:
 	case PDM_V2_VERSION:
+	case PDM_V2_GAIN_CTRL:
+	case PDM_V2_DATA_SHIFT0:
+	case PDM_V2_DATA_SHIFT1:
+	case PDM_V2_FILTER_CTRL1:
 		return true;
 	default:
 		return false;
@@ -637,7 +749,7 @@ static const struct regmap_config rockchip_pdm_v2_regmap_config = {
 	.reg_bits = 32,
 	.reg_stride = 4,
 	.val_bits = 32,
-	.max_register = PDM_V2_GAIN_CTRL,
+	.max_register = PDM_V2_FILTER_CTRL1,
 	.reg_defaults = rockchip_pdm_v2_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(rockchip_pdm_v2_reg_defaults),
 	.writeable_reg = rockchip_pdm_v2_wr_reg,
@@ -650,6 +762,7 @@ static const struct regmap_config rockchip_pdm_v2_regmap_config = {
 static const struct of_device_id rockchip_pdm_v2_match[] __maybe_unused = {
 	{ .compatible = "rockchip,rk3506-pdm", },
 	{ .compatible = "rockchip,rk3576-pdm", },
+	{ .compatible = "rockchip,rv1126b-pdm", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, rockchip_pdm_v2_match);
@@ -677,6 +790,40 @@ static int rockchip_pdm_v2_path_parse(struct rk_pdm_v2_dev *pdm, struct device_n
 	}
 
 	regmap_update_bits(pdm->regmap, PDM_V2_CTRL, msk, val);
+
+	return 0;
+}
+
+static int rockchip_pdm_v2_one_line_one_channel_parse(struct rk_pdm_v2_dev *pdm,
+						      struct device_node *node)
+{
+	unsigned int oloc[PDM_OLOC_PARA_MAX];
+	int cnt = 0, ret = 0;
+
+	cnt = of_count_phandle_with_args(node, "rockchip,one-line-one-channel",
+					 NULL);
+	if (cnt != PDM_OLOC_PARA_MAX)
+		return -EINVAL;
+
+	ret = of_property_read_u32_array(node, "rockchip,one-line-one-channel",
+					 oloc, cnt);
+	if (ret)
+		return ret;
+
+	if (oloc[0] > PDM_SELECT_LINE0_3 || oloc[1] > PDM_DATA_10_RR || oloc[2] > PDM_DATA_10_RR) {
+		dev_err(pdm->dev, "invalid OLOC parameter: %u %u %u\n", oloc[0], oloc[1], oloc[2]);
+
+		return -EINVAL;
+	}
+
+	regmap_update_bits(pdm->regmap, PDM_V2_CTRL,
+			   PDM_V2_PATH1_MSK | PDM_V2_PATH0_MSK |
+			   PDM_V2_PATH_MODE_SELECT_MSK | PDM_V2_SPLIT_MSK,
+			   PDM_V2_SPLIT_EN | PDM_V2_PATH_MODE(oloc[PDM_OLOC_MODE]) |
+			   PDM_V2_PATH0(oloc[PDM_OLOC_PATH0]) |
+			   PDM_V2_PATH1(oloc[PDM_OLOC_PATH1]));
+
+	pdm->split_en = 1;
 
 	return 0;
 }
@@ -752,6 +899,49 @@ static int rockchip_pdm_v2_register_platform(struct device *dev)
 	return ret;
 }
 
+static int rockchip_pdm_v2_data_shift(struct rk_pdm_v2_dev *pdm,
+				      struct device_node *np)
+{
+	char *pdm_data_shift_prop = "rockchip,pdm-data-shift";
+	int num, ret = 0;
+
+	num = of_count_phandle_with_args(np, pdm_data_shift_prop, NULL);
+	if (num < 0) {
+		if (num != -ENOENT) {
+			dev_err(pdm->dev,
+				"Failed to read '%s' num: %d\n",
+				pdm_data_shift_prop, num);
+			ret = num;
+		}
+
+		return ret;
+	} else if (num != PDM_V2_CHANNEL_MAX) {
+		dev_err(pdm->dev,
+			"The num: %d should be: %d\n", num, PDM_V2_CHANNEL_MAX);
+
+		return -EINVAL;
+	}
+
+	ret = of_property_read_u32_array(np, pdm_data_shift_prop,
+					 pdm->data_shift, num);
+	if (ret < 0) {
+		dev_err(pdm->dev, "Failed to read '%s': %d\n", pdm_data_shift_prop, ret);
+
+		return ret;
+	}
+
+	for (num = 0; num < PDM_V2_CHANNEL_MAX; num++) {
+		if (pdm->data_shift[num] > 0xff) {
+			dev_err(pdm->dev,
+				"The data_shift: %d exceed 0xff\n", num);
+
+			return -EINVAL;
+		}
+	}
+
+	return ret;
+}
+
 static int rockchip_pdm_v2_probe(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
@@ -818,30 +1008,39 @@ static int rockchip_pdm_v2_probe(struct platform_device *pdev)
 	 * release time here.
 	 */
 	pdm->version = (pdm->version >> 16) & 0xffff;
-	/*
-	 * Set the default gain 24dB, this parameter can get better
-	 * performance if the voice energy is lower. In other words this
-	 * can improve PDM IP SNR.
-	 *
-	 * So the applicable range of this is for sound intensity below 100dB.
-	 * If you want to record stronger sound intensity, you must set
-	 * PDM gain register but not soft gain-controller.
-	 */
+
 	if (pdm->version == RK3506_PDM) {
 		regmap_update_bits(pdm->regmap, PDM_V2_GAIN_CTRL, PDM_V2_GAIN_CTRL_MSK,
-				   PDM_V2_GAIN_CTRL_24DB);
+				   PDM_V2_GAIN_CTRL_0DB);
 	} else if (pdm->version == RK3576_PDM) {
 		regmap_update_bits(pdm->regmap, PDM_V2_FILTER_CTRL, PDM_V2_GAIN_MSK,
-				   PDM_V2_GAIN_24DB);
+				   PDM_V2_GAIN_0DB);
+	} else if (pdm->version >= RV1126B_PDM) {
+		regmap_update_bits(pdm->regmap, PDM_V2_GAIN_CTRL,
+				   PDM_V2_GAIN_CTRL_MSK |
+				   PDM_V2_GAIN_CTRL_MSK << 8 |
+				   PDM_V2_GAIN_CTRL_MSK << 16 |
+				   PDM_V2_GAIN_CTRL_MSK << 24,
+				   PDM_V2_GAIN_CTRL_0DB |
+				   PDM_V2_GAIN_CTRL_0DB << 8 |
+				   PDM_V2_GAIN_CTRL_0DB << 16 |
+				   PDM_V2_GAIN_CTRL_0DB << 24);
 	}
 
 	ret = rockchip_pdm_v2_path_parse(pdm, node);
 	if (ret != 0 && ret != -ENOENT)
 		goto err_hclk;
 
+	rockchip_pdm_v2_one_line_one_channel_parse(pdm, node);
 	ret = rockchip_pdm_v2_parse_quirks(pdm);
 	if (ret)
 		goto err_hclk;
+
+	if (pdm->version >= RV1126B_PDM) {
+		ret = rockchip_pdm_v2_data_shift(pdm, node);
+		if (ret)
+			goto err_hclk;
+	}
 	/*
 	 * MUST: after pm_runtime_enable step, any register R/W
 	 * should be wrapped with pm_runtime_get_sync/put.

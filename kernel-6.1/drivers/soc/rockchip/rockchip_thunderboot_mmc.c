@@ -11,12 +11,17 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
+#include <linux/of_platform.h>
 #include <linux/platform_device.h>
-#include <linux/soc/rockchip/rockchip_decompress.h>
-#include <linux/soc/rockchip/rockchip_thunderboot_crypto.h>
+#include <linux/soc/rockchip/rockchip_thunderboot.h>
 
+#define SDMMC_CTRL		0x000
+#define SDMMC_CMDARG		0x028
+#define SDMMC_CMD		0x02c
 #define SDMMC_RINTSTS		0x044
 #define SDMMC_STATUS		0x048
+#define SDMMC_BMOD		0x080
+#define SDMMC_DBADDR		0x088
 #define SDMMC_IDSTS		0x08c
 #define SDMMC_INTR_ERROR	0xB7C2
 
@@ -26,7 +31,7 @@ static int rk_tb_mmc_thread(void *p)
 	struct platform_device *pdev = p;
 	void __iomem *regs;
 	struct resource *res;
-	struct device_node *rds, *rdd, *dma;
+	struct device_node *dma;
 	struct device *dev = &pdev->dev;
 	struct clk_bulk_data *clk_bulks;
 	int clk_num;
@@ -39,8 +44,6 @@ static int rk_tb_mmc_thread(void *p)
 		return -ENOMEM;
 	}
 
-	rds = of_parse_phandle(dev->of_node, "memory-region-src", 0);
-	rdd = of_parse_phandle(dev->of_node, "memory-region-dst", 0);
 	dma = of_parse_phandle(dev->of_node, "memory-region-idmac", 0);
 
 	clk_num = clk_bulk_get_all(&pdev->dev, &clk_bulks);
@@ -57,13 +60,17 @@ static int rk_tb_mmc_thread(void *p)
 
 	if (readl_poll_timeout(regs + SDMMC_STATUS, status,
 			       !(status & (BIT(10) | GENMASK(7, 4))), 100,
-			       500 * USEC_PER_MSEC))
+			       500 * USEC_PER_MSEC)) {
 		dev_err(dev, "Controller is occupied!\n");
+		goto out;
+	}
 
 	if (readl_poll_timeout(regs + SDMMC_IDSTS, status,
 			       !(status & GENMASK(16, 13)), 100,
-			       500 * USEC_PER_MSEC))
+			       500 * USEC_PER_MSEC)) {
 		dev_err(dev, "DMA is still running!\n");
+		goto out;
+	}
 
 	status = readl_relaxed(regs + SDMMC_RINTSTS);
 	if (status & SDMMC_INTR_ERROR) {
@@ -71,32 +78,23 @@ static int rk_tb_mmc_thread(void *p)
 		goto out;
 	}
 
-	/* Parse ramdisk addr and help start decompressing */
-	if (rds && rdd) {
-		struct resource src, dst;
-		u32 rdk_size = 0;
-		const u32 *digest_org;
+	/* Disable the DMA of the MMC controller */
+	writel(0, regs + SDMMC_CTRL);
+	writel(0, regs + SDMMC_BMOD);
+	writel(0, regs + SDMMC_DBADDR);
 
-		if (of_address_to_resource(rds, 0, &src) >= 0 &&
-		    of_address_to_resource(rdd, 0, &dst) >= 0) {
-			if (IS_ENABLED(CONFIG_ROCKCHIP_THUNDER_BOOT_CRYPTO)) {
-				of_property_read_u32(rds, "size", &rdk_size);
-				digest_org = of_get_property(rds->child, "value", NULL);
-				if (digest_org && rdk_size)
-					rk_tb_sha256((dma_addr_t)src.start, rdk_size,
-						     (void *)digest_org);
-			}
-			/*
-			 * Decompress HW driver will free reserved area of
-			 * memory-region-src.
-			 */
-			ret = rk_decom_start(GZIP_MOD, src.start,
-					     dst.start,
-					     resource_size(&dst));
-			if (ret < 0)
-				dev_err(dev, "failed to start decom\n");
-		}
-	}
+	/* Send CMD12 to stop transmission */
+	writel(0xffffffff, regs + SDMMC_RINTSTS);
+	writel(0, regs + SDMMC_CMDARG);
+	writel(0xa000414c, regs + SDMMC_CMD);
+
+	if (readl_poll_timeout(regs + SDMMC_RINTSTS, status,
+			       !(status & BIT(2)), 100,
+			       11 * USEC_PER_MSEC))
+		dev_warn(dev, "Send CMD12 timeout!\n");
+
+	rk_tb_ramdisk_compress_done();
+	rk_tb_prepare_ramdisk_decompress(dev);
 
 	/* Release idmac descriptor */
 	if (dma) {
@@ -112,8 +110,6 @@ static int rk_tb_mmc_thread(void *p)
 out:
 	clk_bulk_disable_unprepare(clk_num, clk_bulks);
 	clk_bulk_put_all(clk_num, clk_bulks);
-	of_node_put(rds);
-	of_node_put(rdd);
 	of_node_put(dma);
 	iounmap(regs);
 

@@ -43,6 +43,7 @@
 #include <linux/version.h>
 #include <linux/compat.h>
 #include <linux/rk-camera-module.h>
+#include <linux/rk_hdmirx_config.h>
 #include <media/v4l2-dv-timings.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ctrls.h>
@@ -1928,10 +1929,10 @@ static void tc35874x_get_module_inf(struct tc35874x_state *tc35874x,
 				  struct rkmodule_inf *inf)
 {
 	memset(inf, 0, sizeof(*inf));
-	strlcpy(inf->base.sensor, TC35874X_NAME, sizeof(inf->base.sensor));
-	strlcpy(inf->base.module, tc35874x->module_name,
+	strscpy(inf->base.sensor, TC35874X_NAME, sizeof(inf->base.sensor));
+	strscpy(inf->base.module, tc35874x->module_name,
 		sizeof(inf->base.module));
-	strlcpy(inf->base.lens, tc35874x->len_name, sizeof(inf->base.lens));
+	strscpy(inf->base.lens, tc35874x->len_name, sizeof(inf->base.lens));
 }
 
 static long tc35874x_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
@@ -1945,6 +1946,9 @@ static long tc35874x_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		break;
 	case RKMODULE_GET_HDMI_MODE:
 		*(int *)arg = RKMODULE_HDMIIN_MODE;
+		break;
+	case RK_HDMIRX_CMD_GET_SIGNAL_STABLE_STATUS:
+		*(int *)arg = !no_signal(sd);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -2001,6 +2005,20 @@ static long tc35874x_compat_ioctl32(struct v4l2_subdev *sd,
 			return ret;
 		}
 
+		ret = tc35874x_ioctl(sd, cmd, seq);
+		if (!ret) {
+			ret = copy_to_user(up, seq, sizeof(*seq));
+			if (ret)
+				ret = -EFAULT;
+		}
+		kfree(seq);
+		break;
+	case RK_HDMIRX_CMD_GET_SIGNAL_STABLE_STATUS:
+		seq = kzalloc(sizeof(*seq), GFP_KERNEL);
+		if (!seq) {
+			ret = -ENOMEM;
+			return ret;
+		}
 		ret = tc35874x_ioctl(sd, cmd, seq);
 		if (!ret) {
 			ret = copy_to_user(up, seq, sizeof(*seq));

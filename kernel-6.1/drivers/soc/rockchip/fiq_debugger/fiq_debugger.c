@@ -420,7 +420,7 @@ static void fiq_debugger_schedule_work(struct fiq_debugger_state *state,
 		return;
 	}
 
-	strlcpy(state->work_cmd, cmd, sizeof(state->work_cmd));
+	strscpy(state->work_cmd, cmd, sizeof(state->work_cmd));
 	spin_unlock_irqrestore(&state->work_lock, flags);
 
 	schedule_work(&state->work);
@@ -437,7 +437,7 @@ static void fiq_debugger_work(struct work_struct *work)
 
 	spin_lock_irqsave(&state->work_lock, flags);
 
-	strlcpy(work_cmd, state->work_cmd, sizeof(work_cmd));
+	strscpy(work_cmd, state->work_cmd, sizeof(work_cmd));
 	state->work_cmd[0] = '\0';
 
 	spin_unlock_irqrestore(&state->work_lock, flags);
@@ -651,7 +651,7 @@ static bool fiq_debugger_fiq_exec(struct fiq_debugger_state *state,
 			cmd++;
 		if (*cmd) {
 			char tmp_cmd[32];
-			strlcpy(tmp_cmd, cmd, sizeof(tmp_cmd));
+			strscpy(tmp_cmd, cmd, sizeof(tmp_cmd));
 			machine_restart(tmp_cmd);
 		} else {
 			machine_restart(NULL);
@@ -1061,7 +1061,11 @@ static void fiq_debugger_fiq(struct fiq_glue_handler *h,
 {
 	struct fiq_debugger_state *state =
 		container_of(h, struct fiq_debugger_state, handler);
+#ifndef CONFIG_THREAD_INFO_IN_TASK
 	unsigned int this_cpu = THREAD_INFO(svc_sp)->cpu;
+#else
+	unsigned int this_cpu = raw_smp_processor_id();
+#endif
 	bool need_irq;
 
 	need_irq = fiq_debugger_handle_uart_interrupt(state, this_cpu, regs,
@@ -1101,7 +1105,7 @@ static irqreturn_t fiq_debugger_uart_irq(int irq, void *dev)
 	fiq_debugger_handle_wakeup(state);
 
 	/* handle the debugger irq in regular context */
-	not_done = fiq_debugger_handle_uart_interrupt(state, smp_processor_id(),
+	not_done = fiq_debugger_handle_uart_interrupt(state, raw_smp_processor_id(),
 #ifdef CONFIG_NO_GKI
 					      get_irq_regs(),
 #else
@@ -1566,7 +1570,7 @@ static int fiq_debugger_probe(struct platform_device *pdev)
 			pr_err("%s: could not install nmi irq handler\n", __func__);
 			irq_clear_status_flags(state->uart_irq, IRQ_NOAUTOEN);
 			ret = request_irq(state->uart_irq, fiq_debugger_uart_irq,
-					  IRQF_NO_SUSPEND | IRQF_NOBALANCING, "debug", state);
+					  IRQF_NO_SUSPEND | IRQF_NOBALANCING | IRQF_NO_THREAD, "debug", state);
 		} else {
 			enable_nmi(state->uart_irq);
 		}

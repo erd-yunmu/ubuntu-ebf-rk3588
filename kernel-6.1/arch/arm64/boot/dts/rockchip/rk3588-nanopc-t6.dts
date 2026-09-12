@@ -54,7 +54,7 @@
 		simple-audio-card,mclk-fs = <256>;
 
 		simple-audio-card,hp-det-gpio = <&gpio1 RK_PC4 GPIO_ACTIVE_LOW>;
-		simple-audio-card,hp-pin-name = "Headphone Jack";
+		simple-audio-card,hp-pin-name = "Headphones";
 
 		simple-audio-card,widgets =
 			"Headphone", "Headphones",
@@ -262,7 +262,7 @@
 	status = "okay";
 
 	#sound-dai-cells = <1>;
-	edid-version = <3>;
+	edid-version = <2>;
 	/* Effective level used to trigger HPD: 0-low, 1-high */
 	hpd-trigger-level = <1>;
 	hdmirx-det-gpios = <&gpio1 RK_PD5 GPIO_ACTIVE_LOW>;
@@ -270,11 +270,11 @@
 	pinctrl-0 = <&hdmim1_rx &hdmirx_det>;
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
 	status = "okay";
 };
 
-&hdptxphy_hdmi1 {
+&hdptxphy1 {
 	status = "okay";
 };
 
@@ -430,7 +430,7 @@
 	vpcie3v3-supply = <&vcc_3v3_pcie20>;
 	status = "okay";
 
-	pcie@20 {
+	pcie@0,0 {
 		reg = <0x00200000 0 0 0 0>;
 		#address-cells = <3>;
 		#size-cells = <2>;
@@ -454,7 +454,7 @@
 	vpcie3v3-supply = <&vcc_3v3_pcie20>;
 	status = "okay";
 
-	pcie@40 {
+	pcie@0,0 {
 		reg = <0x00400000 0 0 0 0>;
 		#address-cells = <3>;
 		#size-cells = <2>;
@@ -471,6 +471,8 @@
 };
 
 &pcie3x4 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie30x4_clkreqn_m1>;
 	reset-gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>;
 	vpcie3v3-supply = <&vcc3v3_pcie30>;
 	status = "okay";
@@ -563,6 +565,10 @@
 
 		pcie_m2_1_pwren: pcie-m21-pwren {
 			rockchip,pins = <4 RK_PC2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		pcie30x4_clkreqn_m1: pcie30x4-clkreqn-m1 {
+			rockchip,pins = <4 RK_PB4 RK_FUNC_GPIO &pcfg_pull_down>;
 		};
 	};
 
@@ -720,7 +726,7 @@
 
 
 &display_subsystem {
-	clocks = <&hdptxphy_hdmi0>, <&hdptxphy_hdmi1>;
+	clocks = <&hdptxphy0>, <&hdptxphy1>;
 	clock-names = "hdmi0_phy_pll", "hdmi1_phy_pll";
 };
 

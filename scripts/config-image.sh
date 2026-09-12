@@ -93,6 +93,17 @@ for type in $target; do
     # Clean package cache
     chroot ${chroot_dir} /bin/bash -c "apt-get -y autoremove && apt-get -y clean && apt-get -y autoclean"
 
+    # Install Mali firmware from the kernel source and include it in the initramfs
+    mali_firmware=(../kernel-*/drivers/gpu/arm/bifrost/mali_csffw.bin)
+    if [[ ${#mali_firmware[@]} -ne 1 || ! -f ${mali_firmware[0]} ]]; then
+        echo "Error: expected exactly one Mali firmware in kernel-*"
+        exit 1
+    fi
+    mkdir -p ${chroot_dir}/usr/lib/firmware/arm/mali/arch10.8
+    cp "${mali_firmware[0]}" \
+        ${chroot_dir}/usr/lib/firmware/arm/mali/arch10.8/
+    chroot ${chroot_dir} /bin/bash -c "update-initramfs -u"
+
     # Copy kernel and initrd for the boot partition
     mkdir -p ${chroot_dir}/boot/firmware/
     cp ${chroot_dir}/boot/initrd.img-* ${chroot_dir}/boot/firmware/initrd.img

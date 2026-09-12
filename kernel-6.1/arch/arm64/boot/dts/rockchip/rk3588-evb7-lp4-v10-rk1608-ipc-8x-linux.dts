@@ -79,11 +79,15 @@
 	status = "disabled";
 };
 
-&hdptxphy_hdmi0 {
+&hdptxphy0 {
 	status = "disabled";
 };
 
-&hdptxphy_hdmi1 {
+&hdptxphy1 {
+	status = "disabled";
+};
+
+&hynitron {
 	status = "disabled";
 };
 

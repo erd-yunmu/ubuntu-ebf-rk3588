@@ -26,6 +26,7 @@
 #include <linux/delay.h>
 #include <linux/of_platform.h>
 
+
 unsigned int system_serial_low;
 EXPORT_SYMBOL(system_serial_low);
 

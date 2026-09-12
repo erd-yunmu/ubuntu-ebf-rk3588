@@ -58,10 +58,13 @@
 
 static u8 m89or101 = TRUE;
 static u8 bgt911 = FALSE;
+static u8 bgt9272 = FALSE;
 static u8 bgt9110 = FALSE;
 static u8 bgt9111 = FALSE;
 static u8 bgt970 = FALSE;
 static u8 bgt910 = FALSE;
+static u8 bgt2059 = FALSE;
+static u8 bgt928 = FALSE;
 static u8 gtp_change_x2y = TRUE;
 static u8 gtp_x_reverse = FALSE;
 static u8 gtp_y_reverse = TRUE;
@@ -1462,6 +1465,11 @@ static s32 gtp_init_panel(struct goodix_ts_data *ts)
 		cfg_info_len[0] =  CFG_GROUP_LEN(gtp_dat_gt9111);
 	}
 
+    if (bgt9272) {
+		send_cfg_buf[0] = gtp_dat_gt9272;
+		cfg_info_len[0] = CFG_GROUP_LEN(gtp_dat_gt9272);
+	}
+
 	if (bgt970) {
 		send_cfg_buf[0] = gtp_dat_9_7;
 		cfg_info_len[0] = CFG_GROUP_LEN(gtp_dat_9_7);
@@ -1470,6 +1478,16 @@ static s32 gtp_init_panel(struct goodix_ts_data *ts)
 	if (bgt910) {
 		send_cfg_buf[0] = gtp_dat_7;
 		cfg_info_len[0] = CFG_GROUP_LEN(gtp_dat_7);
+	}
+
+	if (bgt2059) {
+		send_cfg_buf[0] = gtp_dat_tpc2059;
+		cfg_info_len[0] = CFG_GROUP_LEN(gtp_dat_tpc2059);
+	}
+
+	if (bgt928) {
+		send_cfg_buf[0] = gtp_dat_gt928;
+		cfg_info_len[0] = CFG_GROUP_LEN(gtp_dat_gt928);
 	}
 
     GTP_DEBUG_FUNC();
@@ -2661,6 +2679,12 @@ static int goodix_ts_probe(struct i2c_client *client, const struct i2c_device_id
 		gtp_change_x2y = TRUE;
 		gtp_x_reverse = TRUE;
 		gtp_y_reverse = FALSE;
+	} else if (val == 9272) {
+        m89or101 = FALSE;
+        bgt9272 = TRUE;
+		gtp_change_x2y = FALSE;
+		gtp_x_reverse = FALSE;
+		gtp_y_reverse = FALSE;
 	} else if (val == 101) {
 		m89or101 = FALSE;
 		gtp_change_x2y = TRUE;
@@ -2683,6 +2707,24 @@ static int goodix_ts_probe(struct i2c_client *client, const struct i2c_device_id
 		bgt9111 = TRUE;
 		gtp_change_x2y = TRUE;
 		gtp_x_reverse = FALSE;
+		gtp_y_reverse = FALSE;
+	} else if (val == 2059) {
+		/* TPC2059 7" 1024x600 panel (Youyeetoo R1 / YY3588 DSI kits):
+		 * vendor cfg blob reports raw coordinates 1:1 with the panel.
+		 */
+		m89or101 = FALSE;
+		bgt2059 = TRUE;
+		gtp_change_x2y = FALSE;
+		gtp_x_reverse = FALSE;
+		gtp_y_reverse = FALSE;
+	} else if (val == 928) {
+		/* GT928 11.6" 1920x1080 eDP kit (Youyeetoo YY3588): sensor is
+		 * portrait-wired, swap axes and reverse X per vendor tuning.
+		 */
+		m89or101 = FALSE;
+		bgt928 = TRUE;
+		gtp_change_x2y = TRUE;
+		gtp_x_reverse = TRUE;
 		gtp_y_reverse = FALSE;
 	} else if (val == 970) {
 		m89or101 = FALSE;

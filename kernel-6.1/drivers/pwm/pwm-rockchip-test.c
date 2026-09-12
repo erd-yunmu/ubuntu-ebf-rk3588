@@ -18,10 +18,11 @@
 #define PWM_CONTROLLER_NUM_MAX	4
 #define PWM_CHANNEL_NUM_MAX	8
 
-#define PWM_WAVE_8BIT_TEST 1
+#define PWM_WAVE_BREATHING_LIGHT_8BIT_TEST 1
 
 /* 400k pwm_dclk src */
-#ifdef PWM_WAVE_8BIT_TEST
+#ifndef PWM_WAVE_PRIOD_DUTY_BOTH_UPDATE_TEST
+#ifdef PWM_WAVE_BREATHING_LIGHT_8BIT_TEST
 #define PWM_TABLE_MAX		256
 #define PWM_WIDTH_MODE		PWM_WAVE_TABLE_8BITS_WIDTH
 /* in nanoseconds */
@@ -33,6 +34,7 @@
 /* in nanoseconds */
 #define PWM_WAVE_STEP		10000
 #define PWM_WAVE_RPT		10
+#endif
 #endif
 
 struct pwm_test_data {
@@ -57,6 +59,7 @@ enum pwm_cmd_type {
 	PWM_SET_FREQ_METER,
 	PWM_SET_BIPHASIC,
 	PWM_SET_WAVE,
+	PWM_SET_FILTER,
 	PWM_GLOBAL_CTRL,
 	PWM_TEST_HELP,
 };
@@ -81,6 +84,8 @@ static enum pwm_cmd_type pwm_rockchip_test_parse_cmd(char *cmd_type)
 		return PWM_SET_BIPHASIC;
 	else if (!strcmp(cmd_type, "wave"))
 		return PWM_SET_WAVE;
+	else if (!strcmp(cmd_type, "filter"))
+		return PWM_SET_FILTER;
 	else if (!strcmp(cmd_type, "global"))
 		return PWM_GLOBAL_CTRL;
 	else if (!strcmp(cmd_type, "help"))
@@ -126,8 +131,9 @@ static void pwm_rockchip_test_help_info(void)
 	pr_info("echo capture 1 0 1000 > /dev/pwm_rockchip_misc_test\n");
 	pr_info("\n");
 	pr_info("counter mode demo:\n");
-	pr_info("echo counter 1 0 io 1000 > /dev/pwm_rockchip_misc_test\n");
-	pr_info("echo counter 1 1 cru 1000 > /dev/pwm_rockchip_misc_test\n");
+	pr_info("echo counter 1 0 io continuous 1000 > /dev/pwm_rockchip_misc_test\n");
+	pr_info("echo counter 1 1 cru continuous 1000 > /dev/pwm_rockchip_misc_test\n");
+	pr_info("echo counter 1 2 io discontinuous 5000 > /dev/pwm_rockchip_misc_test\n");
 	pr_info("\n");
 	pr_info("frequency meter mode demo:\n");
 	pr_info("echo frequency 1 2 io 1000 > /dev/pwm_rockchip_misc_test\n");
@@ -156,9 +162,16 @@ static void pwm_rockchip_test_help_info(void)
 	pr_info("\n");
 	pr_info("wave generator demo:\n");
 	pr_info("echo wave 0 1 true > /dev/pwm_rockchip_misc_test\n");
+	pr_info("[brathing light demo with 8bit table]\n");
 	pr_info("echo continuous 0 1 640000 320000 normal > /dev/pwm_rockchip_misc_test\n");
+	pr_info("[brathing light demo with 16bit table]\n");
 	pr_info("echo continuous 0 1 1000000 500000 normal > /dev/pwm_rockchip_misc_test\n");
+	pr_info("[demo for updating both period and duty]\n");
+	pr_info("echo continuous 0 1 1000 500 normal > /dev/pwm_rockchip_misc_test\n");
 	pr_info("echo enable 0 1 true > /dev/pwm_rockchip_misc_test\n");
+	pr_info("\n");
+	pr_info("filter setup demo:\n");
+	pr_info("echo filter 1 0 1000 > /dev/pwm_rockchip_misc_test\n");
 	pr_info("------------------------------------------------------------------------------------\n");
 }
 
@@ -200,11 +213,12 @@ static ssize_t pwm_rockchip_test_write(struct file *file, const char __user *buf
 	struct pwm_device *pdev;
 	struct pwm_state state;
 	struct pwm_capture cap_res;
-	struct rockchip_pwm_wave_table duty_table;
+	struct rockchip_pwm_wave_table wave_table;
 	struct rockchip_pwm_wave_config wave_config;
 	struct rockchip_pwm_biphasic_config biphasic_config;
 	enum rockchip_pwm_freq_meter_input_sel freq_input_sel;
 	enum rockchip_pwm_counter_input_sel counter_input_sel;
+	enum rockchip_pwm_counter_mode counter_mode;
 	enum rockchip_pwm_biphasic_mode biphasic_mode;
 	enum pwm_cmd_type cmd_type;
 	enum pwm_polarity polarity;
@@ -212,6 +226,7 @@ static ssize_t pwm_rockchip_test_write(struct file *file, const char __user *buf
 	unsigned long freq_hz;
 	unsigned long counter_res;
 	unsigned long biphasic_res;
+	unsigned long filter_window_ns;
 	int controller_id, channel_id;
 	int period, duty;
 #ifdef CONFIG_PWM_ROCKCHIP_ONESHOT
@@ -473,7 +488,24 @@ static ssize_t pwm_rockchip_test_write(struct file *file, const char __user *buf
 			ret = -EINVAL;
 			goto exit;
 		}
-		ret = kstrtoul(argv[3], 10, &timeout_ms);
+		if (argv[3]) {
+			if (!strcmp(argv[3], "continuous")) {
+				counter_mode = PWM_COUNTER_CONTINUOUS;
+			} else if (!strcmp(argv[3], "discontinuous")) {
+				counter_mode = PWM_COUNTER_DISCONTINUOUS;
+			} else {
+				pr_err("counter mode should be continuous or discontinuous\n");
+				ret = -EINVAL;
+				goto exit;
+			}
+		} else {
+			pr_err("failed to parse counter mode for pwm%d_%d in %s mode\n",
+			       controller_id, channel_id, cmd);
+			ret = -EINVAL;
+			goto exit;
+		}
+
+		ret = kstrtoul(argv[4], 10, &timeout_ms);
 		if (ret) {
 			pr_err("failed to parse timeout_ms for pwm%d_%d in %s mode\n",
 			       controller_id, channel_id, cmd);
@@ -481,7 +513,7 @@ static ssize_t pwm_rockchip_test_write(struct file *file, const char __user *buf
 			goto exit;
 		}
 
-		ret = rockchip_pwm_set_counter(pdev, counter_input_sel, true);
+		ret = rockchip_pwm_set_counter(pdev, counter_input_sel, counter_mode, true);
 		if (ret) {
 			pr_err("failed to enable %s mode for pwm%d_%d\n",
 			       cmd, controller_id, channel_id);
@@ -497,7 +529,7 @@ static ssize_t pwm_rockchip_test_write(struct file *file, const char __user *buf
 			return -EINVAL;
 		}
 
-		ret = rockchip_pwm_set_counter(pdev, 0, false);
+		ret = rockchip_pwm_set_counter(pdev, 0, 0, false);
 		if (ret) {
 			pr_err("failed to disable %s mode for pwm%d_%d\n",
 			       cmd, controller_id, channel_id);
@@ -627,23 +659,68 @@ static ssize_t pwm_rockchip_test_write(struct file *file, const char __user *buf
 			goto exit;
 		}
 
+#ifdef PWM_WAVE_PRIOD_DUTY_BOTH_UPDATE_TEST
+		/*
+		 * The output wave should be like:
+		 *    _   _   _   _   _
+		 *   | | | | | | | | | |
+		 * __| |_| |_| |_| |_| |_____________________________________
+		 *
+		 * |                   |                                    |
+		 * |  five 400K waves  |             delay 10ms             |
+		 * |                   |                                    |
+		 */
+		table[0] = 2500;
+		table[1] = 500000; // avoid exceeding the 16-bit table
+		table[2] = 500000;
+		table[3] = 500000;
+		table[4] = 500000;
+		table[5] = 1250;
+		table[6] = 0;
+		table[7] = 0;
+		table[8] = 0;
+		table[9] = 0;
+
+		wave_table.table = table;
+		wave_table.offset = 0;
+		wave_table.len = 10;
+
+		wave_config.wave_table = &wave_table;
+		wave_config.clk_src = PWM_SELECT_CLK_PWM;
+		wave_config.mem_clk_src = PWM_SELECT_CLK_PWM_OSC;
+		wave_config.width_mode = PWM_WAVE_TABLE_16BITS_WIDTH;
+		wave_config.update_mode = PWM_WAVE_INCREASING;
+		wave_config.enable = enable;
+		wave_config.duty_en = true;
+		wave_config.period_en = true;
+		wave_config.clk_rate = 100000000;
+		wave_config.rpt = 4;
+		wave_config.duty_max = 9;
+		wave_config.duty_min = 5;
+		wave_config.period_max = 4;
+		wave_config.period_min = 0;
+		wave_config.offset = 0;
+		wave_config.middle = 0;
+		wave_config.max_hold = 0;
+		wave_config.min_hold = 0;
+		wave_config.middle_hold = 0;
+#else
 		for (i = 0; i < PWM_TABLE_MAX; i++)
 			table[i] = i * PWM_WAVE_STEP;
-		duty_table.table = table;
-		duty_table.offset = (channel_id % 3) * PWM_TABLE_MAX;
-		duty_table.len = PWM_TABLE_MAX;
+		wave_table.table = table;
+		wave_table.offset = (channel_id % 3) * PWM_TABLE_MAX;
+		wave_table.len = PWM_TABLE_MAX;
 
-		wave_config.rpt = PWM_WAVE_RPT;
-
-		/* select the 400k clk src */
-		wave_config.clk_rate = 400000;
-		wave_config.duty_table = &duty_table;
-		wave_config.period_table = NULL;
+		wave_config.wave_table = &wave_table;
+		wave_config.clk_src = PWM_SELECT_CLK_PWM;
+		wave_config.mem_clk_src = PWM_SELECT_CLK_PWM_OSC;
+		wave_config.width_mode = PWM_WIDTH_MODE;
+		wave_config.update_mode = PWM_WAVE_INCREASING_THEN_DECREASING;
 		wave_config.enable = enable;
 		wave_config.duty_en = true;
 		wave_config.period_en = false;
-		wave_config.width_mode = PWM_WIDTH_MODE;
-		wave_config.update_mode = PWM_WAVE_INCREASING_THEN_DECREASING;
+		wave_config.clk_rate = 400000;
+		wave_config.rpt = PWM_WAVE_RPT;
 		wave_config.duty_max = (channel_id % 3 + 1) * PWM_TABLE_MAX - 1;
 		wave_config.duty_min = (channel_id % 3) * PWM_TABLE_MAX;
 		wave_config.period_max = 0;
@@ -653,6 +730,7 @@ static ssize_t pwm_rockchip_test_write(struct file *file, const char __user *buf
 		wave_config.max_hold = 3;
 		wave_config.min_hold = 0;
 		wave_config.middle_hold = 2;
+#endif
 
 		ret = rockchip_pwm_set_wave(pdev, &wave_config);
 		if (ret) {
@@ -662,8 +740,36 @@ static ssize_t pwm_rockchip_test_write(struct file *file, const char __user *buf
 			goto exit;
 		}
 
+#ifndef PWM_WAVE_PRIOD_DUTY_BOTH_UPDATE_TEST
 		pr_info("%s %s mode for pwm%d_%d: table_len = %d, table_step = %d\n",
 			argv[2], cmd, controller_id, channel_id, PWM_TABLE_MAX, PWM_WAVE_STEP);
+#endif
+		break;
+	case PWM_SET_FILTER:
+		pdev = pwm_rockchip_test_get_pwm_dev(argv[0], argv[1],
+						     &controller_id, &channel_id);
+		if (!pdev) {
+			pr_err("failed to get pwm device\n");
+			ret = -EINVAL;
+			goto exit;
+		}
+		ret = kstrtoul(argv[2], 10, &filter_window_ns);
+		if (ret) {
+			pr_err("failed to parse filter_window_ns for pwm%d_%d in %s configuration\n",
+			       controller_id, channel_id, cmd);
+			ret = -EINVAL;
+			goto exit;
+		}
+
+		ret = rockchip_pwm_set_filter(pdev, filter_window_ns);
+		if (ret) {
+			pr_err("failed to set %s for pwm%d_%d\n",
+			       cmd, controller_id, channel_id);
+			return -EINVAL;
+		}
+
+		pr_info("set %s for pwm%d_%d: filter_window = %ldns\n",
+			cmd, controller_id, channel_id, filter_window_ns);
 		break;
 	case PWM_GLOBAL_CTRL:
 		if (!argv[0]) {

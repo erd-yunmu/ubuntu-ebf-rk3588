@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2023 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2023 Rockchip Electronics Co., Ltd.
  *
  */
 #include "rk628.h"
@@ -42,8 +42,12 @@
 /* r,g,b color temp div coef, range [-128,128] for 10bit data */
 #define PQ_CSC_TEMP_OFFSET_DIV_COEF		2
 
+#ifndef MAX
 #define	MAX(a, b)				((a) > (b) ? (a) : (b))
+#endif
+#ifndef MIN
 #define	MIN(a, b)				((a) < (b) ? (a) : (b))
+#endif
 #define	CLIP(x, min_v, max_v)			MIN(MAX(x, min_v), max_v)
 
 enum rk_pq_csc_mode {
@@ -80,6 +84,8 @@ enum rk_pq_csc_mode {
 	RK_PQ_CSC_RGBL2RGBL,                   /* RGB LIMIT->RGB LIMIT */
 	RK_PQ_CSC_RGB2RGB,                     /* RGB FULL->RGB FULL */
 	RK_PQ_CSC_YUV2RGB_2020,                /* YUV 2020 FULL->RGB  2020 FULL */
+	RK_PQ_CSC_YUV2RGB_2020_LIMIT2FULL,     /* YUV 2020 LIMIT->RGB  2020 FULL */
+	RK_PQ_CSC_YUV2RGB_2020_LIMIT,          /* YUV 2020 LIMIT->RGB  2020 LIMIT */
 	RK_PQ_CSC_RGB2YUV2020_LIMIT2FULL,      /* BT2020RGBLIMIT -> BT2020YUVFULL */
 	RK_PQ_CSC_RGB2YUV2020_LIMIT,           /* BT2020RGBLIMIT -> BT2020YUVLIMIT */
 	RK_PQ_CSC_RGB2YUV2020_FULL2LIMIT,      /* BT2020RGBFULL -> BT2020YUVLIMIT */
@@ -713,6 +719,27 @@ static const struct rk_pq_csc_dc_coef rk_dc_csc_table_adobe_yuv_limit_to_yuv_lim
 	-64, -512, -512,
 	64, 512, 512
 };
+// 2020 YUV LIMIT -> RGB FULL
+static const struct rk_pq_csc_coef rk_csc_table_identity_yuv_limit_to_rgb_full_2020 = {
+	1196, 0, 1724,
+	1196, -192, -668,
+	1196, 2200, 0,
+};
+static const struct rk_pq_csc_dc_coef rk_dc_csc_table_identity_yuv_limit_to_rgb_full_2020 = {
+	-64, -512, -512,
+	0, 0, 0
+};
+
+// 2020 YUV LIMIT -> RGB LIMIT
+static const struct rk_pq_csc_coef rk_csc_table_identity_yuv_limit_to_rgb_limit_2020 = {
+	1024, 0, 1476,
+	1024, -165, -572,
+	1024, 1884, 0,
+};
+static const struct rk_pq_csc_dc_coef rk_dc_csc_table_identity_yuv_limit_to_rgb_limit_2020 = {
+	-64, -512, -512,
+	64, 64, 64
+};
 /*
  *CSC Param Struct
  */
@@ -979,6 +1006,22 @@ static const struct rk_csc_mode_coef g_mode_csc_coef[] = {
 		&rk_dc_csc_table_identity_yuv_to_rgb_2020,
 		{
 			OPTM_CS_E_XV_YCC_2020, OPTM_CS_E_RGB_2020, true, true
+		}
+	},
+	{
+		RK_PQ_CSC_YUV2RGB_2020_LIMIT2FULL, "YUV2020 L->RGB2020 F",
+		&rk_csc_table_identity_yuv_limit_to_rgb_full_2020,
+		&rk_dc_csc_table_identity_yuv_limit_to_rgb_full_2020,
+		{
+			OPTM_CS_E_XV_YCC_2020, OPTM_CS_E_RGB_2020, false, true
+		}
+	},
+	{
+		RK_PQ_CSC_YUV2RGB_2020_LIMIT, "YUV2020 L->RGB2020 L",
+		&rk_csc_table_identity_yuv_limit_to_rgb_limit_2020,
+		&rk_dc_csc_table_identity_yuv_limit_to_rgb_limit_2020,
+		{
+			OPTM_CS_E_XV_YCC_2020, OPTM_CS_E_RGB_2020, false, false
 		}
 	},
 	{
@@ -1564,7 +1607,7 @@ static int rockchip_calc_post_csc(struct rk628 *rk628, struct post_csc_coef *csc
 	return ret;
 }
 
-static u8 rk628_csc_color_space_convert(u8 in_color_space, u8 format)
+u8 rk628_csc_color_space_convert(u8 in_color_space, u8 format)
 {
 	switch (in_color_space) {
 	case HDMIRX_XVYCC601:
@@ -1589,8 +1632,9 @@ static u8 rk628_csc_color_space_convert(u8 in_color_space, u8 format)
 		return OPTM_CS_E_UNKNOWN;
 	}
 }
+EXPORT_SYMBOL(rk628_csc_color_space_convert);
 
-static u8 rk628_get_output_color_space(struct rk628 *rk628, u8 input_color_space)
+u8 rk628_get_output_color_space(struct rk628 *rk628, u8 input_color_space)
 {
 	switch (input_color_space) {
 	case OPTM_CS_E_XV_YCC_601:
@@ -1599,7 +1643,7 @@ static u8 rk628_get_output_color_space(struct rk628 *rk628, u8 input_color_space
 		return rk628->tx_mode ? OPTM_CS_E_RGB : OPTM_CS_E_XV_YCC_709;
 	case OPTM_CS_E_XV_YCC_2020:
 	case OPTM_CS_E_RGB_2020:
-		return rk628->tx_mode ? OPTM_CS_E_RGB_2020 : OPTM_CS_E_XV_YCC_709;
+		return rk628->tx_mode ? OPTM_CS_E_RGB_2020 : OPTM_CS_E_XV_YCC_2020;
 	case OPTM_CS_E_RGB_ADOBE:
 	case OPTM_CS_E_YUV_ADOBE:
 		return rk628->tx_mode ? OPTM_CS_E_RGB_ADOBE : OPTM_CS_E_XV_YCC_709;
@@ -1607,6 +1651,7 @@ static u8 rk628_get_output_color_space(struct rk628 *rk628, u8 input_color_space
 		return OPTM_CS_E_XV_YCC_709;
 	}
 }
+EXPORT_SYMBOL(rk628_get_output_color_space);
 
 static void rk628_post_process_csc(struct rk628 *rk628,
 				bool is_input_full_range, bool is_output_full_range)

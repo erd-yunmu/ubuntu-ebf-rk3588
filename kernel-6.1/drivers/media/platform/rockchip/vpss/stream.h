@@ -4,8 +4,23 @@
 #ifndef _RKVPSS_STREAM_H
 #define _RKVPSS_STREAM_H
 
+#include <linux/clk.h>
+#include <linux/delay.h>
+#include <linux/pm_runtime.h>
+#include <linux/slab.h>
+#include <media/v4l2-common.h>
+#include <media/v4l2-event.h>
+#include <media/v4l2-fh.h>
+#include <media/v4l2-ioctl.h>
+#include <media/v4l2-mc.h>
+#include <media/v4l2-subdev.h>
+#include <media/videobuf2-dma-contig.h>
+#include <media/videobuf2-dma-sg.h>
+#include <uapi/linux/rk-video-format.h>
+
 #include <linux/interrupt.h>
-#include "common.h"
+
+#define STREAM_OUT_REQ_BUFS_MIN 0
 
 struct rkvpss_stream;
 
@@ -47,6 +62,10 @@ struct stream_config {
 		u32 hc_offs;
 		u32 vy_offs;
 		u32 vc_offs;
+		u32 phase_hy;
+		u32 phase_hc;
+		u32 phase_vy;
+		u32 phase_vc;
 		u32 hy_size;
 		u32 hc_size;
 		u32 hy_offs_mi;
@@ -63,6 +82,10 @@ struct stream_config {
 		u32 hc_offs_shd;
 		u32 vy_offs_shd;
 		u32 vc_offs_shd;
+		u32 phase_hy_shd;
+		u32 phase_hc_shd;
+		u32 phase_vy_shd;
+		u32 phase_vc_shd;
 		u32 hy_size_shd;
 		u32 hc_size_shd;
 		u32 hy_offs_mi_shd;
@@ -81,6 +104,10 @@ struct stream_config {
 		u32 v_offs_shd;
 		u32 h_size_shd;
 		u32 v_size_shd;
+		u32 ch_4_5_offs;
+		u32 ch_4_5_size;
+		u32 ch_4_5_offs_shd;
+		u32 ch_4_5_size_shd;
 	} crop;
 	struct {
 		u32 ctrl;
@@ -147,6 +174,8 @@ struct rkvpss_online_unite_params {
  * streaming: stream start flag
  * stopping: stream stop flag
  * linked: link enable flag
+ * alpha: argb a value
+ * avg_scl_down : CH0 and CH2 can use average scale down, 1-16 scale range
  */
 struct rkvpss_stream {
 	struct rkvpss_device *dev;
@@ -171,6 +200,9 @@ struct rkvpss_stream {
 	struct rkvpss_online_unite_params unite_params;
 
 	int id;
+	u32 alpha;
+	u32 fbc_head_size;
+	u32 skip_frame;
 	bool streaming;
 	bool stopping;
 	bool linked;
@@ -178,12 +210,16 @@ struct rkvpss_stream {
 	bool is_crop_upd;
 	bool is_mf_upd;
 	bool is_pause;
+	bool is_attach_info;
+	bool rockit_on;
+	bool avg_scl_down;
 };
 
 /* rkvpss stream device */
 struct rkvpss_stream_vdev {
 	struct rkvpss_stream stream[RKVPSS_OUTPUT_MAX];
 	atomic_t refcnt;
+	u32 wrap_line;
 };
 
 void rkvpss_cmsc_config(struct rkvpss_device *dev, bool sync);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
 /*
  * Rockchip NAND Flash controller driver.
- * Copyright (C) 2020 Rockchip Inc.
+ * Copyright (C) 2020 Rockchip Electronics Co., Ltd.
  * Author: Yifeng Zhao <yifeng.zhao@rock-chips.com>
  */
 
@@ -421,12 +421,12 @@ static int rk_nfc_setup_interface(struct nand_chip *chip, int target,
 	u32 rate, tc2rw, trwpw, trw2c;
 	u32 temp;
 
-	if (target < 0)
-		return 0;
-
 	timings = nand_get_sdr_timings(conf);
 	if (IS_ERR(timings))
 		return -EOPNOTSUPP;
+
+	if (target < 0)
+		return 0;
 
 	if (IS_ERR(nfc->nfc_clk))
 		rate = clk_get_rate(nfc->ahb_clk);
@@ -657,9 +657,16 @@ static int rk_nfc_write_page_hwecc(struct nand_chip *chip, const u8 *buf,
 
 	dma_data = dma_map_single(nfc->dev, (void *)nfc->page_buf,
 				  mtd->writesize, DMA_TO_DEVICE);
+	if (dma_mapping_error(nfc->dev, dma_data))
+		return -ENOMEM;
+
 	dma_oob = dma_map_single(nfc->dev, nfc->oob_buf,
 				 ecc->steps * oob_step,
 				 DMA_TO_DEVICE);
+	if (dma_mapping_error(nfc->dev, dma_oob)) {
+		dma_unmap_single(nfc->dev, dma_data, mtd->writesize, DMA_TO_DEVICE);
+		return -ENOMEM;
+	}
 
 	reinit_completion(&nfc->done);
 	writel(INT_DMA, nfc->regs + nfc->cfg->int_en_off);
@@ -773,9 +780,17 @@ static int rk_nfc_read_page_hwecc(struct nand_chip *chip, u8 *buf, int oob_on,
 	dma_data = dma_map_single(nfc->dev, nfc->page_buf,
 				  mtd->writesize,
 				  DMA_FROM_DEVICE);
+	if (dma_mapping_error(nfc->dev, dma_data))
+		return -ENOMEM;
+
 	dma_oob = dma_map_single(nfc->dev, nfc->oob_buf,
 				 ecc->steps * oob_step,
 				 DMA_FROM_DEVICE);
+	if (dma_mapping_error(nfc->dev, dma_oob)) {
+		dma_unmap_single(nfc->dev, dma_data, mtd->writesize,
+				 DMA_FROM_DEVICE);
+		return -ENOMEM;
+	}
 
 	/*
 	 * The first blocks (4, 8 or 16 depending on the device)
@@ -795,8 +810,10 @@ static int rk_nfc_read_page_hwecc(struct nand_chip *chip, u8 *buf, int oob_on,
 			  dma_oob);
 	ret = wait_for_completion_timeout(&nfc->done,
 					  msecs_to_jiffies(100));
-	if (!ret)
+	if (!ret) {
+		print_hex_dump(KERN_WARNING, "reg:", DUMP_PREFIX_OFFSET, 4, 4, nfc->regs, 0x84, 0);
 		dev_warn(nfc->dev, "read: wait dma done timeout.\n");
+	}
 	/*
 	 * Whether the DMA transfer is completed or not. The driver
 	 * needs to check the NFC`s status register to see if the data
@@ -1091,6 +1108,9 @@ static int rk_nfc_attach_chip(struct nand_chip *chip)
 	chip->ecc.read_page_raw = rk_nfc_read_page_raw;
 	chip->ecc.read_page = rk_nfc_read_page_hwecc;
 	chip->ecc.read_oob = rk_nfc_read_oob;
+
+	/* The controller does not support automatic chip-select. */
+	chip->legacy.select_chip = rk_nfc_select_chip;
 
 	return 0;
 }
@@ -1464,6 +1484,9 @@ static int __maybe_unused rk_nfc_resume(struct device *dev)
 	ret = rk_nfc_enable_clks(dev, nfc);
 	if (ret)
 		return ret;
+
+	rk_nfc_hw_init(nfc);
+	nfc->cur_ecc = 0;
 
 	/* Reset NAND chip if VCC was powered off. */
 	list_for_each_entry(rknand, &nfc->chips, node) {

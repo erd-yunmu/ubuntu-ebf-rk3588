@@ -2,7 +2,7 @@
 /*
  * rk730.c -- RK730 ALSA SoC Audio driver
  *
- * Copyright (C) 2022 Rockchip Electronics Co.,Ltd
+ * Copyright (C) 2022 Rockchip Electronics Co., Ltd.
  */
 
 #include <linux/module.h>
@@ -50,10 +50,20 @@ enum rk730_chop_freq {
 	RK730_CHOP_FREQ_800KHZ,
 };
 
+enum rk730_hpf_center_freq {
+	RK730_HPF_CENTER_FREQ_3_79HZ,
+	RK730_HPF_CENTER_FREQ_60HZ,
+	RK730_HPF_CENTER_FREQ_243KHZ,
+	RK730_HPF_CENTER_FREQ_493KHZ,
+};
+
 struct rk730_priv {
 	struct regmap *regmap;
 	struct clk *mclk;
+	unsigned int sysclk;
 	atomic_t mix_mode;
+	bool fixed_mclk_fs;
+	bool force_bias_on;
 };
 
 /* ADC Digital Volume */
@@ -141,6 +151,21 @@ static const struct snd_kcontrol_new rk730_out2_switch =
 static SOC_ENUM_SINGLE_DECL(ana_ldo_volt_enum, RK730_LDO,
 			    4, ana_ldo_volt_text);
 
+static const char * const adc_sdo_sel_tx_text[] = {
+	"ADCL ADCR", "ADCL ADCR DACL DACR", "ADCL DACL", "ADCL DACR",
+	"ADCR DACL", "ADCR DACR",           "DACL DACR",
+};
+
+static SOC_ENUM_SINGLE_DECL(adc_sdo_sel_tx_enum, RK730_DI2S_TXCR2,
+			    5, adc_sdo_sel_tx_text);
+
+static const char *const hpf_cf_texts[] = {
+	"3.79Hz", "60Hz", "243Hz", "493Hz"
+};
+
+static const struct soc_enum hpf_cf_enum =
+	SOC_ENUM_SINGLE(RK730_DADC_FILTER, 4, 4, hpf_cf_texts);
+
 static int rk730_pll_event(struct snd_soc_dapm_widget *w,
 			   struct snd_kcontrol *kcontrol, int event)
 {
@@ -216,10 +241,8 @@ static int rk730_sdin_event(struct snd_soc_dapm_widget *w,
 					      RK730_DI2S_RXCMD_TSD_RXS_MASK,
 					      RK730_DI2S_RXCMD_TSD_RXS_EN);
 		snd_soc_component_update_bits(component, RK730_DTOP_DIGEN_CLKE,
-					      RK730_DTOP_DIGEN_CLKE_I2SRX_CKE_MASK |
-					      RK730_DTOP_DIGEN_CLKE_I2SRX_EN_MASK,
-					      RK730_DTOP_DIGEN_CLKE_I2SRX_CKE_EN |
-					      RK730_DTOP_DIGEN_CLKE_I2SRX_EN);
+					      RK730_DTOP_DIGEN_CLKE_I2SRX_CKE_MASK,
+					      RK730_DTOP_DIGEN_CLKE_I2SRX_CKE_EN);
 		snd_soc_component_update_bits(component, RK730_DTOP_DIGEN_CLKE,
 					      RK730_DTOP_DIGEN_CLKE_DAC_CKE_MASK |
 					      RK730_DTOP_DIGEN_CLKE_DAC_EN_MASK,
@@ -234,10 +257,8 @@ static int rk730_sdin_event(struct snd_soc_dapm_widget *w,
 					      RK730_DTOP_DIGEN_CLKE_DAC_CKE_DIS |
 					      RK730_DTOP_DIGEN_CLKE_DAC_DIS);
 		snd_soc_component_update_bits(component, RK730_DTOP_DIGEN_CLKE,
-					      RK730_DTOP_DIGEN_CLKE_I2SRX_CKE_MASK |
-					      RK730_DTOP_DIGEN_CLKE_I2SRX_EN_MASK,
-					      RK730_DTOP_DIGEN_CLKE_I2SRX_CKE_DIS |
-					      RK730_DTOP_DIGEN_CLKE_I2SRX_DIS);
+					      RK730_DTOP_DIGEN_CLKE_I2SRX_CKE_MASK,
+					      RK730_DTOP_DIGEN_CLKE_I2SRX_CKE_DIS);
 		snd_soc_component_update_bits(component, RK730_DI2S_RXCMD_TSD,
 					      RK730_DI2S_RXCMD_TSD_RXS_MASK,
 					      RK730_DI2S_RXCMD_TSD_RXS_DIS);
@@ -265,18 +286,14 @@ static int rk730_sdout_event(struct snd_soc_dapm_widget *w,
 					      RK730_DTOP_DIGEN_CLKE_I2STX_CKE_EN);
 		usleep_range(20000, 21000);
 		snd_soc_component_update_bits(component, RK730_DTOP_DIGEN_CLKE,
-					      RK730_DTOP_DIGEN_CLKE_ADC_EN_MASK |
-					      RK730_DTOP_DIGEN_CLKE_I2STX_EN_MASK,
-					      RK730_DTOP_DIGEN_CLKE_ADC_EN |
-					      RK730_DTOP_DIGEN_CLKE_I2STX_EN);
+					      RK730_DTOP_DIGEN_CLKE_ADC_EN_MASK,
+					      RK730_DTOP_DIGEN_CLKE_ADC_EN);
 	} else {
 		dev_dbg(component->dev, "%s off\n", __func__);
 
 		snd_soc_component_update_bits(component, RK730_DTOP_DIGEN_CLKE,
-					      RK730_DTOP_DIGEN_CLKE_ADC_EN_MASK |
-					      RK730_DTOP_DIGEN_CLKE_I2STX_EN_MASK,
-					      RK730_DTOP_DIGEN_CLKE_ADC_DIS |
-					      RK730_DTOP_DIGEN_CLKE_I2STX_DIS);
+					      RK730_DTOP_DIGEN_CLKE_ADC_EN_MASK,
+					      RK730_DTOP_DIGEN_CLKE_ADC_DIS);
 		usleep_range(50, 60);
 		snd_soc_component_update_bits(component, RK730_DTOP_DIGEN_CLKE,
 					      RK730_DTOP_DIGEN_CLKE_ADC_CKE_MASK |
@@ -475,6 +492,7 @@ static const struct snd_kcontrol_new rk730_snd_controls[] = {
 	SOC_ENUM("Mic Bias Volt", micbias_volt_enum),
 	SOC_ENUM("DAC HPF Center Freq", dac_hfp_center_freq_enum),
 	SOC_ENUM("ADC CAPACITY TRIM", adc_capacity_trim_enum),
+	SOC_ENUM("ADC SDO SEL TX", adc_sdo_sel_tx_enum),
 	SOC_SINGLE("ADC Volume Bypass Switch", RK730_DTOP_VUCTL, 7, 1, 0),
 	SOC_SINGLE("DAC Volume Bypass Switch", RK730_DTOP_VUCTL, 6, 1, 0),
 	SOC_SINGLE("ADC Fade Switch", RK730_DTOP_VUCTL, 5, 1, 0),
@@ -485,6 +503,8 @@ static const struct snd_kcontrol_new rk730_snd_controls[] = {
 	SOC_SINGLE("DAC Zero Crossing Switch", RK730_DTOP_VUCTL, 0, 1, 0),
 	SOC_SINGLE("MIC1N / MIC2P Exchanged Switch", RK730_MIC_BOOST_2, 7, 1, 0),
 	SOC_SINGLE("ADC CHOP EN", RK730_ADC_2, 4, 1, 0),
+	SOC_ENUM("ADC HPF Cutoff Frequency", hpf_cf_enum),
+	SOC_DOUBLE("ADC HPF Switch", 0x004e, 7, 6, 1, 0),
 };
 
 static const struct snd_soc_dapm_widget rk730_dapm_widgets[] = {
@@ -607,16 +627,130 @@ static const struct snd_soc_dapm_route rk730_dapm_routes[] = {
 	{"MIC2", NULL, "MICBIAS"},
 };
 
+struct _coeff_div {
+	int mclk;
+	int rate;
+	char syspll_channel;
+	char fsclk_channel;
+	char refclk_channel;
+};
+
+/* codec hifi mclk clock divider coefficients */
+static const struct _coeff_div coeff_div[] = {
+	/* mclk */
+	{12288000, 48000, 0x0, 0x1, 0x0},
+	{12288000, 96000, 0x0, 0x1, 0x0},
+	{12288000, 192000, 0x0, 0x1, 0x0},
+	{12288000, 44100, 0x1, 0x1, 0x0},
+	{12288000, 88200, 0x1, 0x1, 0x0},
+	{12288000, 176000, 0x1, 0x1, 0x0},
+	{12288000, 8000, 0x2, 0x3, 0x0},
+	{12288000, 16000, 0x2, 0x3, 0x0},
+	{12288000, 32000, 0x2, 0x3, 0x0},
+	{12288000, 64000, 0x2, 0x3, 0x0},
+	{12288000, 128000, 0x2, 0x3, 0x0},
+
+	{12000000, 48000, 0x3, 0x1, 0x0},
+	{12000000, 96000, 0x3, 0x1, 0x0},
+	{12000000, 192000, 0x3, 0x1, 0x0},
+	{12000000, 44100, 0x4, 0x1, 0x0},
+	{12000000, 88200, 0x4, 0x1, 0x0},
+	{12000000, 176000, 0x4, 0x1, 0x0},
+	{12000000, 8000, 0x5, 0x3, 0x0},
+	{12000000, 16000, 0x5, 0x3, 0x0},
+	{12000000, 32000, 0x5, 0x3, 0x0},
+	{12000000, 64000, 0x5, 0x3, 0x0},
+	{12000000, 128000, 0x5, 0x3, 0x0},
+
+	{24000000, 48000, 0x9, 0x1, 0x1},
+	{24000000, 96000, 0x9, 0x1, 0x1},
+	{24000000, 192000, 0x9, 0x1, 0x1},
+	{24000000, 44100, 0xa, 0x1, 0x1},
+	{24000000, 88200, 0xa, 0x1, 0x1},
+	{24000000, 176000, 0xa, 0x1, 0x1},
+	{24000000, 8000, 0xb, 0x3, 0x1},
+	{24000000, 16000, 0xb, 0x3, 0x1},
+	{24000000, 32000, 0xb, 0x3, 0x1},
+	{24000000, 64000, 0xb, 0x3, 0x1},
+	{24000000, 128000, 0xb, 0x3, 0x1},
+
+	{6144000, 48000, 0xc, 0x1, 0x0},
+	{6144000, 96000, 0xc, 0x1, 0x0},
+	{6144000, 192000, 0xc, 0x1, 0x0},
+	{11289600, 44100, 0xd, 0x1, 0x0},
+	{11289600, 88200, 0xd, 0x1, 0x0},
+	{11289600, 176000, 0xd, 0x1, 0x0},
+	{8192000, 8000, 0xe, 0x3, 0x0},
+	{8192000, 16000, 0xe, 0x3, 0x0},
+	{8192000, 32000, 0xe, 0x3, 0x0},
+	{8192000, 64000, 0xe, 0x3, 0x0},
+	{8192000, 128000, 0xe, 0x3, 0x0},
+
+	/* uncommon sample rate groups */
+	{12288000, 11025, 0x1, 0x1, 0x0},
+	{12288000, 22050, 0x1, 0x1, 0x0},
+	{12000000, 11025, 0x4, 0x1, 0x0},
+	{12000000, 22050, 0x4, 0x1, 0x0},
+	{24000000, 11025, 0xa, 0x1, 0x0},
+	{24000000, 22050, 0xa, 0x1, 0x0},
+	{11289600, 11025, 0xd, 0x1, 0x0},
+	{11289600, 22050, 0xd, 0x1, 0x0},
+};
+
+static inline int get_coeff(int mclk, int rate)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(coeff_div); i++) {
+		if (coeff_div[i].rate == rate && coeff_div[i].mclk == mclk)
+			return i;
+	}
+	return -EINVAL;
+}
+
+struct _coeff_clk {
+	int mclk;
+	int rate;
+};
+
+/* codec selects the required mclk and sets it by itself  */
+static const struct _coeff_clk coeff_clk[] = {
+	/* mclks */
+	{12288000, 48000},
+	{12288000, 96000},
+	{12288000, 192000},
+	{11289600, 44100},
+	{11289600, 88200},
+	{11289600, 176000},
+	{8192000, 8000},
+	{8192000, 16000},
+	{8192000, 32000},
+	{8192000, 64000},
+	{8192000, 128000},
+	/* uncommon sample rate groups */
+	{11289600, 11025},
+	{11289600, 22050},
+};
+
+static inline int get_coeff_clk(int rate)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(coeff_clk); i++) {
+		if (coeff_clk[i].rate == rate)
+			return coeff_clk[i].mclk;
+	}
+	return -EINVAL;
+}
+
 static unsigned int samplerate_to_bit(unsigned int samplerate)
 {
 	switch (samplerate) {
 	case 8000:
 	case 11025:
-	case 12000:
 		return 0;
 	case 16000:
 	case 22050:
-	case 24000:
 		return 1;
 	case 32000:
 	case 44100:
@@ -640,28 +774,82 @@ static int rk730_dai_hw_params(struct snd_pcm_substream *substream,
 			       struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
+	struct rk730_priv *rk730 = snd_soc_component_get_drvdata(component);
 	unsigned int rate;
+	int coeff;
 
-	switch (params_format(params)) {
-	case SNDRV_PCM_FORMAT_S16_LE:
-		snd_soc_component_update_bits(component, RK730_DI2S_RXCR2,
-					      RK730_DI2S_RXCR2_VDW_MASK,
-					      RK730_DI2S_RXCR2_VDW(16));
-		snd_soc_component_update_bits(component, RK730_DI2S_TXCR2,
-					      RK730_DI2S_TXCR2_VDW_MASK,
-					      RK730_DI2S_TXCR2_VDW(16));
-		break;
-	case SNDRV_PCM_FORMAT_S24_LE:
-	case SNDRV_PCM_FORMAT_S32_LE:
-		snd_soc_component_update_bits(component, RK730_DI2S_RXCR2,
-					      RK730_DI2S_RXCR2_VDW_MASK,
-					      RK730_DI2S_RXCR2_VDW(24));
-		snd_soc_component_update_bits(component, RK730_DI2S_TXCR2,
-					      RK730_DI2S_TXCR2_VDW_MASK,
-					      RK730_DI2S_TXCR2_VDW(24));
-		break;
-	default:
-		return -EINVAL;
+	if (!rk730->fixed_mclk_fs) {
+		rk730->sysclk = get_coeff_clk(params_rate(params));
+		if ((int)rk730->sysclk < 0) {
+			dev_err(component->dev,
+				"Unable to lookup coeff clk with sample rate %dHz\n",
+				params_rate(params));
+			return -EINVAL;
+		}
+		dev_dbg(component->dev, "%s: Lookup mclk:%d for rate:%d\n",
+			 __func__, rk730->sysclk, params_rate(params));
+
+		if (clk_set_rate(rk730->mclk, rk730->sysclk) < 0) {
+			dev_err(component->dev,
+				"Unable to set mclk %dHz\n", rk730->sysclk);
+			return -EINVAL;
+		}
+	}
+
+	coeff = get_coeff(rk730->sysclk, params_rate(params));
+	if (coeff < 0)
+		coeff = get_coeff(rk730->sysclk / 2, params_rate(params));
+	if (coeff < 0)
+		coeff = get_coeff(rk730->sysclk * 2, params_rate(params));
+	if (coeff < 0) {
+		dev_err(component->dev,
+			"Unable to configure sample rate %dHz with %dHz MCLK\n",
+			params_rate(params), rk730->sysclk);
+		return coeff;
+	}
+	dev_dbg(component->dev, "%s:index %d  mclk=%d rate=%d\n",
+		 __func__, coeff, coeff_div[coeff].mclk, coeff_div[coeff].rate);
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		switch (params_format(params)) {
+		case SNDRV_PCM_FORMAT_S16_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_RXCR2,
+						      RK730_DI2S_RXCR2_VDW_MASK,
+						      RK730_DI2S_RXCR2_VDW(16));
+			break;
+		case SNDRV_PCM_FORMAT_S24_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_RXCR2,
+						      RK730_DI2S_RXCR2_VDW_MASK,
+						      RK730_DI2S_RXCR2_VDW(24));
+			break;
+		case SNDRV_PCM_FORMAT_S32_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_RXCR2,
+						      RK730_DI2S_RXCR2_VDW_MASK,
+						      RK730_DI2S_RXCR2_VDW(32));
+			break;
+		default:
+			return -EINVAL;
+		}
+	} else {
+		switch (params_format(params)) {
+		case SNDRV_PCM_FORMAT_S16_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_TXCR2,
+						      RK730_DI2S_TXCR2_VDW_MASK,
+						      RK730_DI2S_TXCR2_VDW(16));
+			break;
+		case SNDRV_PCM_FORMAT_S24_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_TXCR2,
+						      RK730_DI2S_TXCR2_VDW_MASK,
+						      RK730_DI2S_TXCR2_VDW(24));
+			break;
+		case SNDRV_PCM_FORMAT_S32_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_TXCR2,
+						      RK730_DI2S_TXCR2_VDW_MASK,
+						      RK730_DI2S_TXCR2_VDW(32));
+			break;
+		default:
+			return -EINVAL;
+		}
 	}
 
 	rate = samplerate_to_bit(params_rate(params));
@@ -674,6 +862,10 @@ static int rk730_dai_hw_params(struct snd_pcm_substream *substream,
 					      RK730_DTOP_ADCSRT_MASK,
 					      RK730_DTOP_ADCSRT(rate));
 	}
+	snd_soc_component_write(component, RK730_SYSPLL_3,
+				coeff_div[coeff].syspll_channel << 4 |
+				coeff_div[coeff].fsclk_channel << 2 |
+				coeff_div[coeff].refclk_channel << 0);
 	return 0;
 }
 
@@ -740,36 +932,59 @@ static int rk730_dai_set_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	return ret;
 }
 
-static int rk730_dai_mute(struct snd_soc_dai *codec_dai, int mute, int stream)
+static int rk730_digital_mute_dac(struct snd_soc_dai *dai, int mute, int stream)
 {
-	struct snd_soc_component *component = codec_dai->component;
+	struct snd_soc_component *component = dai->component;
 
-	dev_dbg(component->dev, "%s %d stream %d\n", __func__, mute, stream);
-	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		if (mute) {
-			snd_soc_component_update_bits(component, RK730_DADC_SEL,
-						      RK730_DADC_DAC_MUTE_MASK,
-						      RK730_DADC_DAC_MUTE);
-		} else {
-			snd_soc_component_update_bits(component, RK730_DADC_SEL,
-						      RK730_DADC_DAC_MUTE_MASK,
-						      RK730_DADC_DAC_UNMUTE);
-		}
+	if (mute) {
+		snd_soc_component_update_bits(component, RK730_DADC_SEL,
+					      RK730_DADC_DAC_MUTE_MASK,
+					      RK730_DADC_DAC_MUTE);
+		snd_soc_component_update_bits(component, RK730_DTOP_DIGEN_CLKE,
+					      RK730_DTOP_DIGEN_CLKE_I2SRX_EN_MASK,
+					      RK730_DTOP_DIGEN_CLKE_I2SRX_DIS);
 	} else {
-		if (mute) {
-			snd_soc_component_update_bits(component, RK730_DADC_SEL,
-						      RK730_DADC_ADC_MUTE_MASK,
-						      RK730_DADC_ADC_L_MUTE |
-						      RK730_DADC_ADC_R_MUTE);
-		} else {
-			snd_soc_component_update_bits(component, RK730_DADC_SEL,
-						      RK730_DADC_ADC_MUTE_MASK,
-						      RK730_DADC_ADC_L_UNMUTE |
-						      RK730_DADC_ADC_R_UNMUTE);
-		}
+		snd_soc_component_update_bits(component, RK730_DTOP_DIGEN_CLKE,
+					      RK730_DTOP_DIGEN_CLKE_I2SRX_EN_MASK,
+					      RK730_DTOP_DIGEN_CLKE_I2SRX_EN);
+		snd_soc_component_update_bits(component, RK730_DADC_SEL,
+					      RK730_DADC_DAC_MUTE_MASK,
+					      RK730_DADC_DAC_UNMUTE);
 	}
-
 	return 0;
+}
+
+static int rk730_digital_mute_adc(struct snd_soc_dai *dai, int mute, int stream)
+{
+	struct snd_soc_component *component = dai->component;
+
+	if (mute) {
+		snd_soc_component_update_bits(component, RK730_DADC_SEL,
+					      RK730_DADC_ADC_MUTE_MASK,
+					      RK730_DADC_ADC_L_MUTE |
+					      RK730_DADC_ADC_R_MUTE);
+		snd_soc_component_update_bits(component, RK730_DTOP_DIGEN_CLKE,
+					      RK730_DTOP_DIGEN_CLKE_I2STX_EN_MASK,
+					      RK730_DTOP_DIGEN_CLKE_I2STX_DIS);
+	} else {
+
+		snd_soc_component_update_bits(component, RK730_DTOP_DIGEN_CLKE,
+					      RK730_DTOP_DIGEN_CLKE_I2STX_EN_MASK,
+					      RK730_DTOP_DIGEN_CLKE_I2STX_EN);
+		snd_soc_component_update_bits(component, RK730_DADC_SEL,
+					      RK730_DADC_ADC_MUTE_MASK,
+					      RK730_DADC_ADC_L_UNMUTE |
+					      RK730_DADC_ADC_R_UNMUTE);
+	}
+	return 0;
+}
+
+static int rk730_dai_mute(struct snd_soc_dai *dai, int mute, int stream)
+{
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK)
+		return rk730_digital_mute_dac(dai, mute, stream);
+	else
+		return rk730_digital_mute_adc(dai, mute, stream);
 }
 
 static int rk730_set_bias_level(struct snd_soc_component *component,
@@ -810,6 +1025,19 @@ static int rk730_set_bias_level(struct snd_soc_component *component,
 	return 0;
 }
 
+/*
+ * Note that this should be called from init rather than from hw_params.
+ */
+static int rk730_set_dai_sysclk(struct snd_soc_dai *codec_dai,
+				 int clk_id, unsigned int freq, int dir)
+{
+	struct snd_soc_component *component = codec_dai->component;
+	struct rk730_priv *rk730 = snd_soc_component_get_drvdata(component);
+
+	rk730->sysclk = freq;
+	return 0;
+}
+
 #define RK730_RATES	SNDRV_PCM_RATE_8000_192000
 #define RK730_FORMATS	(SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE | \
 			 SNDRV_PCM_FMTBIT_S32_LE)
@@ -818,6 +1046,7 @@ static const struct snd_soc_dai_ops rk730_dai_ops = {
 	.set_fmt = rk730_dai_set_fmt,
 	.hw_params = rk730_dai_hw_params,
 	.mute_stream = rk730_dai_mute,
+	.set_sysclk = rk730_set_dai_sysclk,
 };
 
 static struct snd_soc_dai_driver rk730_dai = {
@@ -832,7 +1061,7 @@ static struct snd_soc_dai_driver rk730_dai = {
 	.capture = {
 		 .stream_name = "HiFi Capture",
 		 .channels_min = 1,
-		 .channels_max = 2,
+		 .channels_max = 8,
 		 .rates = RK730_RATES,
 		 .formats = RK730_FORMATS,
 	},
@@ -845,18 +1074,36 @@ static int rk730_reset(struct snd_soc_component *component)
 
 	clk_prepare_enable(rk730->mclk);
 	udelay(10);
+	snd_soc_component_update_bits(component, RK730_DTOP_SRT,
+				      RK730_DTOP_SRST_MASK,
+				      RK730_DTOP_SRST_EN);
+	snd_soc_component_update_bits(component, RK730_DTOP_SRT,
+				      RK730_DTOP_SRST_MASK,
+				      RK730_DTOP_SRST_DIS);
 	/* WA: Initial micbias default, ADC stopped with micbias(>2.5v) */
 	snd_soc_component_update_bits(component, RK730_MIC_BIAS,
 				      RK730_MIC_BIAS_VOLT_MASK,
-				      RK730_MIC_BIAS_VOLT_2_2V);
+				      RK730_MIC_BIAS_VOLT_2_8V);
 	/* PF: Use the chop 400kHz for better ADC noise performance */
 	snd_soc_component_update_bits(component, RK730_MIC_BOOST_3,
 				      RK730_MIC_BOOST_3_MIC_CHOP_MASK,
-				      RK730_MIC_BOOST_3_MIC_CHOP(RK730_CHOP_FREQ_400KHZ));
+				      RK730_MIC_BOOST_3_MIC_CHOP(RK730_CHOP_FREQ_200KHZ));
 	snd_soc_component_update_bits(component, RK730_ADC_PGA_BLOCK_1,
 				      RK730_ADC_PGA_BLOCK_1_PGA_CHOP_MASK,
-				      RK730_ADC_PGA_BLOCK_1_PGA_CHOP(RK730_CHOP_FREQ_400KHZ));
-	snd_soc_component_write(component, RK730_SYSPLL_3, 0x64);
+				      RK730_ADC_PGA_BLOCK_1_PGA_CHOP(RK730_CHOP_FREQ_200KHZ));
+	snd_soc_component_update_bits(component, RK730_SYSPLL_2,
+				      RK730_SYSPLL_2_RVCO_ISEL_MASK,
+				      RK730_SYSPLL_2_RVCO_ISEL_ADD4UA);
+	snd_soc_component_update_bits(component, RK730_ADC_2, RK730_ADC_2_CHOP_EN_MASK,
+				      RK730_ADC_2_CHOP_EN);
+	snd_soc_component_update_bits(component, RK730_DAC_0, RK730_DAC_0_SCLK_EDGE_SEL_MASK,
+				      RK730_DAC_0_SCLK_EDGE_RISE);
+	snd_soc_component_update_bits(component, RK730_DADC_FILTER,
+				      RK730_DADC_FILTER_HPFL_EN_MASK |
+				      RK730_DADC_FILTER_HPFR_EN_MASK |
+				      RK730_DADC_FILTER_HPF_CF_MASK,
+				      RK730_DADC_FILTER_HPFL_EN | RK730_DADC_FILTER_HPFR_EN |
+				      RK730_DADC_FILTER_HPF_CF(RK730_HPF_CENTER_FREQ_60HZ));
 	clk_disable_unprepare(rk730->mclk);
 
 	return 0;
@@ -865,6 +1112,7 @@ static int rk730_reset(struct snd_soc_component *component)
 static int rk730_probe(struct snd_soc_component *component)
 {
 	struct rk730_priv *rk730 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
 	int ret = 0;
 
 	regcache_mark_dirty(rk730->regmap);
@@ -879,6 +1127,12 @@ static int rk730_probe(struct snd_soc_component *component)
 	}
 
 	rk730_reset(component);
+	if (rk730->force_bias_on) {
+		snd_soc_dapm_force_enable_pin(dapm, "ANA LDO");
+		snd_soc_dapm_force_enable_pin(dapm, "HK VAG BUF");
+		snd_soc_dapm_force_enable_pin(dapm, "MICBIAS");
+		snd_soc_dapm_sync(dapm);
+	}
 
 	return ret;
 }
@@ -1019,6 +1273,12 @@ static int rk730_i2c_probe(struct i2c_client *i2c,
 	rk730->mclk = devm_clk_get(&i2c->dev, "mclk");
 	if (IS_ERR(rk730->mclk))
 		return PTR_ERR(rk730->mclk);
+
+	rk730->fixed_mclk_fs =
+		device_property_read_bool(&i2c->dev, "rockchip,mclk-fs-fixed");
+
+	rk730->force_bias_on =
+		device_property_read_bool(&i2c->dev, "rockchip,force-bias-on");
 
 	i2c_set_clientdata(i2c, rk730);
 

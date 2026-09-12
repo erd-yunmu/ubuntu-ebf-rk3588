@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *
- * (C) COPYRIGHT 2010-2022 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2010-2024 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -26,18 +26,19 @@
 #ifndef _KBASE_PM_H_
 #define _KBASE_PM_H_
 
-#include "mali_kbase_hwaccess_pm.h"
+#include <linux/types.h>
 
-#define PM_ENABLE_IRQS       0x01
-#define PM_HW_ISSUES_DETECT  0x02
+struct kbase_device;
 
-#ifdef CONFIG_MALI_ARBITER_SUPPORT
-/* In the case that the GPU was granted by the Arbiter, it will have
+#define PM_ENABLE_IRQS 0x01
+#define PM_HW_ISSUES_DETECT 0x02
+
+/* Case 1: the GPU was granted by the Arbiter, it will have
  * already been reset. The following flag ensures it is not reset
  * twice.
+ * Case 2: GPU already in reset state after power on, then no soft-reset is needed.
  */
-#define PM_NO_RESET          0x04
-#endif
+#define PM_NO_RESET 0x04
 
 /**
  * kbase_pm_init - Initialize the power management framework.
@@ -104,7 +105,6 @@ void kbase_pm_term(struct kbase_device *kbdev);
  */
 void kbase_pm_context_active(struct kbase_device *kbdev);
 
-
 /** Handler codes for doing kbase_pm_context_active_handle_suspend() */
 enum kbase_pm_suspend_handler {
 	/** A suspend is not expected/not possible - this is the same as
@@ -144,7 +144,20 @@ enum kbase_pm_suspend_handler {
  *
  * Return: 0 on success, non-zero othrewise.
  */
-int kbase_pm_context_active_handle_suspend(struct kbase_device *kbdev, enum kbase_pm_suspend_handler suspend_handler);
+int kbase_pm_context_active_handle_suspend(struct kbase_device *kbdev,
+					   enum kbase_pm_suspend_handler suspend_handler);
+
+/**
+ * kbase_pm_context_active_handle_suspend_locked - Same as kbase_pm_context_active_handle_suspend(),
+ *                                                 except that pm.lock is held by the caller.
+ *
+ * @kbdev:     The kbase device structure for the device (must be a valid pointer)
+ * @suspend_handler: The handler code for how to handle a suspend that might occur
+ *
+ * Return: 0 on success, non-zero othrewise.
+ */
+int kbase_pm_context_active_handle_suspend_locked(struct kbase_device *kbdev,
+						  enum kbase_pm_suspend_handler suspend_handler);
 
 /**
  * kbase_pm_context_idle - Decrement the reference count of active contexts.
@@ -156,6 +169,14 @@ int kbase_pm_context_active_handle_suspend(struct kbase_device *kbdev, enum kbas
  * code should ensure that it does not access the GPU's registers.
  */
 void kbase_pm_context_idle(struct kbase_device *kbdev);
+
+/**
+ * kbase_pm_context_idle_locked - Same as kbase_pm_context_idle(), except that
+ *                                pm.lock is held by the caller.
+ *
+ * @kbdev:     The kbase device structure for the device (must be a valid pointer)
+ */
+void kbase_pm_context_idle_locked(struct kbase_device *kbdev);
 
 /* NOTE: kbase_pm_is_active() is in mali_kbase.h, because it is an inline
  * function
@@ -239,7 +260,7 @@ int kbase_pm_driver_suspend(struct kbase_device *kbdev);
  * Despite kbase_pm_resume(), it will ignore to update Arbiter
  * status if MALI_ARBITER_SUPPORT is enabled.
  */
-void kbase_pm_driver_resume(struct kbase_device *kbdev,	bool arb_gpu_start);
+void kbase_pm_driver_resume(struct kbase_device *kbdev, bool arb_gpu_start);
 
 #ifdef CONFIG_MALI_ARBITER_SUPPORT
 /**
