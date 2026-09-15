@@ -1,0 +1,3 @@
+KERNEL=="mpp_service", GROUP="video", MODE="0660"
+KERNEL=="rga", GROUP="video", MODE="0660"
+SUBSYSTEM=="dma_heap", GROUP="video", MODE="0660"

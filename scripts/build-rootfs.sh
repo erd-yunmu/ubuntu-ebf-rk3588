@@ -36,7 +36,7 @@ export DEBIAN_FRONTEND=noninteractive
 # Debootstrap options
 arch=arm64
 release=jammy
-mirror=http://mirrors.aliyun.com/ubuntu-ports/
+mirror=https://mirrors.aliyun.com/ubuntu-ports/
 chroot_dir=rootfs
 overlay_dir=../overlay
 
@@ -182,8 +182,10 @@ mv /tmp/swapfile /swapfile
 EOF
 
 # Install arm64 deb package
-cp -r ../packages/arm64/* ${chroot_dir}/tmp
-chroot ${chroot_dir} /bin/bash -c "dpkg -i /tmp/*.deb"
+mkdir -p ${chroot_dir}/tmp
+find ../packages/arm64/ -type f -name "*.deb" -exec cp -f {} ${chroot_dir}/tmp/ \;
+chroot ${chroot_dir} /bin/bash -c "apt-get install -y libglib2.0-dev libunwind-dev libdw-dev liblzma-doc"
+chroot ${chroot_dir} /bin/bash -c "dpkg -i /tmp/*.deb || { apt-mark hold ffmpeg; apt-get -y --fix-broken install; }"
 chroot ${chroot_dir} /bin/bash -c "apt-mark hold ffmpeg"
 rm -f ${chroot_dir}/tmp/*.deb
 
@@ -261,6 +263,9 @@ cp ${overlay_dir}/etc/netplan/01-network-manager-all.yaml ${chroot_dir}/etc/netp
 # Fix the problem of network interface order change
 cp ${overlay_dir}/etc/udev/rules.d/80-net-setup-link.rules ${chroot_dir}/etc/udev/rules.d/80-net-setup-link.rules
 
+# Allow users in the video group to access Rockchip MPP, RGA and DMA heaps
+cp ${overlay_dir}/etc/udev/rules.d/99-rockchip-mpp.rules ${chroot_dir}/etc/udev/rules.d/99-rockchip-mpp.rules
+
 # Use gzip compression for the initrd
 cp ${overlay_dir}/etc/initramfs-tools/conf.d/compression.conf ${chroot_dir}/etc/initramfs-tools/conf.d/compression.conf
 
@@ -290,6 +295,13 @@ mount -t proc /proc ${chroot_dir}/proc
 mount -t sysfs /sys ${chroot_dir}/sys
 mount -o bind /dev ${chroot_dir}/dev
 mount -o bind /dev/pts ${chroot_dir}/dev/pts
+
+# Copy Chromium RKMPP local packages into the desktop rootfs
+chromium_rkmpp_package_dir=../packages/chromium-rkmpp
+chromium_rkmpp_chroot_dir=${chroot_dir}/tmp/chromium-rkmpp
+mkdir -p ${chromium_rkmpp_chroot_dir}
+find ${chromium_rkmpp_package_dir}/ -maxdepth 1 -type f -name "*.deb" \
+    -exec cp -f {} ${chromium_rkmpp_chroot_dir}/ \;
 
 # Copy the isolated Mesa package into the desktop rootfs
 cp ../packages/mesa/*.deb ${chroot_dir}/tmp/
@@ -322,6 +334,11 @@ ibus-table-quick-classic fonts-arphic-ukai ibus-table-cangjie5 fonts-noto-cjk-ex
 thunderbird-locale-zh-hant language-pack-gnome-zh-hans ibus-table-cangjie3 ibus-table-wubi \
 thunderbird-locale-zh-hans ibus-libpinyin libreoffice-help-zh-tw libreoffice-l10n-zh-tw
 
+# Install Chromium RKMPP local packages and resolve dependencies with APT
+if compgen -G "/tmp/chromium-rkmpp/*.deb" > /dev/null; then
+    apt-get install -y /tmp/chromium-rkmpp/*.deb
+fi
+
 # Remove cloud-init and landscape-common
 apt-get -y purge cloud-init landscape-common cryptsetup-initramfs
 
@@ -329,6 +346,16 @@ apt-get -y purge cloud-init landscape-common cryptsetup-initramfs
 apt-get -y autoremove && apt-get -y clean && apt-get -y autoclean
 
 EOF
+
+# Set the default GNOME favorites and compile the system dconf database
+mkdir -p ${chroot_dir}/etc/dconf/profile ${chroot_dir}/etc/dconf/db/local.d
+cp ${overlay_dir}/etc/dconf/profile/user ${chroot_dir}/etc/dconf/profile/user
+cp ${overlay_dir}/etc/dconf/db/local.d/00-favorite-apps \
+    ${chroot_dir}/etc/dconf/db/local.d/00-favorite-apps
+chroot ${chroot_dir} /bin/bash -c "dconf update"
+
+# Remove staged Chromium RKMPP packages from the rootfs
+rm -rf ${chromium_rkmpp_chroot_dir}
 
 # Hack for GDM to restart on first HDMI hotplug
 mkdir -p ${chroot_dir}/usr/lib/scripts
