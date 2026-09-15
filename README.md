@@ -55,6 +55,13 @@ debootstrap flex libssl-dev bc rsync kmod cpio xz-utils fakeroot parted \
 udev dosfstools uuid-runtime git-lfs device-tree-compiler python3 fdisk \
 python-is-python3
 ```
+### 配置 ARM64 跨架构构建环境
+在 x86_64/amd64 主机上构建 ARM64 rootfs 前，需要启用 QEMU binfmt：
+```bash
+sudo update-binfmts --enable qemu-aarch64
+update-binfmts --display qemu-aarch64
+```
+确认输出中包含 `qemu-aarch64 (enabled)`构建脚本通过 binfmt 执行 ARM64 程序。
 
 ## 获取源码
 ```bash
