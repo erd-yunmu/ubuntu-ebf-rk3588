@@ -49,14 +49,25 @@ mkdir -p ${chroot_dir}
 # Detect current system architecture
 HOST_ARCH=$(uname -m)
 
-if [[ "${HOST_ARCH}" == "x86_64" ]]; then
-    echo "Detected x86_64 architecture, using QEMU cross compilation"
-    debootstrap --foreign --arch ${arch} ${release} ${chroot_dir} ${mirror}
-    sudo cp /usr/bin/qemu-aarch64-static ${chroot_dir}/usr/bin/
-    chroot ${chroot_dir} /debootstrap/debootstrap --second-stage
-elif [[ "${HOST_ARCH}" == "aarch64" ]] || [[ "${HOST_ARCH}" == "arm64" ]]; then
-    debootstrap --arch "${arch}" "${release}" "${chroot_dir}" "${mirror}"
-fi
+case "${HOST_ARCH}" in
+    x86_64|amd64)
+        if [[ ! -r /proc/sys/fs/binfmt_misc/qemu-aarch64 ]] || 
+           ! grep -q '^enabled' /proc/sys/fs/binfmt_misc/qemu-aarch64; then
+            echo "ARM64 binfmt is not enabled. Install qemu-user-static and enable qemu-aarch64." >&2
+            exit 1
+        fi
+        echo "Detected x86_64 architecture, using binfmt/QEMU"
+        debootstrap --no-merged-usr --arch="${arch}" "${release}" "${chroot_dir}" "${mirror}"
+        ;;
+    aarch64|arm64)
+        echo "Detected ARM64 architecture, using native debootstrap"
+        debootstrap --no-merged-usr --arch="${arch}" "${release}" "${chroot_dir}" "${mirror}"
+        ;;
+    *)
+        echo "Unsupported host architecture: ${HOST_ARCH}" >&2
+        exit 1
+        ;;
+esac
 
 # Use a more complete sources.list file 
 cat > ${chroot_dir}/etc/apt/sources.list << EOF
