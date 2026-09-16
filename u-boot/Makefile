@@ -85,6 +85,13 @@ else
   Q = @
 endif
 
+ifeq ("$(origin FWVER)", "command line")
+  PLAT_FW_VERSION := $(FWVER)
+endif
+ifeq ("$(origin SPL_FWVER)", "command line")
+  PLAT_SPL_FW_VERSION := $(SPL_FWVER)
+endif
+
 # If the user is running make -s (silent mode), suppress echoing of
 # commands
 
@@ -365,7 +372,7 @@ KBUILD_AFLAGS   := -D__ASSEMBLY__
 
 # Read UBOOTRELEASE from include/config/uboot.release (if it exists)
 UBOOTRELEASE = $(shell cat include/config/uboot.release 2> /dev/null)
-UBOOTVERSION = $(VERSION)$(if $(PATCHLEVEL),.$(PATCHLEVEL)$(if $(SUBLEVEL),.$(SUBLEVEL)))$(EXTRAVERSION)
+UBOOTVERSION = next-dev
 
 export VERSION PATCHLEVEL SUBLEVEL UBOOTRELEASE UBOOTVERSION
 export ARCH CPU BOARD VENDOR SOC CPUDIR BOARDDIR
@@ -389,6 +396,9 @@ export RCS_FIND_IGNORE := \( -name SCCS -o -name BitKeeper -o -name .svn -o    \
 			  -prune -o
 export RCS_TAR_IGNORE := --exclude SCCS --exclude BitKeeper --exclude .svn \
 			 --exclude CVS --exclude .pc --exclude .hg --exclude .git
+KBUILD_CFLAGS += $(call cc-option,-Wno-address)
+KBUILD_CFLAGS += $(call cc-option,-Wno-maybe-uninitialized)
+KBUILD_CFLAGS += $(call cc-option,-Wno-enum-int-mismatch)
 
 # ===========================================================================
 # Rules shared between *config targets and build targets
@@ -1011,7 +1021,7 @@ U_BOOT_ITS = $(subst ",,$(CONFIG_SPL_FIT_SOURCE))
 else
 ifneq ($(CONFIG_SPL_FIT_GENERATOR),"")
 U_BOOT_ITS := u-boot.its
-$(U_BOOT_ITS): FORCE
+$(U_BOOT_ITS): u-boot FORCE
 	$(srctree)/$(CONFIG_SPL_FIT_GENERATOR) \
 	$(patsubst %,arch/$(ARCH)/dts/%.dtb,$(subst ",,$(CONFIG_OF_LIST))) > $@
 endif
@@ -1049,7 +1059,7 @@ u-boot-dtb.img u-boot.img u-boot.kwb u-boot.pbl u-boot-ivt.img: \
 		$(if $(CONFIG_SPL_LOAD_FIT),u-boot-nodtb.bin dts/dt.dtb,u-boot.bin) FORCE
 	$(call if_changed,mkimage)
 
-u-boot.itb: u-boot-nodtb.bin dts/dt.dtb $(U_BOOT_ITS) FORCE
+u-boot.itb: u-boot-nodtb.bin dts/dt.dtb u-boot.dtb $(U_BOOT_ITS) FORCE
 	$(call if_changed,mkfitimage)
 
 u-boot-spl.kwb: u-boot.img spl/u-boot-spl.bin FORCE
@@ -1369,6 +1379,12 @@ ifeq ($(CONFIG_SUPPORT_USBPLUG),)
 define filechk_version.h
 	(echo \#define PLAIN_VERSION \"$(UBOOTRELEASE)\"; \
 	echo \#define U_BOOT_VERSION \"U-Boot \" PLAIN_VERSION; \
+	if [ -n "$(PLAT_SPL_FW_VERSION)" ]; then \
+		echo \#define BUILD_SPL_TAG \"$(PLAT_SPL_FW_VERSION)\"; \
+	fi; \
+	if [ -n "$(PLAT_FW_VERSION)" ]; then \
+        echo \#define BUILD_TAG \"$(PLAT_FW_VERSION)\"; \
+	fi; \
 	echo \#define CC_VERSION_STRING \"$$(LC_ALL=C $(CC) --version | head -n 1)\"; \
 	echo \#define LD_VERSION_STRING \"$$(LC_ALL=C $(LD) --version | head -n 1)\"; )
 endef
@@ -1376,6 +1392,12 @@ else
 define filechk_version.h
         (echo \#define PLAIN_VERSION \"$(UBOOTRELEASE)\"; \
         echo \#define U_BOOT_VERSION \"USB-PLUG \" PLAIN_VERSION; \
+        if [ -n "$(PLAT_SPL_FW_VERSION)" ]; then \
+            echo \#define BUILD_SPL_TAG \"$(PLAT_SPL_FW_VERSION)\"; \
+        fi; \
+        if [ -n "$(PLAT_FW_VERSION)" ]; then \
+            echo \#define BUILD_TAG \"$(PLAT_FW_VERSION)\"; \
+        fi; \
         echo \#define CC_VERSION_STRING \"$$(LC_ALL=C $(CC) --version | head -n 1)\"; \
         echo \#define LD_VERSION_STRING \"$$(LC_ALL=C $(LD) --version | head -n 1)\"; )
 endef

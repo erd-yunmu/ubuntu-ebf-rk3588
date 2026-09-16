@@ -10819,7 +10819,7 @@ _u_boot_list_2_driver_2_rockchip_secure_otp:
 .LASF427:
 	.string	"buffer"
 .LASF251:
-	.string	"UCLASS_EINK_DISPLAY"
+	.string	"UCLASS_EBOOK_DISPLAY"
 .LASF202:
 	.string	"UCLASS_PANEL_BACKLIGHT"
 .LASF230:

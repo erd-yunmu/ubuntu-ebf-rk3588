@@ -48,6 +48,7 @@ SCRIPT_SPL="${SRCTREE}/scripts/spl.sh"
 SCRIPT_UBOOT="${SRCTREE}/scripts/uboot.sh"
 SCRIPT_LOADER="${SRCTREE}/scripts/loader.sh"
 SCRIPT_DECOMP="${SRCTREE}/scripts/decomp.sh"
+SCRIPT_CHECKCONFIG="${SRCTREE}/scripts/check-rkconfig.sh"
 CC_FILE=".cc"
 REP_DIR="./rep"
 #########################################################################################################
@@ -191,6 +192,16 @@ function process_args()
 				ARG_SPL_BIN="spl/u-boot-spl.bin"
 				shift 1
 				;;
+			--spl-fwver)
+				ARG_FIT_FWVER="${ARG_FIT_FWVER} --spl-fwver $2"
+				ARG_SPL_FWVER="SPL_FWVER=$2"
+				shift 2
+				;;
+			--fwver)
+				ARG_FIT_FWVER="${ARG_FIT_FWVER} --fwver $2"
+				ARG_FWVER="FWVER=$2"
+				shift 2
+				;;
 			--uboot|--fdt|--optee|--mcu|--bl31) # uboot.img components
 				mkdir -p ${REP_DIR}
 				if [ ! -f $2 ]; then
@@ -312,7 +323,7 @@ function select_chip_info()
 	#  - PX30, PX3SE
 	#  - RK????, RK????X
 	#  - RV????
-	CHIP_PATTERN='^CONFIG_ROCKCHIP_[R,P][X,V,K][0-9ESX]{1,5}'
+	CHIP_PATTERN='^CONFIG_ROCKCHIP_[R,P][X,V,K][0-9ESXB]{1,5}'
 	RKCHIP=`egrep -o ${CHIP_PATTERN} .config`
 
 	# default
@@ -545,8 +556,8 @@ function pack_uboot_itb_image()
 		cp ${RKBIN}/${BL31_ELF} bl31.elf
 		if grep BL32_OPTION -A 1 ${INI} | grep SEC=1 ; then
 			cp ${RKBIN}/${BL32_BIN} tee.bin
-			TEE_OFFSET=`grep BL32_OPTION -A 3 ${INI} | grep ADDR= | awk -F "=" '{ printf $2 }' | tr -d '\r'`
-			TEE_ARG="-t ${TEE_OFFSET}"
+			TEE_ADDR=`grep BL32_OPTION -A 3 ${INI} | grep ADDR= | awk -F "=" '{ printf $2 }' | tr -d '\r'`
+			TEE_ARG="-t ${TEE_ADDR}"
 		fi
 	else
 		# TOS
@@ -560,13 +571,32 @@ function pack_uboot_itb_image()
 			echo "WARN: No tee bin"
 		fi
 		if [ ! -z "${TOSTA}" -o ! -z "${TOS}" ]; then
-			TEE_OFFSET=`filt_val "ADDR" ${INI}`
-			if [ "${TEE_OFFSET}" == "" ]; then
-				TEE_OFFSET=0x8400000
+			TEE_ADDR=`filt_val "ADDR" ${INI}`
+			if [ "${TEE_ADDR}" == "" ]; then
+				DRAM_BASE=`sed -n "/CONFIG_SYS_SDRAM_BASE=/s/CONFIG_SYS_SDRAM_BASE=//p" ${srctree}/include/autoconf.mk|tr -d '\r'`
+				TEE_ADDR="0x"$(echo "obase=16;$((DRAM_BASE+0x8400000))"|bc)
 			fi
-			TEE_ARG="-t ${TEE_OFFSET}"
+			TEE_ARG="-t ${TEE_ADDR}"
 		fi
 	fi
+
+	# Inits
+	for ((i=0; i<5; i++))
+	do
+		INIT_BIN="init${i}.bin"
+		INIT_IDX="INIT${i}"
+		ENABLED=`awk -F "," '/'${INIT_IDX}'=/  { printf $3 }' ${INI} | tr -d ' '`
+		if [ "${ENABLED}" == "enabled" -o "${ENABLED}" == "okay" ]; then
+			NAME=`awk -F "," '/'${INIT_IDX}'=/ { printf $1 }' ${INI} | tr -d ' ' | awk -F "=" '{ print $2 }'`
+			OFFS=`awk -F "," '/'${INIT_IDX}'=/ { printf $2 }' ${INI} | tr -d ' '`
+			cp ${RKBIN}/${NAME} ${INIT_BIN}
+			if [ -z ${OFFS} ]; then
+				echo "ERROR: No ${INIT_BIN} address in ${INI}"
+				exit 1
+			fi
+			INIT_ARG=${INIT_ARG}" -i${i} ${OFFS}"
+		fi
+	done
 
 	# MCUs
 	for ((i=0; i<5; i++))
@@ -615,9 +645,13 @@ function pack_uboot_itb_image()
 	done
 
 	# COMPRESSION
-	COMPRESSION=`awk -F"," '/COMPRESSION=/  { printf $1 }' ${INI} | tr -d ' ' | cut -c 13-`
-	if [ ! -z "${COMPRESSION}" -a "${COMPRESSION}" != "none" ]; then
-		COMPRESSION_ARG="-c ${COMPRESSION}"
+	if grep -q '^CONFIG_IMAGE_GZIP=y' .config ; then
+		COMPRESSION_ARG="-c gzip"
+	else
+		COMPRESSION=`awk -F"," '/COMPRESSION=/  { printf $1 }' ${INI} | tr -d ' ' | cut -c 13-`
+		if [ ! -z "${COMPRESSION}" -a "${COMPRESSION}" != "none" ]; then
+			COMPRESSION_ARG="-c ${COMPRESSION}"
+		fi
 	fi
 
 	if [ -d ${REP_DIR} ]; then
@@ -633,7 +667,7 @@ function pack_uboot_itb_image()
 		if [[ ${SPL_FIT_GENERATOR} == *.py ]]; then
 			${SPL_FIT_GENERATOR} u-boot.dtb > u-boot.its
 		else
-			${SPL_FIT_GENERATOR} ${TEE_ARG} ${COMPRESSION_ARG} ${MCU_ARG} ${LOAD_ARG} > u-boot.its
+			${SPL_FIT_GENERATOR} ${TEE_ARG} ${COMPRESSION_ARG} ${INIT_ARG} ${MCU_ARG} ${LOAD_ARG} > u-boot.its
 		fi
 	fi
 
@@ -720,11 +754,6 @@ function pack_fit_image()
 	if ! which dtc >/dev/null 2>&1 ; then
 		echo "ERROR: No 'dtc', please: apt-get install device-tree-compiler"
 		exit 1
-	elif [ "${ARM64_TRUSTZONE}" == "y" ]; then
-		if ! which python2 >/dev/null 2>&1 ; then
-			echo "ERROR: No python2"
-			exit 1
-		fi
 	fi
 
 	# If we don't plan to have uboot in uboot.img in case of: SPL => Trust => Kernel, creating empty files.
@@ -742,7 +771,7 @@ function pack_fit_image()
 
 function handle_args_late()
 {
-	ARG_LIST_FIT="${ARG_LIST_FIT} --ini-trust ${INI_TRUST} --ini-loader ${INI_LOADER}"
+	ARG_LIST_FIT="${ARG_LIST_FIT} --ini-trust ${INI_TRUST} --ini-loader ${INI_LOADER} ${ARG_FIT_FWVER}"
 }
 
 function clean_files()
@@ -768,6 +797,9 @@ function pack_images()
 
 function finish()
 {
+	# check special config
+	${SCRIPT_CHECKCONFIG}
+
 	echo
 	if [ "${ARG_BOARD}" == "" ]; then
 		echo "Platform ${RKCHIP_LABEL} is build OK, with exist .config"
@@ -785,7 +817,7 @@ select_ini_file
 handle_args_late
 sub_commands
 clean_files
-make PYTHON=python2 CROSS_COMPILE=${TOOLCHAIN} all --jobs=${JOB}
+make ${ARG_SPL_FWVER} ${ARG_FWVER} CROSS_COMPILE=${TOOLCHAIN} all --jobs=${JOB}
 pack_images
 finish
 echo ${TOOLCHAIN}

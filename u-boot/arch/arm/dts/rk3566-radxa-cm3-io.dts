@@ -41,9 +41,48 @@
 		regulator-boot-on;
 		regulator-always-on;
 	};
+
+	pi_led_green: pi-led-green {
+		u-boot,dm-pre-reloc;
+		compatible = "regulator-fixed";
+		regulator-name = "pi_led_green";
+		gpio = <&gpio4 RK_PA4 GPIO_ACTIVE_LOW>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	pwr_led_red: pwr-led-red {
+		u-boot,dm-pre-reloc;
+		compatible = "regulator-fixed";
+		regulator-name = "pwr_led_red";
+		gpio = <&gpio4 RK_PB7 GPIO_ACTIVE_LOW>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	adc-keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 0>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		u-boot,dm-spl;
+		status = "okay";
+
+		volumeup-key {
+			u-boot,dm-spl;
+			linux,code = <KEY_VOLUMEUP>;
+			label = "volume up";
+			press-threshold-microvolt = <9>;
+		};
+	};
 };
 
 &gpio1 {
+	u-boot,dm-pre-reloc;
+	status = "okay";
+};
+
+&gpio4 {
 	u-boot,dm-pre-reloc;
 	status = "okay";
 };

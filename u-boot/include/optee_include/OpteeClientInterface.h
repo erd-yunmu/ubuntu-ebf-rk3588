@@ -18,6 +18,22 @@ enum RK_OEM_OTP_KEYID {
 	RK_OEM_OTP_KEYMAX
 };
 
+enum RK_HDCP_KEYID {
+	RK_HDCP_KEY0 = 0,
+	RK_HDCP_KEY1 = 1,
+	RK_HDCP_KEYMAX
+};
+
+enum RK_ESCK_KEYID {
+	RK_ESCK_KEY0 = 0,
+	RK_ESCK_KEYMAX
+};
+
+enum RK_FW_KEYID {
+	RK_FW_KEY0 = 0,
+	RK_FW_KEYMAX
+};
+
 /* Crypto mode */
 enum RK_CIPIHER_MODE {
 	RK_CIPHER_MODE_ECB = 0,
@@ -43,6 +59,14 @@ enum RK_CRYPTO_ALGO {
 	RK_ALGO_ALGO_MAX
 };
 
+enum RK_DICE_TYPE {
+	RK_DICE_UDSCERTS = 0,
+	RK_DICE_CERTCHAIN,
+	RK_DICE_ED25519_PUB,
+	RK_DICE_ED25519_PRI,
+	RK_DICE_MAX
+};
+
 typedef struct {
 	uint32_t	algo;
 	uint32_t	mode;
@@ -66,6 +90,11 @@ typedef struct {
 #define ATTEST_UUID_SIZE     (ATAP_HEX_UUID_LEN+1)
 #define ATTEST_CA_OUT_SIZE     256
 
+void optee_client_init(void);
+uint32_t trusty_set_dice_data(enum RK_DICE_TYPE type,
+			      uint8_t *data, uint32_t data_size);
+uint32_t trusty_get_dice_data(enum RK_DICE_TYPE type,
+			      uint8_t *data, uint32_t *data_size);
 uint32_t trusty_read_rollback_index(uint32_t slot, uint64_t *value);
 uint32_t trusty_write_rollback_index(uint32_t slot, uint64_t value);
 uint32_t trusty_read_permanent_attributes(uint8_t *attributes, uint32_t size);
@@ -86,9 +115,11 @@ uint32_t trusty_read_vbootkey_hash(uint32_t *buf, uint32_t length);
 uint32_t trusty_write_vbootkey_hash(uint32_t *buf, uint32_t length);
 uint32_t trusty_read_vbootkey_enable_flag(uint8_t *flag);
 uint32_t trusty_write_ta_encryption_key(uint32_t *buf, uint32_t length);
+uint32_t trusty_ta_encryption_key_is_written(uint8_t *value);
+uint32_t trusty_write_oem_encrypt_data(uint32_t *buf, uint32_t length);
+uint32_t trusty_oem_encrypt_data_is_written(uint8_t *value);
 uint32_t trusty_check_security_level_flag(uint8_t flag);
 uint32_t trusty_write_oem_huk(uint32_t *buf, uint32_t length);
-void trusty_select_security_level(void);
 uint32_t trusty_read_permanent_attributes_flag(uint8_t *attributes);
 uint32_t trusty_write_permanent_attributes_flag(uint8_t attributes);
 uint32_t trusty_write_oem_ns_otp(uint32_t byte_off, uint8_t *byte_buf, uint32_t byte_len);
@@ -100,11 +131,25 @@ uint32_t trusty_set_oem_hr_otp_read_lock(enum RK_OEM_OTP_KEYID key_id);
 uint32_t trusty_oem_otp_key_cipher(enum RK_OEM_OTP_KEYID key_id, rk_cipher_config *config,
 				   uint32_t src_phys_addr, uint32_t dst_phys_addr,
 				   uint32_t len);
+uint32_t trusty_oem_user_ta_transfer(void);
+uint32_t trusty_oem_user_ta_storage(void);
+uint32_t trusty_write_oem_hdcp_key(enum RK_HDCP_KEYID key_id,
+				  uint8_t *byte_buf, uint32_t byte_len);
+uint32_t trusty_oem_hdcp_key_is_written(enum RK_HDCP_KEYID key_id, uint8_t *value);
+uint32_t trusty_set_oem_hdcp_key_mask(enum RK_HDCP_KEYID key_id);
 uint32_t trusty_attest_dh(uint8_t *dh, uint32_t *dh_size);
 uint32_t trusty_attest_uuid(uint8_t *uuid, uint32_t *uuid_size);
 uint32_t trusty_attest_get_ca
 	(uint8_t *operation_start, uint32_t *operation_size,
 	 uint8_t *out, uint32_t *out_len);
 uint32_t trusty_attest_set_ca(uint8_t *ca_response, uint32_t *ca_response_size);
+uint32_t trusty_set_fw_encrypt_key_mask(enum RK_FW_KEYID key_id);
+uint32_t trusty_fw_encrypt_key_is_written(enum RK_FW_KEYID key_id, uint8_t *value);
+uint32_t trusty_write_fw_encrypt_key(enum RK_FW_KEYID key_id,
+				     uint8_t *byte_buf, uint32_t byte_len);
+uint32_t trusty_fw_key_cipher(enum RK_FW_KEYID key_id, rk_cipher_config *config,
+			      uint32_t src_phys_addr, uint32_t dst_phys_addr,
+			      uint32_t len);
+uint32_t trusty_verify_config_ip(char *licence_str);
 
 #endif

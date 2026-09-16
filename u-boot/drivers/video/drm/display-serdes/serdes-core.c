@@ -1,0 +1,764 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
+ * serdes-i2c.c  --  display i2c for different serdes chips
+ *
+ * Copyright (c) 2023 Rockchip Electronics Co. Ltd.
+ *
+ * Author: luowei <lw@rock-chips.com>
+ */
+
+#include "core.h"
+
+static int dm_i2c_reg_write_u8(struct udevice *dev, u8 reg, u8 val)
+{
+	int ret;
+	u8 buf[2];
+	struct i2c_msg msg;
+	struct dm_i2c_chip *chip = dev_get_parent_platdata(dev);
+
+	buf[0] = reg;
+	buf[1] = val;
+	msg.addr = chip->chip_addr;
+	msg.flags = 0;
+	msg.len = 2;
+	msg.buf = buf;
+
+	ret = dm_i2c_xfer(dev, &msg, 1);
+	if (ret) {
+		printf("dm i2c write failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static uint8_t dm_i2c_reg_read_u8(struct udevice *dev, u8 reg)
+{
+	int ret;
+	u8 data;
+	struct dm_i2c_chip *chip = dev_get_parent_platdata(dev);
+	struct i2c_msg msg[] = {
+		{
+			.addr = chip->chip_addr,
+			.flags = 0,
+			.buf = (u8 *)&reg,
+			.len = 1,
+		}, {
+			.addr = chip->chip_addr,
+			.flags = I2C_M_RD,
+			.buf = (u8 *)&data,
+			.len = 1,
+		}
+	};
+
+	ret = dm_i2c_xfer(dev, msg, 2);
+	if (ret) {
+		printf("dm i2c read failed: %d\n", ret);
+		return ret;
+	}
+
+	return data;
+}
+
+static int dm_i2c_reg_clrset_u8(struct udevice *dev,
+				u8 offset,
+				u8 clr, u8 set)
+{
+	u8 val;
+
+	val = dm_i2c_reg_read_u8(dev, offset);
+	if (val < 0)
+		return val;
+
+	val &= ~clr;
+	val |= set;
+
+	return dm_i2c_reg_write_u8(dev, offset, val);
+}
+
+/**
+ * serdes_reg_read: Read a single serdes register.
+ *
+ * @serdes: Device to read from.
+ * @reg: Register to read.
+ * @val: Date read from register.
+ */
+int serdes_reg_read(struct serdes *serdes,
+		    unsigned int reg, unsigned int *val)
+{
+	int ret;
+
+	if (serdes->chip_data->reg_val_type == REG_8BIT_VAL_8IT)
+		ret = dm_i2c_reg_read_u8(serdes->dev, reg);
+	else
+		ret = dm_i2c_reg_read(serdes->dev, reg);
+
+	if (ret >= 0) {
+		*val = ret;
+		ret = 0;
+	}
+
+	SERDES_DBG_I2C("%s %s Read Reg%04x %04x, ret=%d\n",
+		       __func__, serdes->dev->name, reg, *val, ret);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(serdes_reg_read);
+
+/**
+ * serdes_reg_write: Write a single serdes register.
+ *
+ * @serdes: Device to write to.
+ * @reg: Register to write to.
+ * @val: Value to write.
+ */
+int serdes_reg_write(struct serdes *serdes, unsigned int reg,
+		     unsigned int val)
+{
+	int ret = 0;
+
+	if (serdes->chip_data->reg_val_type == REG_8BIT_VAL_8IT)
+		ret = dm_i2c_reg_write_u8(serdes->dev, reg, val);
+	else
+		ret = dm_i2c_reg_write(serdes->dev, reg, val);
+
+	SERDES_DBG_I2C("%s %s Write Reg%04x %04x type=%d, ret=%d\n",
+		       __func__, serdes->dev->name,
+		       reg, val, serdes->chip_data->reg_val_type, ret);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(serdes_reg_write);
+
+/**
+ * serdes_multi_reg_write: Write many serdes register.
+ *
+ * @serdes: Device to write to.
+ * @regs: Registers to write to.
+ * @num_regs: Number of registers to write.
+ */
+int serdes_multi_reg_write(struct serdes *serdes,
+			   const struct reg_sequence *regs,
+			   int num_regs)
+{
+	int i, ret = 0;
+
+	SERDES_DBG_I2C("%s %s %s num=%d\n", __func__, serdes->dev->name,
+		       serdes->chip_data->name, num_regs);
+
+	for (i = 0; i < num_regs; i++) {
+		ret = serdes_reg_write(serdes, regs[i].reg, regs[i].def);
+		SERDES_DBG_I2C("serdes %s Write Reg%04x %04x ret=%d\n",
+			       serdes->chip_data->name,
+			       regs[i].reg, regs[i].def, ret);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(serdes_multi_reg_write);
+
+/**
+ * serdes_set_bits: Set the value of a bitfield in a serdes register
+ *
+ * @serdes: Device to write to.
+ * @reg: Register to write to.
+ * @mask: Mask of bits to set.
+ * @val: Value to set (unshifted)
+ */
+int serdes_set_bits(struct serdes *serdes, unsigned int reg,
+		    unsigned int mask, unsigned int val)
+{
+	int ret = 0;
+
+	if (serdes->chip_data->reg_val_type == REG_8BIT_VAL_8IT)
+		ret = dm_i2c_reg_clrset_u8(serdes->dev, reg, mask, val);
+	else
+		ret = dm_i2c_reg_clrset(serdes->dev, reg, mask, val);
+
+	SERDES_DBG_I2C("%s %s Write Reg%04x %04x mask=%04x, ret=%d\n",
+		       __func__, serdes->dev->name, reg, val, mask, ret);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(serdes_set_bits);
+
+int serdes_i2c_set_sequence(struct serdes *serdes)
+{
+	int i, ret = 0;
+	unsigned int def = 0;
+
+	if (serdes->mcu_enable) {
+		printf("serdes %s i2c set sequence in MCU\n",
+		       serdes->dev->name);
+		return 0;
+	}
+
+	if (!serdes->serdes_init_seq)
+		return 0;
+
+	for (i = 0; i < serdes->serdes_init_seq->reg_seq_cnt; i++) {
+		if (serdes->serdes_init_seq->reg_sequence[i].reg == 0xffff) {
+			SERDES_DBG_MFD("%s: delay 0x%04x us\n", __func__,
+				       serdes->serdes_init_seq->reg_sequence[i].def);
+			udelay(serdes->serdes_init_seq->reg_sequence[i].def);
+			continue;
+		}
+
+		ret = serdes_reg_write(serdes,
+				       serdes->serdes_init_seq->reg_sequence[i].reg,
+				       serdes->serdes_init_seq->reg_sequence[i].def);
+
+		if (ret < 0) {
+			SERDES_DBG_MFD("failed to write reg %04x, ret %d\n",
+				       serdes->serdes_init_seq->reg_sequence[i].reg, ret);
+			ret = serdes_reg_write(serdes,
+					       serdes->serdes_init_seq->reg_sequence[i].reg,
+					       serdes->serdes_init_seq->reg_sequence[i].def);
+		}
+		serdes_reg_read(serdes, serdes->serdes_init_seq->reg_sequence[i].reg, &def);
+		if ((def != serdes->serdes_init_seq->reg_sequence[i].def) || (ret < 0)) {
+			/*if read value != write value then write again*/
+			printf("%s read %04x %04x != %04x\n", serdes->dev->name,
+			       serdes->serdes_init_seq->reg_sequence[i].reg,
+			       def, serdes->serdes_init_seq->reg_sequence[i].def);
+			ret = serdes_reg_write(serdes,
+					       serdes->serdes_init_seq->reg_sequence[i].reg,
+					       serdes->serdes_init_seq->reg_sequence[i].def);
+		}
+	}
+
+	SERDES_DBG_MFD("serdes %s sequence_init\n", serdes->dev->name);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(serdes_i2c_set_sequence);
+
+int serdes_parse_init_seq(struct udevice *dev, const u16 *data,
+			  int length, struct serdes_init_seq *seq)
+{
+	struct reg_sequence *reg_sequence;
+	u16 *buf, *d;
+	unsigned int i, cnt;
+	int ret;
+
+	if (!seq)
+		return -EINVAL;
+
+	buf = calloc(1, length);
+	if (!buf)
+		return -ENOMEM;
+
+	memcpy(buf, data, length);
+
+	d = buf;
+	cnt = length / 4;
+	seq->reg_seq_cnt = cnt;
+
+	seq->reg_sequence = calloc(cnt, sizeof(struct reg_sequence));
+	if (!seq->reg_sequence) {
+		ret = -ENOMEM;
+		goto free_buf;
+	}
+
+	for (i = 0; i < cnt; i++) {
+		reg_sequence = &seq->reg_sequence[i];
+		reg_sequence->reg = get_unaligned_be16(&d[0]);
+		reg_sequence->def = get_unaligned_be16(&d[1]);
+		d += 2;
+	}
+
+	return 0;
+
+free_buf:
+	free(buf);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(serdes_parse_init_seq);
+
+int serdes_get_init_seq(struct serdes *serdes)
+{
+	const void *data = NULL;
+	int len, err;
+
+	data = dev_read_prop(serdes->dev, "serdes-init-sequence", &len);
+	if (!data) {
+		printf("serdes %s failed to get serdes-init-sequence\n",
+		       serdes->dev->name);
+		return 0;
+	}
+
+	serdes->serdes_init_seq = calloc(1, sizeof(*serdes->serdes_init_seq));
+	if (!serdes->serdes_init_seq)
+		return -ENOMEM;
+
+	err = serdes_parse_init_seq(serdes->dev,
+				    data, len, serdes->serdes_init_seq);
+	if (err) {
+		printf("failed to parse serdes-init-sequence\n");
+		goto free_init_seq;
+	}
+
+	return 0;
+
+free_init_seq:
+	free(serdes->serdes_init_seq);
+
+	return err;
+}
+EXPORT_SYMBOL_GPL(serdes_get_init_seq);
+
+int serdes_gpio_register(struct udevice *dev)
+{
+	bool pre_reloc_only = !(gd->flags & GD_FLG_RELOC);
+	struct uclass_driver *drv;
+	int ret = -ENODEV;
+	const char *name;
+	const char *status;
+	ofnode subnode;
+	struct udevice *subdev;
+	struct udevice *gpio_dev;
+
+	SERDES_DBG_MFD("%s node=%s\n",
+		       __func__, ofnode_get_name(dev->node));
+
+	/* Lookup GPIO driver */
+	drv = lists_uclass_lookup(UCLASS_GPIO);
+	if (!drv) {
+		printf("Cannot find GPIO driver\n");
+		return -ENOENT;
+	}
+
+	dev_for_each_subnode(subnode, dev) {
+		if (pre_reloc_only &&
+		    !ofnode_pre_reloc(subnode))
+			continue;
+
+		name = ofnode_get_name(subnode);
+		if (!name)
+			continue;
+
+		if (strstr(name, "gpio")) {
+			status = ofnode_read_string(subnode, "status");
+			if (status && strcmp(status, "okay") != 0) {
+				SERDES_DBG_MFD("%s node=%s status=%s, exit\n",
+					       __func__, name, status);
+				return 0;
+			}
+
+			ret = device_bind_driver_to_node(dev,
+							 "serdes-gpio", name,
+							 subnode, &subdev);
+			if (ret) {
+				printf("Cannot find serdes gpio driver\n");
+				return ret;
+			}
+
+			ret = uclass_get_device_by_ofnode(UCLASS_GPIO,
+							  subnode,
+							  &gpio_dev);
+			if (ret) {
+				printf("%s failed to get gpio dev\n", __func__);
+				return ret;
+			}
+
+			SERDES_DBG_MFD("%s select %s gpio_dev=%s\n",
+				       __func__, name, gpio_dev->name);
+			return 0;
+		}
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(serdes_gpio_register);
+
+int serdes_pinctrl_register(struct udevice *dev)
+{
+	bool pre_reloc_only = !(gd->flags & GD_FLG_RELOC);
+	struct uclass_driver *drv;
+	int ret = -ENODEV;
+	const char *name;
+	const char *status;
+	ofnode subnode;
+	struct udevice *subdev;
+	struct udevice *pinctrl_dev;
+	struct serdes *serdes = dev_get_priv(dev);
+
+	SERDES_DBG_MFD("%s node=%s\n",
+		       __func__, ofnode_get_name(dev->node));
+
+	/* Lookup PINCTRL driver */
+	drv = lists_uclass_lookup(UCLASS_PINCTRL);
+	if (!drv) {
+		printf("Cannot find PINCTRL driver\n");
+		return -ENOENT;
+	}
+
+	dev_for_each_subnode(subnode, dev) {
+		if (pre_reloc_only &&
+		    !ofnode_pre_reloc(subnode))
+			continue;
+
+		name = ofnode_get_name(subnode);
+		if (!name)
+			continue;
+
+		if (strstr(name, "pinctrl")) {
+			status = ofnode_read_string(subnode, "status");
+			if (status && strcmp(status, "okay") != 0) {
+				SERDES_DBG_MFD("%s node=%s status=%s, exit\n",
+					       __func__, name, status);
+				return 0;
+			}
+
+			if (serdes->mcu_enable) {
+				printf("serdes %s iomux init in MCU\n",
+				       serdes->dev->name);
+				return 0;
+			}
+
+			ret = device_bind_driver_to_node(dev,
+							 "serdes-pinctrl", name,
+							 subnode, &subdev);
+			if (ret) {
+				printf("Cannot find serdes pinctrl driver\n");
+				return ret;
+			}
+
+			ret = uclass_get_device_by_ofnode(UCLASS_PINCTRL,
+							  subnode,
+							  &pinctrl_dev);
+			if (ret) {
+				printf("%s failed to get pinctrl\n", __func__);
+				return ret;
+			}
+
+			SERDES_DBG_MFD("%s select %s pinctrl_dev=%s\n",
+				       __func__, name, pinctrl_dev->name);
+			return 0;
+		}
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(serdes_pinctrl_register);
+
+static const struct device_node *serdes_of_graph_get_port_parent(ofnode port)
+{
+	ofnode parent;
+	int is_ports_node;
+
+	parent = ofnode_get_parent(port);
+	is_ports_node = strstr(ofnode_to_np(parent)->full_name,
+			       "ports") ? 1 : 0;
+	if (is_ports_node)
+		parent = ofnode_get_parent(parent);
+
+	return ofnode_to_np(parent);
+}
+
+static const struct device_node *
+serdes_of_graph_get_remote_node(ofnode node, int port, int endpoint)
+{
+	const struct device_node *ep_node;
+	ofnode ep;
+	uint phandle;
+
+	ep_node = rockchip_of_graph_get_endpoint_by_regs(node, port, endpoint);
+	if (!ep_node)
+		return NULL;
+
+	if (ofnode_read_u32(np_to_ofnode(ep_node), "remote-endpoint", &phandle))
+		return NULL;
+
+	ep = ofnode_get_by_phandle(phandle);
+	if (!ofnode_valid(ep))
+		return NULL;
+
+	return ofnode_to_np(ep);
+}
+
+static int serdes_of_find_panel(struct udevice *dev, int port,
+				int endpoint, struct rockchip_panel **panel)
+{
+	const struct device_node *ep_node, *panel_node;
+	ofnode panel_ofnode, ports;
+	struct udevice *panel_dev;
+	int ret = 0;
+
+	*panel = NULL;
+	panel_ofnode = dev_read_subnode(dev, "panel");
+	if (ofnode_valid(panel_ofnode) && ofnode_is_available(panel_ofnode)) {
+		ret = uclass_get_device_by_ofnode(UCLASS_PANEL, panel_ofnode,
+						  &panel_dev);
+		if (!ret)
+			goto found;
+	}
+
+	ep_node = serdes_of_graph_get_remote_node(dev->node, port, endpoint);
+	if (!ep_node)
+		return -ENODEV;
+
+	ports = ofnode_get_parent(np_to_ofnode(ep_node));
+	if (!ofnode_valid(ports))
+		return -ENODEV;
+
+	panel_node = serdes_of_graph_get_port_parent(ports);
+	if (!panel_node)
+		return -ENODEV;
+
+	ret = uclass_get_device_by_ofnode(UCLASS_PANEL,
+					  np_to_ofnode(panel_node), &panel_dev);
+	if (!ret)
+		goto found;
+
+	return -ENODEV;
+
+found:
+	*panel = (struct rockchip_panel *)dev_get_driver_data(panel_dev);
+	return 0;
+}
+
+static int serdes_of_find_bridge(struct udevice *dev, int port,
+				 int endpoint, struct rockchip_bridge **bridge)
+{
+	const struct device_node *ep_node, *bridge_node;
+	ofnode ports;
+	struct udevice *bridge_dev;
+	int ret = 0;
+
+	ep_node = serdes_of_graph_get_remote_node(dev->node, port, endpoint);
+	if (!ep_node)
+		return -ENODEV;
+
+	ports = ofnode_get_parent(np_to_ofnode(ep_node));
+	if (!ofnode_valid(ports))
+		return -ENODEV;
+
+	bridge_node = serdes_of_graph_get_port_parent(ports);
+	if (!bridge_node)
+		return -ENODEV;
+
+	ret = uclass_get_device_by_ofnode(UCLASS_VIDEO_BRIDGE,
+					  np_to_ofnode(bridge_node),
+					  &bridge_dev);
+	if (!ret)
+		goto found;
+
+	return -ENODEV;
+
+found:
+	*bridge = (struct rockchip_bridge *)dev_get_driver_data(bridge_dev);
+	return 0;
+}
+
+static int
+serdes_find_bridge_or_panel(struct udevice *dev, int port, int endpoint,
+			    struct rockchip_panel **panel,
+			    struct rockchip_bridge **bridge)
+{
+	int ret = 0;
+
+	if (*panel)
+		return 0;
+
+	*panel = NULL;
+	*bridge = NULL;
+
+	if (panel) {
+		ret  = serdes_of_find_panel(dev, port, endpoint, panel);
+		if (!ret)
+			goto exit;
+	}
+
+	if (!ret)
+		goto exit;
+
+	ret = serdes_of_find_bridge(dev, port, endpoint, bridge);
+	if (!ret)
+		ret = serdes_find_bridge_or_panel((*bridge)->dev,
+						  1, 0, panel,
+						  &(*bridge)->next_bridge);
+
+exit:
+	return ret;
+}
+
+void serdes_get_split_bridge_or_panel(struct serdes_bridge *serdes_bridge)
+{
+	int ret;
+	u8 nr = 0;
+	ofnode ports, port;
+	struct rockchip_bridge *bridge = serdes_bridge->bridge;
+	struct udevice *dev = bridge->dev;
+
+	ports = ofnode_find_subnode(dev->node, "ports");
+	if (!ofnode_valid(ports))
+		return;
+
+	ofnode_for_each_subnode(port, ports) {
+		if (!ofnode_is_available(port) ||
+		    !of_find_property(ofnode_to_np(port), "reg", NULL))
+			continue;
+
+		nr++;
+	}
+
+	if (nr == 3)
+		serdes_bridge->split_mode = true;
+
+	if (!serdes_bridge->split_mode)
+		return;
+
+	ret = serdes_find_bridge_or_panel(dev, 2, 0,
+					  &serdes_bridge->panel_split,
+					  &serdes_bridge->bridge_split);
+	if (ret)
+		debug("Warn: no find serdes %s panel or bridge split\n",
+		      dev->name);
+}
+EXPORT_SYMBOL_GPL(serdes_get_split_bridge_or_panel);
+
+int serdes_set_i2c_address(struct serdes *serdes,
+			   u32 reg_use, int link)
+{
+	int ret = 0;
+	struct serdes_chip_data *chip_data;
+	struct serdes *serdes_split = serdes->g_serdes_bridge_split;
+
+	if (!serdes_split) {
+		pr_info("%s: serdes_split is null\n", __func__);
+		return -1;
+	}
+
+	chip_data = serdes_split->chip_data;
+	if (!chip_data)
+		return -1;
+
+	if (chip_data->split_ops && chip_data->split_ops->select)
+		ret = chip_data->split_ops->select(serdes_split, link);
+
+	if (serdes->chip_data && serdes->chip_data->split_ops &&
+	    serdes->chip_data->split_ops->set_i2c_addr)
+		ret = serdes->chip_data->split_ops->set_i2c_addr(serdes,
+							   reg_use, link);
+
+	if (chip_data->split_ops && chip_data->split_ops->select)
+		ret = chip_data->split_ops->select(serdes_split,
+						   SER_SPLITTER_MODE);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(serdes_set_i2c_address);
+
+static int serdes_i2c_init(struct serdes *serdes)
+{
+	int ret = 0;
+	int i = 0;
+
+	if (serdes->vpower_supply)
+		regulator_set_enable(serdes->vpower_supply, true);
+
+	if (dm_gpio_is_valid(&serdes->enable_gpio))
+		dm_gpio_set_value(&serdes->enable_gpio, 1);
+
+	mdelay(5);
+
+	for (i = 0; i < 3; i++) {
+		ret = serdes_i2c_set_sequence(serdes);
+		if (!ret)
+			break;
+		mdelay(20);
+	}
+
+	SERDES_DBG_MFD("%s: %s %s\n", __func__, serdes->dev->name,
+		       serdes->chip_data->name);
+
+	return ret;
+}
+
+static int serdes_i2c_probe(struct udevice *dev)
+{
+	struct serdes *serdes = dev_get_priv(dev);
+	int ret;
+
+	ret = i2c_set_chip_offset_len(dev, 2);
+	if (ret)
+		return ret;
+
+	serdes->dev = dev;
+	serdes->chip_data = (struct serdes_chip_data *)dev_get_driver_data(dev);
+	serdes->type = serdes->chip_data->serdes_type;
+
+	SERDES_DBG_MFD("serdes %s %s probe start\n",
+		       serdes->dev->name, serdes->chip_data->name);
+
+	ret = uclass_get_device_by_phandle(UCLASS_REGULATOR, dev,
+					   "vpower-supply",
+					   &serdes->vpower_supply);
+	if (ret && ret != -ENOENT)
+		SERDES_DBG_MFD("%s: Cannot get power supply: %d\n",
+			       __func__, ret);
+
+	ret = gpio_request_by_name(dev, "enable-gpios", 0,
+				   &serdes->enable_gpio, GPIOD_IS_OUT);
+	if (ret)
+		SERDES_DBG_MFD("%s: failed to get enable gpio: %d\n",
+			       __func__, ret);
+
+	ret = gpio_request_by_name(dev, "lock-gpios", 0,
+				   &serdes->lock_gpio,
+				   GPIOD_IS_IN);
+	if (ret)
+		SERDES_DBG_MFD("%s: failed to get lock gpio: %d\n",
+			       __func__, ret);
+
+	ret = gpio_request_by_name(dev, "err-gpios", 0,
+				   &serdes->err_gpio,
+				   GPIOD_IS_IN);
+	if (ret)
+		SERDES_DBG_MFD("%s: failed to err gpio: %d\n",
+			       __func__, ret);
+
+	ret = serdes_get_init_seq(serdes);
+	if (ret)
+		return ret;
+
+	serdes_i2c_init(serdes);
+
+	printf("%s %s successful, version %s\n",
+	       __func__,
+	       serdes->dev->name,
+	       SERDES_UBOOT_DISPLAY_VERSION);
+
+	return 0;
+}
+
+static const struct udevice_id serdes_of_match[] = {
+#if IS_ENABLED(CONFIG_SERDES_DISPLAY_CHIP_NOVO_NCA9539)
+	{ .compatible = "novo,nca9539", .data = (ulong)&serdes_nca9539_data },
+#endif
+	{ }
+};
+
+U_BOOT_DRIVER(serdes_misc) = {
+	.name = "serdes-misc",
+	.id = UCLASS_MISC,
+	.of_match = serdes_of_match,
+	.probe = serdes_i2c_probe,
+	.priv_auto_alloc_size = sizeof(struct serdes),
+};
+
+int serdes_power_init(void)
+{
+	struct udevice *dev;
+	int ret = 0;
+
+	ret = uclass_get_device_by_driver(UCLASS_MISC,
+					  DM_GET_DRIVER(serdes_misc),
+					  &dev);
+	if (ret)
+		printf("%s failed to get misc device ret=%d\n", __func__, ret);
+
+	return ret;
+}

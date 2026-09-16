@@ -85,6 +85,12 @@ config ROCKCHIP_HW_DECOMPRESS
 	  This driver support Decompress IP built-in Rockchip SoC, support
 	  LZ4, GZIP, PNG, ZLIB.
 
+config ROCKCHIP_PM_CONFIG
+	bool "Rockchip PM Config Support"
+	depends on ARM_CPU_SUSPEND
+	help
+	  This driver supports to configure parameters of system sleep.
+
 config SPL_ROCKCHIP_HW_DECOMPRESS
 	bool "Rockchip HardWare Decompress Support"
 	depends on SPL_MISC_DECOMPRESS
@@ -103,6 +109,41 @@ config SPL_ROCKCHIP_SECURE_OTP
 	depends on SPL_MISC
 	help
 	  Support read & write secure otp in spl.
+
+config SPL_OTP_DISABLE_SD
+	bool "Rockchip disable sd upgrade Support"
+	depends on SPL_ROCKCHIP_SECURE_OTP
+	default n
+	help
+	  Support write otp to disable sd upgrade.
+
+config SPL_OTP_DISABLE_USB
+	bool "Rockchip disable usb upgrade Support"
+	depends on SPL_ROCKCHIP_SECURE_OTP
+	default n
+	help
+	  Support write otp to disable usb upgrade.
+
+config SPL_OTP_DISABLE_UART
+	bool "Rockchip disable uart upgrade Support"
+	depends on SPL_ROCKCHIP_SECURE_OTP
+	default n
+	help
+	  Support write otp to disable uart upgrade.
+
+config SPL_OTP_DISABLE_SPI2APB
+	bool "Rockchip disable spi2apb upgrade Support"
+	depends on SPL_ROCKCHIP_SECURE_OTP
+	default n
+	help
+	  Support write otp to disable spi2apb upgrade.
+
+config SPL_REVOKE_PUB_KEY
+	bool "Rockchip revoke current public key Support"
+	depends on SPL_ROCKCHIP_SECURE_OTP
+	default n
+	help
+	  Support write otp to revoke current public key.
 
 config CMD_CROS_EC
 	bool "Enable crosec command"
@@ -259,6 +300,13 @@ config I2C_EEPROM
 	depends on MISC
 	help
 	  Enable a generic driver for EEPROMs attached via I2C.
+
+config RADXA_ID_EEPROM
+	bool "Enable Radxa ID EEPROM driver"
+	depends on MISC
+	help
+	  Enable support for Radxa ID EEPROM.
+	  This EEPROM is used to store persistent platform data, such as MAC address.
 
 if I2C_EEPROM
 
