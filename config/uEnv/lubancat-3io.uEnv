@@ -1,37 +1,28 @@
 overlays=
 
-#rgmii
-# rk3576-lubancat-rgmii-gmac1-overlay
 #msata
 # rk3576-lubancat-sata0-overlay
-#40pin
-# rk3576-lubancat-can0-m2-overlay
-# rk3576-lubancat-can1-m3-overlay
-# rk3576-lubancat-i2c0-m1-overlay
-# rk3576-lubancat-i2c4-m1-overlay
+#18pin
 # rk3576-lubancat-i2c7-m1-overlay
-# rk3576-lubancat-i2c7-m2-overlay
-# rk3576-lubancat-i2c8-m2-overlay
 # rk3576-lubancat-i2c9-m1-overlay
+# rk3576-lubancat-uart3-m0-overlay
 # rk3576-lubancat-pwm0-ch0-m1-overlay
-# rk3576-lubancat-pwm0-ch1-m0-overlay
 # rk3576-lubancat-pwm1-ch0-m1-overlay
-# rk3576-lubancat-pwm1-ch0-m3-overlay
-# rk3576-lubancat-pwm1-ch1-m1-overlay
 # rk3576-lubancat-pwm2-ch3-m3-overlay
 # rk3576-lubancat-pwm2-ch6-m3-overlay
 # rk3576-lubancat-pwm2-ch7-m3-overlay
-# rk3576-lubancat-spi1-m0-overlay
-# rk3576-lubancat-spi3-m0-overlay
-# rk3576-lubancat-spi3-m1-overlay
-# rk3576-lubancat-uart3-m0-overlay
+# rk3576-lubancat-3io-spi1-m0-overlay
+#RS485
 # rk3576-lubancat-uart3-m1-overlay
 # rk3576-lubancat-uart5-m0-overlay
-# rk3576-lubancat-uart6-m0-overlay
-# rk3576-lubancat-uart7-m0-overlay
+# rk3576-lubancat-3io-rs485-1-overlay
+# rk3576-lubancat-3io-rs485-2-overlay
+#RS232
 # rk3576-lubancat-uart8-m2-overlay
 # rk3576-lubancat-uart10-m1-overlay
-# rk3576-lubancat-usb20-overlay
+#CAN
+# rk3576-lubancat-can0-m2-overlay
+# rk3576-lubancat-can1-m3-overlay
 
 # Display
 #vp0
@@ -41,7 +32,6 @@ overlays=
 #vp2
 # rk3576-lubancat-3-dsi-vp2-1024x600-7inch-ebf410173-overlay
 # rk3576-lubancat-3-dsi-vp2-1080x1920-5.5inch-ebf410125-overlay
-# rk3576-lubancat-3-dsi-vp2-1080x1920-5.5inch-ebf410125-v1-overlay
 # rk3576-lubancat-3-dsi-vp2-800x1280-10.1inch-ebf410177-overlay
 # rk3576-lubancat-3-dsi-vp2-800x1280-10.1inch-s8001280b1060b-overlay
 # rk3576-lubancat-3-dsi-vp2-generic-overlay
@@ -89,5 +79,4 @@ overlays=
 # rk3576-lubancat-3-cam4-gc4653-2560x1440-30fps-overlay
 
 # 扩展板
-# rk3576-lubancat-3-xl9535-overlay
 # rk3576-lubancat-i2c7-m1-40pin-test-tca9535-overlay
