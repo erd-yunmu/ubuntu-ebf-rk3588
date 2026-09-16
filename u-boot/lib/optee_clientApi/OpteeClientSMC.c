@@ -313,12 +313,22 @@ void GetTeeSmc32Params(t_teesmc32_param *TeeSmc32Param,
 	uint32_t ParamCount;
 
 	for (ParamCount = 0;
-	ParamCount < TEEC_CONFIG_PAYLOAD_REF_COUNT;
-	ParamCount++) {
-		operation->params[ParamCount].value.a =
-			TeeSmc32Param[ParamCount].u.value.a;
-		operation->params[ParamCount].value.b =
-			TeeSmc32Param[ParamCount].u.value.b;
+	     ParamCount < TEEC_CONFIG_PAYLOAD_REF_COUNT;
+	     ParamCount++) {
+		uint32_t attr = TEEC_PARAM_TYPE_GET(operation->paramTypes, ParamCount);
+		if (attr == TEEC_MEMREF_TEMP_INPUT ||
+		    attr == TEEC_MEMREF_TEMP_OUTPUT ||
+		    attr == TEEC_MEMREF_TEMP_INOUT) {
+			operation->params[ParamCount].tmpref.buffer =
+				(void *)(size_t)TeeSmc32Param[ParamCount].u.memref.buf_ptr;
+			operation->params[ParamCount].tmpref.size =
+				TeeSmc32Param[ParamCount].u.memref.size;
+		} else {
+			operation->params[ParamCount].value.a =
+				TeeSmc32Param[ParamCount].u.value.a;
+			operation->params[ParamCount].value.b =
+				TeeSmc32Param[ParamCount].u.value.b;
+		}
 	}
 }
 

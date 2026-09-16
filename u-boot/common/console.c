@@ -27,6 +27,8 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+static uspinlock_t console_lock;
+
 static int on_console(const char *name, const char *value, enum env_op op,
 	int flags)
 {
@@ -524,13 +526,6 @@ void putc(const char c)
 	putc_to_ram(c);
 #endif
 
-#ifdef CONFIG_DEBUG_UART
-	/* if we don't have a console yet, use the debug UART */
-	if (!gd || !(gd->flags & GD_FLG_SERIAL_READY)) {
-		printch(c);
-		return;
-	}
-#endif
 #ifdef CONFIG_CONSOLE_RECORD
 	if (gd && (gd->flags & GD_FLG_RECORD) && gd->console_out.start)
 		membuff_putbyte((struct membuff *)&gd->console_out, c);
@@ -540,6 +535,13 @@ void putc(const char c)
 		return;
 #endif
 
+#ifdef CONFIG_DEBUG_UART
+	/* if we don't have a console yet, use the debug UART */
+	if (!gd || !(gd->flags & GD_FLG_SERIAL_READY)) {
+		printch(c);
+		return;
+	}
+#endif
 	if (!gd->have_console)
 		return pre_console_putc(c);
 
@@ -566,8 +568,11 @@ static void vspfunc(char *buf, size_t size, char *format, ...)
 
 void puts(const char *s)
 {
-	unsigned long ts_sec, ts_msec, ticks;
+	unsigned long ts_sec, ts_msec, us, delta_ms;
 	char pr_timestamp[32], *p;
+	int cpu;
+
+	u_spin_lock(&console_lock);
 
 	while (*s) {
 		if (*s == '\n') {
@@ -577,12 +582,19 @@ void puts(const char *s)
 		}
 
 		if (gd->new_line) {
+			us = (get_ticks() / (gd->arch.timer_rate_hz / 1000000));
+			if (gd->last_us)
+				delta_ms = DIV_ROUND_UP(us - gd->last_us, 1000);
+			else
+				delta_ms = 0;
+			gd->last_us = us;
 			gd->new_line = 0;
-			ticks = (get_ticks() / 24ULL);
-			ts_sec = ticks / 1000000;
-			ts_msec = ticks % 1000000;
+
+			ts_sec = us / 1000000;
+			ts_msec = us % 1000000;
+			cpu = read_mpidr() & 0xfff;
 			vspfunc(pr_timestamp, sizeof(pr_timestamp),
-				"[%5lu.%06lu] ", ts_sec, ts_msec);
+				"[%5lu.%06lu:%x:%03d] ", ts_sec, ts_msec, cpu, delta_ms);
 			p = pr_timestamp;
 			while (*p)
 				putc(*p++);
@@ -590,12 +602,18 @@ void puts(const char *s)
 
 		putc(*s++);
 	}
+
+	u_spin_unlock(&console_lock);
 }
 #else
 void puts(const char *s)
 {
+	u_spin_lock(&console_lock);
+
 	while (*s)
 		putc(*s++);
+
+	u_spin_unlock(&console_lock);
 }
 #endif
 

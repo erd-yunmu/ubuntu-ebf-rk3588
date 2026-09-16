@@ -19,6 +19,7 @@ obj-y	+= transition.o
 obj-y	+= fwcall.o
 obj-y	+= cpu-dt.o
 
+obj-$(CONFIG_$(SPL_)SMP)	+= spinlock.o uspinlock.o
 obj-$(CONFIG_ARM_SMCCC)		+= smccc-call.o
 
 ifeq ($(CONFIG_SPL_BUILD)$(CONFIG_TPL_BUILD),)
@@ -36,3 +37,5 @@ obj-$(CONFIG_ARCH_ZYNQMP) += zynqmp/
 obj-$(CONFIG_TARGET_HIKEY) += hisilicon/
 obj-$(CONFIG_ARMV8_PSCI) += psci.o
 obj-$(CONFIG_ARCH_SUNXI) += lowlevel_init.o
+obj-$(CONFIG_ARMV8_CE_SHA1) += sha1_ce_glue.o sha1_ce_core.o
+obj-$(CONFIG_ARMV8_CE_SHA256) += sha256_ce_glue.o sha256_ce_core.o
