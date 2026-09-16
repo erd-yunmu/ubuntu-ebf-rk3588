@@ -902,9 +902,13 @@ int mmc_send_tuning(struct mmc *mmc, u32 opcode)
 	data.flags = MMC_DATA_READ;
 
 	err = mmc_send_cmd(mmc, &cmd, &data);
-	if (err)
+	if (err) {
+		cmd.cmdidx = MMC_CMD_STOP_TRANSMISSION;
+		cmd.cmdarg = 0;
+		cmd.resp_type = MMC_RSP_R1b;
+		mmc_send_cmd(mmc, &cmd, NULL);
 		goto out;
-
+	}
 	if (memcmp(data_buf, tuning_block_pattern, size))
 		err = -EIO;
 out:
@@ -1885,6 +1889,10 @@ static int mmc_startup(struct mmc *mmc)
 	mmc->erase_grp_size = 1;
 	mmc->part_config = MMCPART_NOAVAILABLE;
 	if (!IS_SD(mmc) && (mmc->version >= MMC_VERSION_4)) {
+		/* select high speed to reduce initialization time */
+		mmc_select_hs(mmc);
+		mmc_set_clock(mmc, MMC_HIGH_52_MAX_DTR);
+
 		/* check  ext_csd version and capacity */
 		err = mmc_send_ext_csd(mmc, ext_csd);
 		if (err)
@@ -2206,11 +2214,17 @@ static int mmc_select_card(struct mmc *mmc, int n)
 
 int mmc_start_init(struct mmc *mmc)
 {
+	int bus_width = 1;
 	/*
 	 * We use the MMC config set by the bootrom.
 	 * So it is no need to reset the eMMC device.
 	 */
-	mmc_set_bus_width(mmc, 8);
+	if (mmc->cfg->host_caps & MMC_MODE_8BIT)
+		bus_width = 8;
+	else if (mmc->cfg->host_caps & MMC_MODE_4BIT)
+		bus_width = 4;
+	mmc_set_bus_width(mmc, bus_width);
+
 	mmc_set_clock(mmc, 1);
 	mmc_set_timing(mmc, MMC_TIMING_LEGACY);
 	/* Send cmd7 to return stand-by state*/

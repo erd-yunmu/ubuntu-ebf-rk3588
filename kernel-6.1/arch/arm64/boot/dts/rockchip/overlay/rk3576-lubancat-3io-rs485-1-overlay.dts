@@ -1,0 +1,30 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+
+/ {
+	fragment@0 {
+		target = <&uart3>;
+
+		__overlay__ {
+			pinctrl-names = "default";
+			pinctrl-0 = <&uart3m1_xfer &rs485_1_rts>;
+			rs485-de-gpios = <&gpio0 RK_PC3 GPIO_ACTIVE_HIGH>;
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&pinctrl>;
+		__overlay__ {
+		rs485_rts {
+			rs485_1_rts:rs485_1_rts{
+				rockchip,pins =
+					<0 RK_PC3 RK_FUNC_GPIO &pcfg_pull_none>;
+				};
+			};
+		};
+	};
+};

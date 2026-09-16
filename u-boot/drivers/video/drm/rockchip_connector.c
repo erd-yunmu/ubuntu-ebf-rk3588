@@ -15,6 +15,19 @@
 #include "rockchip_connector.h"
 #include "rockchip_phy.h"
 
+#ifdef CONFIG_SPL_BUILD
+int rockchip_connector_bind(struct rockchip_connector *conn, struct udevice *dev, int id,
+			    const struct rockchip_connector_funcs *funcs, void *data, int type)
+{
+	conn->id = id;
+	conn->funcs = funcs;
+	conn->data = data;
+	conn->type = type;
+
+	return 0;
+}
+
+#else
 static LIST_HEAD(rockchip_connector_list);
 
 int rockchip_connector_bind(struct rockchip_connector *conn, struct udevice *dev, int id,
@@ -105,21 +118,6 @@ int rockchip_connector_init(struct display_state *state)
 	return ret;
 }
 
-int rockchip_connector_deinit(struct display_state *state)
-{
-	struct rockchip_connector *conn;
-
-	conn = state->conn_state.connector;
-	if (conn->funcs->deinit) {
-		conn->funcs->deinit(conn, state);
-		if (state->conn_state.secondary) {
-			conn = state->conn_state.secondary;
-			conn->funcs->deinit(conn, state);
-		}
-	}
-
-	return 0;
-}
 
 static bool rockchip_connector_path_detect(struct rockchip_connector *conn,
 					   struct display_state *state)
@@ -178,27 +176,6 @@ int rockchip_connector_get_timing(struct display_state *state)
 		if (state->conn_state.secondary) {
 			conn = state->conn_state.secondary;
 			ret = conn->funcs->get_timing(conn, state);
-			if (ret)
-				return ret;
-		}
-	}
-
-	return ret;
-}
-
-int rockchip_connector_get_edid(struct display_state *state)
-{
-	int ret = 0;
-	struct rockchip_connector *conn;
-
-	conn = state->conn_state.connector;
-	if (conn->funcs->get_edid) {
-		ret = conn->funcs->get_edid(conn, state);
-		if (ret)
-			return ret;
-		if (state->conn_state.secondary) {
-			conn = state->conn_state.secondary;
-			ret = conn->funcs->get_edid(conn, state);
 			if (ret)
 				return ret;
 		}
@@ -318,6 +295,23 @@ int rockchip_connector_post_disable(struct display_state *state)
 	if (state->conn_state.secondary) {
 		conn = state->conn_state.secondary;
 		rockchip_connector_path_post_disable(conn, state);
+	}
+
+	return 0;
+}
+#endif
+
+int rockchip_connector_deinit(struct display_state *state)
+{
+	struct rockchip_connector *conn;
+
+	conn = state->conn_state.connector;
+	if (conn->funcs->deinit) {
+		conn->funcs->deinit(conn, state);
+		if (state->conn_state.secondary) {
+			conn = state->conn_state.secondary;
+			conn->funcs->deinit(conn, state);
+		}
 	}
 
 	return 0;

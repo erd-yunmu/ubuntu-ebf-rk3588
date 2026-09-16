@@ -173,11 +173,17 @@ fdt_addr_t fdtdec_get_addr_size_auto_noparent(const void *blob, int node,
 fdt_addr_t fdtdec_get_addr_size(const void *blob, int node,
 		const char *prop_name, fdt_size_t *sizep)
 {
+#ifdef CONFIG_OF_ADDR_SIZE_AUTO_NOPARENT
+	/* In case of 64-bit U-Boot use 32-bit platform dtb */
+	return fdtdec_get_addr_size_auto_noparent(blob, node, prop_name,
+						  0, sizep, false);
+#else
 	int ns = sizep ? (sizeof(fdt_size_t) / sizeof(fdt32_t)) : 0;
 
 	return fdtdec_get_addr_size_fixed(blob, node, prop_name, 0,
 					  sizeof(fdt_addr_t) / sizeof(fdt32_t),
 					  ns, sizep, false);
+#endif
 }
 
 fdt_addr_t fdtdec_get_addr(const void *blob, int node,
@@ -960,7 +966,12 @@ int fdt_get_resource(const void *fdt, int node, const char *property,
 
 	while (ptr + na + ns <= end) {
 		if (i == index) {
-			res->start = res->end = fdtdec_get_number(ptr, na);
+			if (CONFIG_IS_ENABLED(OF_TRANSLATE))
+				res->start = fdt_translate_address(fdt, node, ptr);
+			else
+				res->start = fdtdec_get_number(ptr, na);
+
+ 			res->end = res->start;
 			res->end += fdtdec_get_number(&ptr[na], ns) - 1;
 			return 0;
 		}
@@ -1288,8 +1299,6 @@ int fdtdec_setup(void)
 #    ifdef CONFIG_USING_KERNEL_DTB
 	gd->fdt_blob_kern = (ulong *)ALIGN((ulong)gd->fdt_blob +
 				fdt_totalsize(gd->fdt_blob), 8);
-	if (fdt_check_header(gd->fdt_blob_kern))
-		gd->fdt_blob_kern = NULL;
 #    endif
 #  endif
 # elif defined(CONFIG_OF_BOARD)

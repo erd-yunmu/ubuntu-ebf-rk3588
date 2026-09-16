@@ -26,6 +26,9 @@
 #include <boot_rkimg.h>
 #include <u-boot/sha256.h>
 #include <asm/arch/rk_atags.h>
+#ifdef CONFIG_ANDROID_BOOTLOADER
+#include <android_bootloader.h>
+#endif
 
 /* rk used */
 int rk_avb_get_pub_key(struct rk_pub_key *pub_key)
@@ -158,6 +161,7 @@ int rk_avb_write_lock_state(uint8_t lock_state)
 int rk_avb_read_lock_state(uint8_t *lock_state)
 {
 #ifdef CONFIG_OPTEE_CLIENT
+	uint8_t vboot_flag = 0;
 	int ret;
 
 	ret = trusty_read_lock_state(lock_state);
@@ -167,7 +171,16 @@ int rk_avb_read_lock_state(uint8_t *lock_state)
 	case TEE_ERROR_GENERIC:
 	case TEE_ERROR_NO_DATA:
 	case TEE_ERROR_ITEM_NOT_FOUND:
-		*lock_state = 1;
+		if (trusty_read_vbootkey_enable_flag(&vboot_flag)) {
+			printf("Can't read vboot flag\n");
+			return -1;
+		}
+
+		if (vboot_flag)
+			*lock_state = 0;
+		else
+			*lock_state = 1;
+
 		if (rk_avb_write_lock_state(*lock_state)) {
 			printf("avb_write_lock_state error!");
 			ret = -1;
@@ -561,7 +574,11 @@ int rk_avb_get_part_has_slot_info(const char *base_name)
 	struct blk_desc *dev_desc;
 	const char *slot_suffix = "_a";
 
+#ifdef CONFIG_ANDROID_BOOTLOADER
+	dev_desc = android_get_bootdev();
+#else
 	dev_desc = rockchip_get_bootdev();
+#endif
 	if (!dev_desc) {
 		printf("%s: Could not find device!\n", __func__);
 		return -1;

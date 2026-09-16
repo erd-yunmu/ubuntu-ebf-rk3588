@@ -156,7 +156,7 @@ cat > ${mount_point}/system-boot/boot.cmd << 'EOF'
 # Recompile with:
 # mkimage -A arm64 -O linux -T script -C none -n "Boot Script" -d boot.cmd boot.scr
 
-setenv load_addr "0x7000000"
+setenv load_addr "${kernel_addr_r}"
 setenv overlay_error "false"
 
 echo "Boot script loaded from ${devtype} ${devnum}"

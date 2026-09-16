@@ -773,6 +773,10 @@ static ulong rk3399_vop_set_clk(struct rk3399_cru *cru, ulong clk_id, u32 hz)
 		     ACLK_VOP_PLL_SEL_MASK | ACLK_VOP_DIV_CON_MASK,
 		     ACLK_VOP_PLL_SEL_GPLL << ACLK_VOP_PLL_SEL_SHIFT |
 		     (div - 1) << ACLK_VOP_DIV_CON_SHIFT);
+	rk_clrsetreg(&cru->clksel_con[42],
+		     ACLK_VOP_PLL_SEL_MASK | ACLK_VOP_DIV_CON_MASK,
+		     ACLK_VOP_PLL_SEL_GPLL << ACLK_VOP_PLL_SEL_SHIFT |
+		     (div - 1) << ACLK_VOP_DIV_CON_SHIFT);
 
 	if (readl(dclkreg_addr) & DCLK_VOP_PLL_SEL_MASK) {
 		if (pll_para_config(hz, &cpll_config))
@@ -1371,8 +1375,13 @@ static int rk3399_clk_enable(struct clk *clk)
 	case HCLK_HOST1:
 	case HCLK_HOST1_ARB:
 	case SCLK_USBPHY1_480M_SRC:
+	case ACLK_USB3OTG0:
 	case ACLK_USB3OTG1:
 	case ACLK_USB3_GRF:
+	case ACLK_USB3_RKSOC_AXI_PERF:
+	case ACLK_USB3:
+	case SCLK_USB3OTG0_REF:
+	case SCLK_USB3OTG0_SUSPEND:
 	case SCLK_USB3OTG1_REF:
 	case SCLK_USB3OTG1_SUSPEND:
 		return 0;

@@ -42,6 +42,9 @@
 #include <android_avb/avb_vbmeta_image.h>
 #include <android_avb/avb_atx_validate.h>
 #include <boot_rkimg.h>
+#ifdef CONFIG_ANDROID_BOOTLOADER
+#include <android_bootloader.h>
+#endif
 
 static void byte_to_block(int64_t *offset,
 			  size_t *num_bytes,
@@ -75,7 +78,11 @@ static AvbIOResult get_size_of_partition(AvbOps *ops,
 	struct blk_desc *dev_desc;
 	disk_partition_t part_info;
 
+#ifdef CONFIG_ANDROID_BOOTLOADER
+	dev_desc = android_get_bootdev();
+#else
 	dev_desc = rockchip_get_bootdev();
+#endif
 	if (!dev_desc) {
 		printf("%s: Could not find device\n", __func__);
 		return AVB_IO_RESULT_ERROR_NO_SUCH_PARTITION;
@@ -111,7 +118,11 @@ static AvbIOResult read_from_partition(AvbOps *ops,
 	}
 
 	byte_to_block(&offset, &num_bytes, &offset_blk, &blkcnt);
+#ifdef CONFIG_ANDROID_BOOTLOADER
+	dev_desc = android_get_bootdev();
+#else
 	dev_desc = rockchip_get_bootdev();
+#endif
 	if (!dev_desc) {
 		printf("%s: Could not find device\n", __func__);
 		return AVB_IO_RESULT_ERROR_NO_SUCH_PARTITION;
@@ -162,7 +173,11 @@ static AvbIOResult write_to_partition(AvbOps *ops,
 		return AVB_IO_RESULT_ERROR_OOM;
 	}
 	memset(buffer_temp, 0, 512 * blkcnt);
+#ifdef CONFIG_ANDROID_BOOTLOADER
+	dev_desc = android_get_bootdev();
+#else
 	dev_desc = rockchip_get_bootdev();
+#endif
 	if (!dev_desc) {
 		printf("%s: Could not find device\n", __func__);
 		return AVB_IO_RESULT_ERROR_NO_SUCH_PARTITION;
@@ -280,6 +295,7 @@ static AvbIOResult read_is_device_unlocked(AvbOps *ops, bool *out_is_unlocked)
 {
 	if (out_is_unlocked) {
 #ifdef CONFIG_OPTEE_CLIENT
+		uint8_t vboot_flag = 0;
 		int ret;
 
 		ret = trusty_read_lock_state((uint8_t *)out_is_unlocked);
@@ -290,7 +306,16 @@ static AvbIOResult read_is_device_unlocked(AvbOps *ops, bool *out_is_unlocked)
 		case TEE_ERROR_GENERIC:
 		case TEE_ERROR_NO_DATA:
 		case TEE_ERROR_ITEM_NOT_FOUND:
-			*out_is_unlocked = 1;
+			if (trusty_read_vbootkey_enable_flag(&vboot_flag)) {
+				printf("Can't read vboot flag\n");
+				return AVB_IO_RESULT_ERROR_IO;
+			}
+
+			if (vboot_flag)
+				*out_is_unlocked = 0;
+			else
+				*out_is_unlocked = 1;
+
 			if (trusty_write_lock_state(*out_is_unlocked)) {
 				printf("%s: init lock state error\n", __FILE__);
 				ret = AVB_IO_RESULT_ERROR_IO;
@@ -336,10 +361,15 @@ static AvbIOResult get_unique_guid_for_partition(AvbOps *ops,
 						 char *guid_buf,
 						 size_t guid_buf_size)
 {
+#if CONFIG_IS_ENABLED(PARTITION_UUIDS)
 	struct blk_desc *dev_desc;
 	disk_partition_t part_info;
 
+#ifdef CONFIG_ANDROID_BOOTLOADER
+	dev_desc = android_get_bootdev();
+#else
 	dev_desc = rockchip_get_bootdev();
+#endif
 	if (!dev_desc) {
 		printf("%s: Could not find device\n", __func__);
 		return AVB_IO_RESULT_ERROR_NO_SUCH_PARTITION;
@@ -349,10 +379,15 @@ static AvbIOResult get_unique_guid_for_partition(AvbOps *ops,
 		printf("Could not find \"%s\" partition\n", partition);
 		return AVB_IO_RESULT_ERROR_NO_SUCH_PARTITION;
 	}
+
 	if (guid_buf && guid_buf_size > 0)
 		memcpy(guid_buf, part_info.uuid, guid_buf_size);
 
 	return AVB_IO_RESULT_OK;
+#else
+	printf("WARN: Get partition uuid requires CONFIG_PARTITION_UUIDS enabled\n");
+	return AVB_IO_RESULT_ERROR_NO_SUCH_VALUE;
+#endif
 }
 
 /* read permanent attributes from rpmb */
@@ -434,14 +469,28 @@ static AvbIOResult get_preloaded_partition(AvbOps* ops,
 	disk_partition_t part_info;
 	ulong load_addr;
 	AvbIOResult ret;
+	int full_preload = 0;
 
+#ifdef CONFIG_ANDROID_BOOTLOADER
+	dev_desc = android_get_bootdev();
+#else
 	dev_desc = rockchip_get_bootdev();
+#endif
 	if (!dev_desc)
 		return AVB_IO_RESULT_ERROR_IO;
 
 	if (part_get_info_by_name(dev_desc, partition, &part_info) < 0) {
 		printf("Could not find \"%s\" partition\n", partition);
 		return AVB_IO_RESULT_ERROR_NO_SUCH_PARTITION;
+	}
+
+	/* Record partition name(either boot or recovery) */
+	if (!strncmp(partition, ANDROID_PARTITION_BOOT, 4) ||
+	    !strncmp(partition, ANDROID_PARTITION_RECOVERY, 8)) {
+		data->boot_partition = strdup(partition);
+#ifdef CONFIG_ANDROID_AB
+		*((char *)data->boot_partition + strlen(partition) - 2) = '\0';
+#endif
 	}
 
 	if (!allow_verification_error) {
@@ -452,14 +501,17 @@ static AvbIOResult get_preloaded_partition(AvbOps* ops,
 			preload_info = &data->vendor_boot;
 		else if (!strncmp(partition, ANDROID_PARTITION_INIT_BOOT, 9))
 			preload_info = &data->init_boot;
+		else if (!strncmp(partition, ANDROID_PARTITION_RESOURCE, 8))
+			preload_info = &data->resource;
 
 		if (!preload_info) {
 			printf("Error: unknown full load partition '%s'\n", partition);
 			return AVB_IO_RESULT_ERROR_NO_SUCH_PARTITION;
 		}
 
-		printf("preloaded: full image from '%s' at 0x%08lx - 0x%08lx\n",
-		       partition, (ulong)preload_info->addr,
+		printf("preloaded(s): %sfull image from '%s' at 0x%08lx - 0x%08lx\n",
+		       preload_info->size ? "pre-" : "", partition,
+		       (ulong)preload_info->addr,
 		       (ulong)preload_info->addr + num_bytes);
 
 		/* If the partition hasn't yet been preloaded, do it now.*/
@@ -478,8 +530,20 @@ static AvbIOResult get_preloaded_partition(AvbOps* ops,
 		if (!strncmp(partition, ANDROID_PARTITION_INIT_BOOT, 9) ||
 		    !strncmp(partition, ANDROID_PARTITION_VENDOR_BOOT, 11) ||
 		    !strncmp(partition, ANDROID_PARTITION_BOOT, 4) ||
-		    !strncmp(partition, ANDROID_PARTITION_RECOVERY, 8)) {
-			printf("preloaded: distribute image from '%s'\n", partition);
+		    !strncmp(partition, ANDROID_PARTITION_RECOVERY, 8) ||
+		    !strncmp(partition, ANDROID_PARTITION_RESOURCE, 8)) {
+			/* If already full preloaded, just use it */
+			if (!strncmp(partition, ANDROID_PARTITION_BOOT, 4) ||
+			    !strncmp(partition, ANDROID_PARTITION_RECOVERY, 8)) {
+				preload_info = &data->boot;
+				if (preload_info->size) {
+					*out_pointer = preload_info->addr;
+					*out_num_bytes_preloaded = num_bytes;
+					full_preload = 1;
+				}
+			}
+			printf("preloaded: %s image from '%s\n",
+			       full_preload ? "pre-full" : "distribute", partition);
 		} else {
 			printf("Error: unknown preloaded partition '%s'\n", partition);
 			return AVB_IO_RESULT_ERROR_OOM;
@@ -490,11 +554,16 @@ static AvbIOResult get_preloaded_partition(AvbOps* ops,
 		 * here we just return a dummy buffer.
 		 */
 		if (!strncmp(partition, ANDROID_PARTITION_INIT_BOOT, 9) ||
-		    !strncmp(partition, ANDROID_PARTITION_VENDOR_BOOT, 11)) {
+		    !strncmp(partition, ANDROID_PARTITION_VENDOR_BOOT, 11) ||
+		    !strncmp(partition, ANDROID_PARTITION_RESOURCE, 8)) {
 			*out_pointer = (u8 *)avb_malloc(ARCH_DMA_MINALIGN);
 			*out_num_bytes_preloaded = num_bytes; /* return what it expects */
 			return AVB_IO_RESULT_OK;
 		}
+
+		/* If already full preloaded, there is nothing to do and just return */
+		if (full_preload)
+			return AVB_IO_RESULT_OK;
 
 		/*
 		 * only boot/recovery partition can reach here
