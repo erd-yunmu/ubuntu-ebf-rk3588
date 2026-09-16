@@ -792,15 +792,15 @@ struct edid {
 } __packed;
 
 enum base_output_format {
-	DRM_HDMI_OUTPUT_DEFAULT_RGB, /* default RGB */
-	DRM_HDMI_OUTPUT_YCBCR444, /* YCBCR 444 */
-	DRM_HDMI_OUTPUT_YCBCR422, /* YCBCR 422 */
-	DRM_HDMI_OUTPUT_YCBCR420, /* YCBCR 420 */
+	RK_IF_FORMAT_RGB,	/* default RGB */
+	RK_IF_FORMAT_YCBCR444,	/* YCBCR 444 */
+	RK_IF_FORMAT_YCBCR422,	/* YCBCR 422 */
+	RK_IF_FORMAT_YCBCR420,	/* YCBCR 420 */
 	/* (YCbCr444 > YCbCr422 > YCbCr420 > RGB) */
-	DRM_HDMI_OUTPUT_YCBCR_HQ,
+	RK_IF_FORMAT_YCBCR_HQ,	/* Highest subsampled YUV */
 	/* (YCbCr420 > YCbCr422 > YCbCr444 > RGB) */
-	DRM_HDMI_OUTPUT_YCBCR_LQ,
-	DRM_HDMI_OUTPUT_INVALID, /* Guess what ? */
+	RK_IF_FORMAT_YCBCR_LQ,	/* Lowest subsampled YUV */
+	RK_IF_FORMAT_MAX,
 };
 
 enum  base_output_depth {
@@ -1018,10 +1018,12 @@ int edid_get_timing(u8 *buf, int buf_size, struct display_timing *timing,
 int edid_get_drm_mode(u8 *buf, int buf_size, struct drm_display_mode *mode,
 		      int *panel_bits_per_colourp);
 int drm_add_edid_modes(struct hdmi_edid_data *data, u8 *edid);
+void drm_add_hdmi_modes(struct hdmi_edid_data *data,
+			const struct drm_display_mode *mode);
 bool drm_detect_hdmi_monitor(struct edid *edid);
 bool drm_detect_monitor_audio(struct edid *edid);
 int do_cea_modes(struct hdmi_edid_data *data, const u8 *db, u8 len);
-int drm_do_get_edid(struct ddc_adapter *adap, u8 *edid);
+u8 *drm_do_get_edid(struct ddc_adapter *adap);
 enum hdmi_quantization_range
 drm_default_rgb_quant_range(struct drm_display_mode *mode);
 u8 drm_scdc_readb(struct ddc_adapter *adap, u8 offset,

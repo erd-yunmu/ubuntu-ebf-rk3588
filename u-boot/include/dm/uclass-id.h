@@ -109,11 +109,12 @@ enum uclass_id {
 	UCLASS_CRYPTO,		/* Crypto */
 	UCLASS_ETH_PHY,		/* Ethernet PHY device */
 	UCLASS_MDIO,		/* MDIO bus */
-	UCLASS_EBC,		/* EBC Controller for eink screen */
-	UCLASS_EINK_DISPLAY,	/* EINK screen display driver */
+	UCLASS_EBC,		/* EBC Controller for ebook screen */
+	UCLASS_EBOOK_DISPLAY,	/* EBOOK screen display driver */
 	UCLASS_RNG,		/* Random Number Generator */
 	UCLASS_DMC,		/* Dynamic Memory Interface */
 	UCLASS_PD,		/* power delivery */
+	UCLASS_KEYLAD,		/* keylad used to transfer otp key */
 	UCLASS_COUNT,
 	UCLASS_INVALID = -1,
 };

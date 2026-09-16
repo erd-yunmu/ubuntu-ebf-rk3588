@@ -6,6 +6,7 @@
  */
 
 #include <common.h>
+#include <bouncebuf.h>
 #include <dm.h>
 #include <errno.h>
 #include <memalign.h>
@@ -311,7 +312,36 @@ static int nvme_disable_ctrl(struct nvme_dev *dev)
 	dev->ctrl_config &= ~NVME_CC_ENABLE;
 	writel(dev->ctrl_config, &dev->bar->cc);
 
+	if (dev->quirks & NVME_QUIRK_DELAY_BEFORE_CHK_RDY)
+		mdelay(NVME_QUIRK_DELAY_AMOUNT);
+
 	return nvme_wait_ready(dev, false);
+}
+
+static int nvme_wait_csts(struct nvme_dev *dev, u32 mask, u32 val)
+{
+	int timeout;
+	ulong start;
+
+	/* Timeout field in the CAP register is in 500 millisecond units */
+	timeout = NVME_CAP_TIMEOUT(dev->cap) * 500;
+
+	start = get_timer(0);
+	while (get_timer(start) < timeout) {
+		if ((readl(&dev->bar->csts) & mask) == val)
+			return 0;
+	}
+
+	return -ETIME;
+}
+
+static int nvme_shutdown_ctrl(struct nvme_dev *dev)
+{
+        dev->ctrl_config &= ~NVME_CC_SHN_MASK;
+        dev->ctrl_config |= NVME_CC_SHN_NORMAL;
+        writel(dev->ctrl_config, &dev->bar->cc);
+
+	return nvme_wait_csts(dev, NVME_CSTS_SHST_MASK, NVME_CSTS_SHST_CMPLT);
 }
 
 static void nvme_free_queue(struct nvme_queue *nvmeq)
@@ -681,8 +711,13 @@ int nvme_scan_namespace(void)
 
 	uclass_foreach_dev(dev, uc) {
 		ret = device_probe(dev);
-		if (ret)
-			return ret;
+		if (ret) {
+			printf("Failed to probe '%s': err=%dE\n", dev->name,
+				ret);
+			/* Bail if we ran out of memory, else keep trying */
+			if (ret != -EBUSY)
+				return ret;
+		}
 	}
 
 	return 0;
@@ -740,14 +775,25 @@ static ulong nvme_blk_rw(struct udevice *udev, lbaint_t blknr,
 	u64 prp2;
 	u64 total_len = blkcnt << desc->log2blksz;
 	u64 temp_len = total_len;
-	uintptr_t temp_buffer = (uintptr_t)buffer;
+	uintptr_t temp_buffer;
 
 	u64 slba = blknr;
 	u16 lbas = 1 << (dev->max_transfer_shift - ns->lba_shift);
 	u64 total_lbas = blkcnt;
 
-	flush_dcache_range((unsigned long)buffer,
-			   (unsigned long)buffer + total_len);
+	struct bounce_buffer bb;
+	unsigned int bb_flags;
+	int ret;
+
+	if (read)
+		bb_flags = GEN_BB_WRITE;
+	else
+		bb_flags = GEN_BB_READ;
+
+	ret = bounce_buffer_start(&bb, buffer, total_len, bb_flags);
+	if (ret)
+		return -ENOMEM;
+	temp_buffer = (unsigned long)bb.bounce_buffer;
 
 	c.rw.opcode = read ? nvme_cmd_read : nvme_cmd_write;
 	c.rw.flags = 0;
@@ -787,9 +833,7 @@ static ulong nvme_blk_rw(struct udevice *udev, lbaint_t blknr,
 		temp_buffer += lbas << ns->lba_shift;
 	}
 
-	if (read)
-		invalidate_dcache_range((unsigned long)buffer,
-					(unsigned long)buffer + total_len);
+	bounce_buffer_stop(&bb);
 
 	return (total_len - temp_len) >> desc->log2blksz;
 }
@@ -806,9 +850,62 @@ static ulong nvme_blk_write(struct udevice *udev, lbaint_t blknr,
 	return nvme_blk_rw(udev, blknr, blkcnt, (void *)buffer, false);
 }
 
+static ulong nvme_blk_erase(struct udevice *udev, lbaint_t blknr,
+			    lbaint_t blkcnt)
+{
+	ALLOC_CACHE_ALIGN_BUFFER(struct nvme_dsm_range, range, sizeof(struct nvme_dsm_range));
+	struct nvme_ns *ns = dev_get_priv(udev);
+	struct nvme_dev *dev = ns->dev;
+	struct nvme_command cmnd;
+
+	memset(&cmnd, 0, sizeof(cmnd));
+
+	range->cattr = cpu_to_le32(0);
+	range->nlb = cpu_to_le32(blkcnt);
+	range->slba = cpu_to_le64(blknr);
+
+	cmnd.dsm.opcode = nvme_cmd_dsm;
+        cmnd.dsm.command_id = nvme_get_cmd_id();
+	cmnd.dsm.nsid = cpu_to_le32(ns->ns_id);
+	cmnd.dsm.prp1 = cpu_to_le64((ulong)range);
+	cmnd.dsm.nr = 0;
+	cmnd.dsm.attributes = cpu_to_le32(NVME_DSMGMT_AD);
+	cmnd.common.nsid = cpu_to_le32(ns->ns_id);
+
+	flush_dcache_range((ulong)range,
+			(ulong)range + sizeof(struct nvme_dsm_range));
+
+	nvme_submit_cmd(dev->queues[NVME_IO_Q], &cmnd);
+	return blkcnt;
+}
+
+static ulong nvme_blk_write_zeroes(struct udevice *udev, lbaint_t blknr, lbaint_t blkcnt)
+{
+	struct nvme_ns *ns = dev_get_priv(udev);
+	struct nvme_dev *dev = ns->dev;
+	struct nvme_command cmnd;
+
+	if (dev->quirks & NVME_QUIRK_DEALLOCATE_ZEROES)
+		nvme_blk_erase(udev, blknr, blkcnt);
+
+	memset(&cmnd, 0, sizeof(cmnd));
+
+	cmnd.write_zeroes.opcode = nvme_cmd_write_zeroes;
+	cmnd.write_zeroes.nsid = cpu_to_le32(ns->ns_id);
+	cmnd.write_zeroes.slba = cpu_to_le64(blknr);
+	cmnd.write_zeroes.length = cpu_to_le16(blkcnt - 1);
+	cmnd.write_zeroes.control = 0;
+	cmnd.write_zeroes.command_id = nvme_get_cmd_id();
+
+	nvme_submit_cmd(dev->queues[NVME_IO_Q], &cmnd);
+	return blkcnt;
+}
+
 static const struct blk_ops nvme_blk_ops = {
 	.read	= nvme_blk_read,
 	.write	= nvme_blk_write,
+	.write_zeroes = nvme_blk_write_zeroes,
+	.erase  = nvme_blk_erase,
 };
 
 U_BOOT_DRIVER(nvme_blk) = {
@@ -829,6 +926,50 @@ static int nvme_bind(struct udevice *udev)
 	return device_set_name(udev, name);
 }
 
+static const struct pci_device_id nvme_id_table[] = {
+	{ PCI_VDEVICE(INTEL, 0x0953),   /* Intel 750/P3500/P3600/P3700 */
+	  .driver_data = NVME_QUIRK_DEALLOCATE_ZEROES, },
+	{ PCI_VDEVICE(INTEL, 0x0a53),   /* Intel P3520 */
+	  .driver_data = NVME_QUIRK_DEALLOCATE_ZEROES, },
+	{ PCI_VDEVICE(INTEL, 0x0a54),   /* Intel P4500/P4600 */
+	  .driver_data = NVME_QUIRK_DEALLOCATE_ZEROES  },
+	{ PCI_VDEVICE(INTEL, 0x0a55),   /* Dell Express Flash P4600 */
+	  .driver_data = NVME_QUIRK_DEALLOCATE_ZEROES, },
+        { PCI_DEVICE(0x1bb1, 0x0100),   /* Seagate Nytro Flash Storage */
+	  .driver_data = NVME_QUIRK_DELAY_BEFORE_CHK_RDY, },
+	{ PCI_DEVICE(0x1c58, 0x0003),   /* HGST adapter */
+	  .driver_data = NVME_QUIRK_DELAY_BEFORE_CHK_RDY, },
+	{ PCI_DEVICE(0x1c58, 0x0023),   /* WDC SN200 adapter */
+	  .driver_data = NVME_QUIRK_DELAY_BEFORE_CHK_RDY, },
+	{ PCI_DEVICE(0x1c5f, 0x0540),   /* Memblaze Pblaze4 adapter */
+	  .driver_data = NVME_QUIRK_DELAY_BEFORE_CHK_RDY, },
+	{ PCI_DEVICE(0x144d, 0xa821),   /* Samsung PM1725 */
+	  .driver_data = NVME_QUIRK_DELAY_BEFORE_CHK_RDY, },
+	{ PCI_DEVICE(0x144d, 0xa822),   /* Samsung PM1725a */
+	  .driver_data = NVME_QUIRK_DELAY_BEFORE_CHK_RDY, },
+	{ PCI_DEVICE(0x1987, 0x5013),   /* Phison E13 */
+	  .driver_data = NVME_QUIRK_LIMIT_IOQD32},
+};
+
+static void nvme_apply_quirks(struct udevice *udev)
+{
+	struct nvme_dev *ndev = dev_get_priv(udev);
+	u16 vendor_id, device_id;
+	unsigned int i;
+
+	dm_pci_read_config16(udev, PCI_VENDOR_ID, &vendor_id);
+	dm_pci_read_config16(udev, PCI_DEVICE_ID, &device_id);
+
+	for (i = 0; i < ARRAY_SIZE(nvme_id_table); i++) {
+		if (vendor_id == nvme_id_table[i].vendor &&
+		    device_id == nvme_id_table[i].device) {
+			ndev->quirks |= nvme_id_table[i].driver_data;
+			debug("vid 0x%x, pid 0x%x apply quirks 0x%lx\n",
+			      vendor_id, device_id, nvme_id_table[i].driver_data);
+		}
+	}
+}
+
 static int nvme_probe(struct udevice *udev)
 {
 	int ret;
@@ -841,8 +982,8 @@ static int nvme_probe(struct udevice *udev)
 	ndev->bar = dm_pci_map_bar(udev, PCI_BASE_ADDRESS_0,
 			PCI_REGION_MEM);
 	if (readl(&ndev->bar->csts) == -1) {
-		ret = -ENODEV;
-		printf("Error: %s: Out of memory!\n", udev->name);
+		ret = -EBUSY;
+		printf("Error: %s: Controller not ready!\n", udev->name);
 		goto free_nvme;
 	}
 
@@ -854,8 +995,12 @@ static int nvme_probe(struct udevice *udev)
 	}
 	memset(ndev->queues, 0, NVME_Q_NUM * sizeof(struct nvme_queue *));
 
+	nvme_apply_quirks(udev);
+
 	ndev->cap = nvme_readq(&ndev->bar->cap);
 	ndev->q_depth = min_t(int, NVME_CAP_MQES(ndev->cap) + 1, NVME_Q_DEPTH);
+	if (ndev->quirks & NVME_QUIRK_LIMIT_IOQD32)
+		ndev->q_depth = min_t(int, ndev->q_depth, 32);
 	ndev->db_stride = 1 << NVME_CAP_STRIDE(ndev->cap);
 	ndev->dbs = ((void __iomem *)ndev->bar) + 4096;
 
@@ -924,11 +1069,26 @@ free_nvme:
 	return ret;
 }
 
+int nvme_shutdown(struct udevice *udev)
+{
+	struct nvme_dev *ndev = dev_get_priv(udev);
+	int ret;
+
+	ret = nvme_shutdown_ctrl(ndev);
+	if (ret < 0) {
+		printf("Error: %s: Shutdown timed out!\n", udev->name);
+		return ret;
+	}
+
+	return nvme_disable_ctrl(ndev);
+}
+
 U_BOOT_DRIVER(nvme) = {
 	.name	= "nvme",
 	.id	= UCLASS_NVME,
 	.bind	= nvme_bind,
 	.probe	= nvme_probe,
+	.remove = nvme_shutdown,
 	.priv_auto_alloc_size = sizeof(struct nvme_dev),
 };
 

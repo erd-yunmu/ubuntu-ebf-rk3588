@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-lubancat-3.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-lubancat-5.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-lubancat-5io.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-lubancat-5-v2.dtb

@@ -11,11 +11,20 @@
 #include <clk-uclass.h>
 #include <asm/arch/hardware.h>
 #include <asm/arch/clock.h>
+#include <rockchip/crypto_ecc.h>
 #include <rockchip/crypto_hash_cache.h>
 #include <rockchip/crypto_v2.h>
 #include <rockchip/crypto_v2_pka.h>
 
 #define	RK_HASH_CTX_MAGIC		0x1A1A1A1A
+
+#define CRYPTO_MAJOR_VER(ver)		((ver) & 0x0f000000)
+
+#define CRYPTO_MAJOR_VER_3		0x03000000
+#define CRYPTO_MAJOR_VER_4		0x04000000
+#ifdef CONFIG_ROCKCHIP_RK3562
+#define CRYPTO_S_BY_KEYLAD_BASE  	0xFF8A8000
+#endif
 
 #ifdef DEBUG
 #define IMSG(format, ...) printf("[%s, %05d]-trace: " format "\n", \
@@ -59,6 +68,9 @@ struct rockchip_crypto_priv {
 	u32				length;
 	struct rk_hash_ctx		*hw_ctx;
 	struct rk_crypto_soc_data	*soc_data;
+
+	u16				secure;
+	u16				enabled;
 };
 
 #define LLI_ADDR_ALIGN_SIZE	8
@@ -85,9 +97,11 @@ struct rockchip_crypto_priv {
 
 #define WAIT_TAG_VALID(channel, timeout) ({ \
 	u32 tag_mask = CRYPTO_CH0_TAG_VALID << (channel);\
-	int ret;\
-	ret = RK_POLL_TIMEOUT(!(crypto_read(CRYPTO_TAG_VALID) & tag_mask),\
-			      timeout);\
+	int ret = 0;\
+	if (is_check_tag_valid()) { \
+		ret = RK_POLL_TIMEOUT(!(crypto_read(CRYPTO_TAG_VALID) & tag_mask),\
+				      timeout);\
+	} \
 	crypto_write(crypto_read(CRYPTO_TAG_VALID) & tag_mask, CRYPTO_TAG_VALID);\
 	ret;\
 })
@@ -118,6 +132,19 @@ struct rockchip_crypto_priv {
 			     (rk_mode) == RK_MODE_GCM)
 
 fdt_addr_t crypto_base;
+static uint32_t g_crypto_version;
+
+static inline bool is_check_hash_valid(void)
+{
+	/* crypto < v4 need to check hash valid */
+	return CRYPTO_MAJOR_VER(g_crypto_version) < CRYPTO_MAJOR_VER_4;
+}
+
+static inline bool is_check_tag_valid(void)
+{
+	/* crypto < v4 need to check hash valid */
+	return CRYPTO_MAJOR_VER(g_crypto_version) < CRYPTO_MAJOR_VER_4;
+}
 
 static inline void word2byte_be(u32 word, u8 *ch)
 {
@@ -139,11 +166,6 @@ static inline void clear_regs(u32 base, u32 words)
 	/*clear out register*/
 	for (i = 0; i < words; i++)
 		crypto_write(0, base + 4 * i);
-}
-
-static inline void clear_hash_out_reg(void)
-{
-	clear_regs(CRYPTO_HASH_DOUT_0, 16);
 }
 
 static inline void clear_key_regs(void)
@@ -239,7 +261,7 @@ static int rk_crypto_do_enable_clk(struct udevice *dev, int enable)
 		else
 			ret = clk_disable(&clk);
 		if (ret < 0 && ret != -ENOSYS) {
-			printf("Failed to enable(%d) clk(%ld): ret=%d\n",
+			debug("Failed to enable(%d) clk(%ld): ret=%d\n",
 			       enable, clk.id, ret);
 			return ret;
 		}
@@ -250,11 +272,17 @@ static int rk_crypto_do_enable_clk(struct udevice *dev, int enable)
 
 static int rk_crypto_enable_clk(struct udevice *dev)
 {
+	struct rockchip_crypto_priv *priv = dev_get_priv(dev);
+
+	crypto_base = priv->reg;
+
 	return rk_crypto_do_enable_clk(dev, 1);
 }
 
 static int rk_crypto_disable_clk(struct udevice *dev)
 {
+	crypto_base = 0;
+
 	return rk_crypto_do_enable_clk(dev, 0);
 }
 
@@ -292,6 +320,13 @@ static u32 crypto_v3_dynamic_cap(void)
 		     CRYPTO_RSA3072 |
 		     CRYPTO_RSA4096;
 
+#if CONFIG_IS_ENABLED(ROCKCHIP_EC)
+	capability |= (CRYPTO_SM2 |
+		       CRYPTO_ECC_192R1 |
+		       CRYPTO_ECC_224R1 |
+		       CRYPTO_ECC_256R1);
+#endif
+
 	for (i = 0; i < ARRAY_SIZE(cap_tbl); i++) {
 		ver_reg = crypto_read(cap_tbl[i].ver_offset);
 
@@ -315,6 +350,8 @@ static int hw_crypto_reset(void)
 
 	/* wait reset compelete */
 	ret = RK_POLL_TIMEOUT(crypto_read(CRYPTO_RST_CTL), RK_CRYPTO_TIMEOUT);
+
+	g_crypto_version = crypto_read(CRYPTO_CRYPTO_VERSION_NEW);
 
 	return ret;
 }
@@ -381,8 +418,6 @@ static int rk_hash_init(void *hw_ctx, u32 algo)
 		ret = -EINVAL;
 		goto exit;
 	}
-
-	clear_hash_out_reg();
 
 	/* enable hardware padding */
 	reg_ctrl |= CRYPTO_HW_PAD_ENABLE;
@@ -504,7 +539,7 @@ exit:
 int rk_hash_final(void *ctx, u8 *digest, size_t len)
 {
 	struct rk_hash_ctx *tmp_ctx = (struct rk_hash_ctx *)ctx;
-	int ret = -EINVAL;
+	int ret = 0;
 
 	if (!digest)
 		goto exit;
@@ -516,9 +551,11 @@ int rk_hash_final(void *ctx, u8 *digest, size_t len)
 		goto exit;
 	}
 
-	/* wait hash value ok */
-	ret = RK_POLL_TIMEOUT(!crypto_read(CRYPTO_HASH_VALID),
-			      RK_CRYPTO_TIMEOUT);
+	if(is_check_hash_valid()) {
+		/* wait hash value ok */
+		ret = RK_POLL_TIMEOUT(!crypto_read(CRYPTO_HASH_VALID),
+				      RK_CRYPTO_TIMEOUT);
+	}
 
 	read_regs(CRYPTO_HASH_DOUT_0, digest, len);
 
@@ -535,6 +572,9 @@ static u32 rockchip_crypto_capability(struct udevice *dev)
 {
 	struct rockchip_crypto_priv *priv = dev_get_priv(dev);
 	u32 capability, mask = 0;
+
+	if (!priv->enabled)
+		return 0;
 
 	capability = priv->soc_data->capability;
 
@@ -864,6 +904,10 @@ static int hw_cipher_init(u32 chn, const u8 *key, const u8 *twk_key,
 	u32 rk_mode = RK_GET_RK_MODE(mode);
 	u32 key_chn_sel = chn;
 	u32 reg_ctrl = 0;
+	bool use_otpkey = false;
+
+	if (!key && key_len)
+		use_otpkey = true;
 
 	IMSG("%s: key addr is %p, key_len is %d, iv addr is %p",
 	     __func__, key, key_len, iv);
@@ -908,7 +952,12 @@ static int hw_cipher_init(u32 chn, const u8 *key, const u8 *twk_key,
 		reg_ctrl |= CRYPTO_BC_DECRYPT;
 
 	/* write key data to reg */
-	write_key_reg(key_chn_sel, key, key_len);
+	if (!use_otpkey) {
+		write_key_reg(key_chn_sel, key, key_len);
+		crypto_write(CRYPTO_SEL_USER, CRYPTO_KEY_SEL);
+	} else {
+		crypto_write(CRYPTO_SEL_KEYTABLE, CRYPTO_KEY_SEL);
+	}
 
 	/* write twk key for xts mode */
 	if (rk_mode == RK_MODE_XTS)
@@ -1252,16 +1301,20 @@ int rockchip_crypto_cipher(struct udevice *dev, cipher_context *ctx,
 	case CRYPTO_DES:
 		ret = rk_crypto_des(dev, ctx->mode, ctx->key, ctx->key_len,
 				    ctx->iv, in, out, len, enc);
+		break;
 	case CRYPTO_AES:
 		ret = rk_crypto_aes(dev, ctx->mode,
 				    ctx->key, ctx->twk_key, ctx->key_len,
 				    ctx->iv, ctx->iv_len, in, out, len, enc);
+		break;
 	case CRYPTO_SM4:
 		ret = rk_crypto_sm4(dev, ctx->mode,
 				    ctx->key, ctx->twk_key, ctx->key_len,
 				    ctx->iv, ctx->iv_len, in, out, len, enc);
+		break;
 	default:
 		ret = -EINVAL;
+		break;
 	}
 
 	rk_crypto_disable_clk(dev);
@@ -1347,7 +1400,6 @@ int rk_crypto_ae(struct udevice *dev, u32 algo, u32 mode,
 int rockchip_crypto_ae(struct udevice *dev, cipher_context *ctx,
 		       const u8 *in, u32 len, const u8 *aad, u32 aad_len,
 		       u8 *out, u8 *tag)
-
 {
 	int ret = 0;
 
@@ -1362,6 +1414,42 @@ int rockchip_crypto_ae(struct udevice *dev, cipher_context *ctx,
 	return ret;
 }
 
+#if CONFIG_IS_ENABLED(DM_KEYLAD)
+int rockchip_crypto_fw_cipher(struct udevice *dev, cipher_fw_context *ctx,
+			      const u8 *in, u8 *out, u32 len, bool enc)
+{
+	int ret;
+
+	rk_crypto_enable_clk(dev);
+
+	switch (ctx->algo) {
+	case CRYPTO_DES:
+		ret = rk_crypto_des(dev, ctx->mode, NULL, ctx->key_len,
+				    ctx->iv, in, out, len, enc);
+		break;
+	case CRYPTO_AES:
+		ret = rk_crypto_aes(dev, ctx->mode, NULL, NULL, ctx->key_len,
+				    ctx->iv, ctx->iv_len, in, out, len, enc);
+		break;
+	case CRYPTO_SM4:
+		ret = rk_crypto_sm4(dev, ctx->mode, NULL, NULL, ctx->key_len,
+				    ctx->iv, ctx->iv_len, in, out, len, enc);
+		break;
+	default:
+		ret = -EINVAL;
+		break;
+	}
+
+	rk_crypto_disable_clk(dev);
+
+	return ret;
+}
+
+static ulong rockchip_crypto_keytable_addr(struct udevice *dev)
+{
+	return CRYPTO_S_BY_KEYLAD_BASE + CRYPTO_CH0_KEY_0;
+}
+#endif
 #endif
 
 #if CONFIG_IS_ENABLED(ROCKCHIP_RSA)
@@ -1425,6 +1513,62 @@ exit:
 }
 #endif
 
+#if CONFIG_IS_ENABLED(ROCKCHIP_EC)
+static int rockchip_crypto_ec_verify(struct udevice *dev, ec_key *ctx,
+				     u8 *hash, u32 hash_len, u8 *sign)
+{
+	struct mpa_num *bn_sign = NULL;
+	struct rk_ecp_point point_P, point_sign;
+	u32 n_bits, n_words;
+	int ret;
+
+	if (!ctx)
+		return -EINVAL;
+
+	if (ctx->algo != CRYPTO_SM2 &&
+	    ctx->algo != CRYPTO_ECC_192R1 &&
+	    ctx->algo != CRYPTO_ECC_224R1 &&
+	    ctx->algo != CRYPTO_ECC_256R1)
+		return -EINVAL;
+
+	n_bits = crypto_algo_nbits(ctx->algo);
+	n_words = BITS2WORD(n_bits);
+
+	ret = rk_mpa_alloc(&bn_sign, sign, n_words);
+	if (ret)
+		goto exit;
+
+	ret = rk_mpa_alloc(&point_P.x, ctx->x, n_words);
+	ret |= rk_mpa_alloc(&point_P.y, ctx->y, n_words);
+	if (ret)
+		goto exit;
+
+	ret = rk_mpa_alloc(&point_sign.x, sign, n_words);
+	ret |= rk_mpa_alloc(&point_sign.y, sign + WORD2BYTE(n_words), n_words);
+	if (ret)
+		goto exit;
+
+	rk_crypto_enable_clk(dev);
+	ret = rockchip_ecc_verify(ctx->algo, hash, hash_len, &point_P, &point_sign);
+	rk_crypto_disable_clk(dev);
+exit:
+	rk_mpa_free(&bn_sign);
+	rk_mpa_free(&point_P.x);
+	rk_mpa_free(&point_P.y);
+	rk_mpa_free(&point_sign.x);
+	rk_mpa_free(&point_sign.y);
+
+	return ret;
+}
+#endif
+
+static bool rockchip_crypto_is_secure(struct udevice *dev)
+{
+	struct rockchip_crypto_priv *priv = dev_get_priv(dev);
+
+	return priv->secure;
+}
+
 static const struct dm_crypto_ops rockchip_crypto_ops = {
 	.capability   = rockchip_crypto_capability,
 	.sha_init     = rockchip_crypto_sha_init,
@@ -1433,16 +1577,24 @@ static const struct dm_crypto_ops rockchip_crypto_ops = {
 #if CONFIG_IS_ENABLED(ROCKCHIP_RSA)
 	.rsa_verify   = rockchip_crypto_rsa_verify,
 #endif
+#if CONFIG_IS_ENABLED(ROCKCHIP_EC)
+	.ec_verify    = rockchip_crypto_ec_verify,
+#endif
 #if CONFIG_IS_ENABLED(ROCKCHIP_HMAC)
 	.hmac_init    = rockchip_crypto_hmac_init,
 	.hmac_update  = rockchip_crypto_hmac_update,
 	.hmac_final   = rockchip_crypto_hmac_final,
 #endif
 #if CONFIG_IS_ENABLED(ROCKCHIP_CIPHER)
-	.cipher_crypt = rockchip_crypto_cipher,
-	.cipher_mac = rockchip_crypto_mac,
-	.cipher_ae  = rockchip_crypto_ae,
+	.cipher_crypt    = rockchip_crypto_cipher,
+	.cipher_mac      = rockchip_crypto_mac,
+	.cipher_ae       = rockchip_crypto_ae,
+#if CONFIG_IS_ENABLED(DM_KEYLAD)
+	.cipher_fw_crypt = rockchip_crypto_fw_cipher,
+	.keytable_addr   = rockchip_crypto_keytable_addr,
 #endif
+#endif
+	.is_secure       = rockchip_crypto_is_secure,
 };
 
 /*
@@ -1465,13 +1617,22 @@ static int rockchip_crypto_ofdata_to_platdata(struct udevice *dev)
 
 	crypto_base = priv->reg;
 
+	priv->secure = dev_read_bool(dev, "secure");
+	priv->enabled = true;
+
+#if !defined(CONFIG_SPL_BUILD)
+	/* uboot disabled secure crypto */
+	priv->enabled = !priv->secure;
+#endif
+	if (!priv->enabled)
+		return 0;
+
 	/* if there is no clocks in dts, just skip it */
 	if (!dev_read_prop(dev, "clocks", &len)) {
 		printf("Can't find \"clocks\" property\n");
 		return 0;
 	}
 
-	memset(priv, 0x00, sizeof(*priv));
 	priv->clocks = malloc(len);
 	if (!priv->clocks)
 		return -ENOMEM;
@@ -1549,10 +1710,8 @@ static int rockchip_crypto_probe(struct udevice *dev)
 
 	sdata = (struct rk_crypto_soc_data *)dev_get_driver_data(dev);
 
-	if (sdata->dynamic_cap)
-		sdata->capability = sdata->dynamic_cap();
-
-	priv->soc_data = sdata;
+	if (!priv->enabled)
+		return 0;
 
 	priv->hw_ctx = memalign(LLI_ADDR_ALIGN_SIZE,
 				sizeof(struct rk_hash_ctx));
@@ -1563,7 +1722,16 @@ static int rockchip_crypto_probe(struct udevice *dev)
 	if (ret)
 		return ret;
 
+	rk_crypto_enable_clk(dev);
+
 	hw_crypto_reset();
+
+	if (sdata->dynamic_cap)
+		sdata->capability = sdata->dynamic_cap();
+
+	priv->soc_data = sdata;
+
+	rk_crypto_disable_clk(dev);
 
 	return 0;
 }
