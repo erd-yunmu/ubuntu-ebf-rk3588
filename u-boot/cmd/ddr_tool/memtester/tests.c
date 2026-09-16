@@ -43,21 +43,32 @@ int compare_regions(u32v *bufa, u32v *bufb, size_t count)
 	size_t i;
 	u32v *p1 = bufa;
 	u32v *p2 = bufb;
+	u32 read[2];
+	u32 reread[2];
 	off_t physaddr;
 
 	for (i = 0; i < count; i++, p1++, p2++) {
-		if (*p1 != *p2) {
+		read[0] = *p1;
+		read[1] = *p2;
+		if (read[0] != read[1]) {
+			flush_dcache_all();
+			reread[0] = *p1;
+			reread[1] = *p2;
 			if (use_phys) {
 				physaddr = physaddrbase + (i * sizeof(u32v));
 				fprintf(stderr,
-					"FAILURE: 0x%08lx != 0x%08lx at physical address "
-					"0x%08lx.\n",
-					(ul)*p1, (ul)*p2, physaddr);
+					"FAILURE: 0x%08x != 0x%08x (readA^readB:0x%08x) at physical address "
+					"0x%08lx, reread:0x%08x, 0x%08x (rereadA^readA:0x%08x, rereadB^readB:0x%08x).\n",
+					read[0], read[1], read[0] ^ read[1], physaddr,
+					reread[0], reread[1], reread[0] ^ read[0], reread[1] ^ read[1]);
 			} else {
 				fprintf(stderr,
-					"FAILURE: 0x%08lx != 0x%08lx at offset 0x%08lx.\n",
-					(ul)*p1, (ul)*p2,
-					(ul)(i * sizeof(u32v)));
+					"FAILURE: 0x%08x != 0x%08x (readA^readB:0x%08x) at offset 0x%08lx.\n"
+					"physical address: 0x%08lx, 0x%08lx, "
+					"reread:0x%08x, 0x%08x (rereadA^readA:0x%08x, rereadB^readB:0x%08x).\n",
+					read[0], read[1], read[0] ^ read[1], (ul) (i * sizeof(u32v)),
+					(ul)bufa + (ul)(i * sizeof(u32v)), (ul)bufb + (ul)(i * sizeof(u32v)),
+					reread[0], reread[1], reread[0] ^ read[0], reread[1] ^ read[1]);
 			}
 			/* printf("Skipping to next test..."); */
 			r = -1;

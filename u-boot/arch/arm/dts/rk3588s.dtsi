@@ -44,6 +44,11 @@
 		spi3 = &spi3;
 		spi4 = &spi4;
 		spi5 = &sfc;
+		gpio0 = &gpio0;
+		gpio1 = &gpio1;
+		gpio2 = &gpio2;
+		gpio3 = &gpio3;
+		gpio4 = &gpio4;
 	};
 
 	cpus {
@@ -514,7 +519,7 @@
 			<&cru PLL_PPLL>, <&cru PLL_CPLL>,
 			<&cru PLL_NPLL>, <&cru PLL_GPLL>,
 			<&cru ARMCLK_L>, <&cru ARMCLK_B01>,
-			<&cru ACLK_CENTER_ROOT>, <&cru PCLK_CENTER_ROOT>,
+			<&cru ACLK_CENTER_ROOT>,
 			<&cru HCLK_CENTER_ROOT>, <&cru ACLK_CENTER_LOW_ROOT>,
 			<&cru ACLK_TOP_ROOT>, <&cru PCLK_TOP_ROOT>,
 			<&cru ACLK_LOW_TOP_ROOT>, <&cru PCLK_PMU0_ROOT>,
@@ -523,7 +528,7 @@
 			<100000000>, <1500000000>,
 			<850000000>,  <1188000000>,
 			<816000000>, <1008000000>,
-			<600000000>, <200000000>,
+			<600000000>,
 			<400000000>, <500000000>,
 			<800000000>, <100000000>,
 			<400000000>, <100000000>,
@@ -2259,6 +2264,7 @@
 	usbdp_phy0: phy@fed80000 {
 		compatible = "rockchip,rk3588-usbdp-phy";
 		reg = <0x0 0xfed80000 0x0 0x10000>;
+		rockchip,u2phy-grf = <&usb2phy0_grf>;
 		rockchip,usb-grf = <&usb_grf>;
 		rockchip,usbdpphy-grf = <&usbdpphy0_grf>;
 		rockchip,vo-grf = <&vo0_grf>;

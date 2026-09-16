@@ -147,6 +147,7 @@ int rksfc_nor_simply_over_write(struct udevice *udev,
 	pbuf_temp = malloc(remain * 512);
 	snor_read(p_dev, addr_aligned, remain, pbuf_temp);
 	memcpy(pbuf_temp + offset * 512, p_data, n_sec * 512);
+	printf("gpt_write addr=0x%x size=0x%x\n", addr_aligned, remain);
 	snor_write(p_dev, addr_aligned, remain, pbuf_temp);
 	free(pbuf_temp);
 
@@ -165,7 +166,7 @@ int rksfc_nor_write(struct udevice *udev,
 	struct SFNOR_DEV *p_dev = (struct SFNOR_DEV *)&priv->flash_dev_info;
 	u32 sfc_nor_density = rksfc_nor_get_capacity(udev);
 
-	if (sec >= (sfc_nor_density - 33))
+	if ((sec >= (sfc_nor_density - 33)) || (sec == 1) || (sec == 2))
 		return rksfc_nor_simply_over_write(udev, sec, n_sec, p_data);
 
 	if (sec + n_sec - 1 < FLASH_VENDOR_PART_START ||

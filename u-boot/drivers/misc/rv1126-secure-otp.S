@@ -6441,7 +6441,7 @@ _u_boot_list_2_driver_2_rockchip_secure_otp:
 .LASF28:
 	.ascii	"name\000"
 .LASF251:
-	.ascii	"UCLASS_EINK_DISPLAY\000"
+	.ascii	"UCLASS_EBOOK_DISPLAY\000"
 .LASF202:
 	.ascii	"UCLASS_PANEL_BACKLIGHT\000"
 .LASF230:

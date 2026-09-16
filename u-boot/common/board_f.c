@@ -21,6 +21,7 @@
 #include <init_helpers.h>
 #include <malloc.h>
 #include <mapmem.h>
+#include <mp_boot.h>
 #include <os.h>
 #include <post.h>
 #include <relocate.h>
@@ -254,6 +255,9 @@ static int setup_mon_len(void)
 	/* TODO: use (ulong)&__bss_end - (ulong)&__text_start; ? */
 	gd->mon_len = (ulong)&__bss_end - CONFIG_SYS_MONITOR_BASE;
 #endif
+#ifdef CONFIG_MP_BOOT
+	mpb_init_x(3);
+#endif
 	return 0;
 }
 
@@ -268,7 +272,7 @@ __weak int mach_cpu_init(void)
 }
 
 /* Get the top of usable RAM */
-__weak ulong board_get_usable_ram_top(ulong total_size)
+__weak uint64_t board_get_usable_ram_top(ulong total_size)
 {
 #ifdef CONFIG_SYS_SDRAM_BASE
 	/*
@@ -503,11 +507,7 @@ static int reserve_fdt(void)
 	 * will be relocated with other data.
 	 */
 	if (gd->fdt_blob) {
-		u32 extrasize = 0;
-
-		if (gd->fdt_blob_kern)
-			extrasize = fdt_totalsize(gd->fdt_blob_kern);
-		gd->fdt_size = ALIGN(fdt_totalsize(gd->fdt_blob) + extrasize + 0x1000, 32);
+		gd->fdt_size = ALIGN(fdt_totalsize(gd->fdt_blob) + 0x1000, 32);
 		gd->start_addr_sp -= gd->fdt_size;
 
 		/* 8-byte align */
@@ -515,9 +515,6 @@ static int reserve_fdt(void)
 		gd->start_addr_sp &= ~0x7;
 		gd->new_fdt = map_sysmem(gd->start_addr_sp, gd->fdt_size);
 
-		if (gd->fdt_blob_kern)
-			gd->fdt_blob_kern = (ulong *)ALIGN((ulong)gd->new_fdt +
-					fdt_totalsize(gd->fdt_blob), 8);
 		debug("Reserving %lu Bytes for FDT at: %08lx\n",
 		      gd->fdt_size, gd->start_addr_sp);
 	}

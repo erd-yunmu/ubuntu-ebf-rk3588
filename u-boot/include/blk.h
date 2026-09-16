@@ -9,6 +9,7 @@
 #define BLK_H
 
 #include <efi.h>
+#include <asm/uspinlock.h>
 
 #ifdef CONFIG_SYS_64BIT_LBA
 typedef uint64_t lbaint_t;
@@ -89,7 +90,10 @@ struct blk_desc {
 	unsigned char	lba48;
 #endif
 	lbaint_t	lba;		/* number of blocks */
+	lbaint_t	rawlba;		/* physical number of blocks */
 	unsigned long	blksz;		/* block size */
+	unsigned long	rawblksz;	/* block size */
+	void	*align_sector_buf; /* allocate alignment buffer for 4k size blocks */
 	int		log2blksz;	/* for convenience: log2(blksz) */
 	char		vendor[BLK_VEN_SIZE + 1]; /* device vendor string */
 	char		product[BLK_PRD_SIZE + 1]; /* device product number */
@@ -120,6 +124,8 @@ struct blk_desc {
 				       lbaint_t blkcnt);
 	void		*priv;		/* driver private struct pointer */
 #endif
+
+	uspinlock_t	blk_lock;
 };
 
 #define BLOCK_CNT(size, blk_desc) (PAD_COUNT(size, blk_desc->blksz))
@@ -243,6 +249,18 @@ struct blk_ops {
 			       lbaint_t blkcnt, const void *buffer);
 
 	/**
+	 * write_zeroes() - write zeroes to a block device
+	 *
+	 * @dev:	Device to write to
+	 * @start:	Start block number to write (0=first)
+	 * @blkcnt:	Number of blocks to write
+	 * @return number of blocks written, or -ve error number (see the
+	 * IS_ERR_VALUE() macro
+	 */
+	unsigned long (*write_zeroes)(struct udevice *dev, lbaint_t start,
+				      lbaint_t blkcnt);
+
+	/**
 	 * erase() - erase a section of a block device
 	 *
 	 * @dev:	Device to (partially) erase
@@ -286,6 +304,8 @@ unsigned long blk_dread(struct blk_desc *block_dev, lbaint_t start,
 			lbaint_t blkcnt, void *buffer);
 unsigned long blk_dwrite(struct blk_desc *block_dev, lbaint_t start,
 			 lbaint_t blkcnt, const void *buffer);
+unsigned long blk_dwrite_zeroes(struct blk_desc *block_dev, lbaint_t start,
+			 lbaint_t blkcnt);
 unsigned long blk_derase(struct blk_desc *block_dev, lbaint_t start,
 			 lbaint_t blkcnt);
 
@@ -646,6 +666,17 @@ ulong blk_read_devnum(enum if_type if_type, int devnum, lbaint_t start,
  */
 ulong blk_write_devnum(enum if_type if_type, int devnum, lbaint_t start,
 		       lbaint_t blkcnt, const void *buffer);
+
+/**
+ * blk_write_zeroes_devnum() - write blocks to a device with zero data
+ *
+ * @if_type:	Block device type
+ * @devnum:	Device number
+ * @blkcnt:	Number of blocks to write
+ * @return number of blocks written, or -ve error number on error
+ */
+ulong blk_write_zeroes_devnum(enum if_type if_type, int devnum, lbaint_t start,
+			      lbaint_t blkcnt);
 
 /**
  * blk_erase_devnum() - erase blocks to a device

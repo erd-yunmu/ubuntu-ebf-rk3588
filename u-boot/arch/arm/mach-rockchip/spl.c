@@ -5,25 +5,32 @@
  */
 
 #include <common.h>
+#include <version.h>
 #include <boot_rkimg.h>
 #include <debug_uart.h>
 #include <dm.h>
+#include <envf.h>
 #include <key.h>
 #include <led.h>
 #include <misc.h>
+#include <mtd_blk.h>
 #include <ram.h>
 #include <spl.h>
+#include <spl_ab.h>
 #include <optee_include/OpteeClientInterface.h>
 #include <power/fuel_gauge.h>
 #include <asm/arch/bootrom.h>
 #ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
 #include <asm/arch/rk_atags.h>
 #endif
+#include <asm/arch/pcie_ep_boot.h>
 #include <asm/arch/sdram.h>
 #include <asm/arch/boot_mode.h>
 #include <asm/arch-rockchip/sys_proto.h>
 #include <asm/io.h>
 #include <asm/arch/param.h>
+#include <asm/arch/rk_hwid.h>
+#include <asm/arch/rk_meta.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -35,11 +42,19 @@ void board_return_to_bootrom(void)
 __weak const char * const boot_devices[BROM_LAST_BOOTSOURCE + 1] = {
 };
 
+__weak void spl_rk_board_prepare_for_jump(struct spl_image_info *spl_image)
+{
+}
+
 const char *board_spl_was_booted_from(void)
 {
 	u32  bootdevice_brom_id = readl(BROM_BOOTSOURCE_ID_ADDR);
 	const char *bootdevice_ofpath = NULL;
 
+	if ((bootdevice_brom_id & BROM_DOWNLOAD_MASK) == BROM_DOWNLOAD_MASK)
+		bootdevice_brom_id = BROM_BOOTSOURCE_USB;
+
+	bootdevice_brom_id = bootdevice_brom_id & BROM_BOOTSOURCE_MASK;
 	if (bootdevice_brom_id < ARRAY_SIZE(boot_devices))
 		bootdevice_ofpath = boot_devices[bootdevice_brom_id];
 
@@ -79,9 +94,11 @@ __weak void rockchip_stimer_init(void)
 	u32 reg = readl(CONFIG_ROCKCHIP_STIMER_BASE + 0x10);
 	if ( reg & 0x1 )
 		return;
+#ifdef COUNTER_FREQUENCY
 #ifndef CONFIG_ARM64
 	asm volatile("mcr p15, 0, %0, c14, c0, 0"
 		     : : "r"(COUNTER_FREQUENCY));
+#endif
 #endif
 	writel(0, CONFIG_ROCKCHIP_STIMER_BASE + 0x10);
 	writel(0xffffffff, CONFIG_ROCKCHIP_STIMER_BASE);
@@ -149,6 +166,41 @@ void *memset(void *s, int c, size_t count)
 }
 #endif
 
+#ifdef CONFIG_SPL_DM_RESET
+static void brom_download(void)
+{
+	if (gd->console_evt == 0x02) {
+		printf("ctrl+b: Bootrom download!\n");
+		writel(BOOT_BROM_DOWNLOAD, CONFIG_ROCKCHIP_BOOT_MODE_REG);
+		do_reset(NULL, 0, 0, NULL);
+	}
+}
+#endif
+
+static void spl_hotkey_init(void)
+{
+	/* If disable console, skip getting uart reg */
+	if (!gd || gd->flags & GD_FLG_DISABLE_CONSOLE)
+		return;
+	if (!gd->have_console)
+		return;
+
+	/* serial uclass only exists when enable CONFIG_SPL_FRAMEWORK */
+#ifdef CONFIG_SPL_FRAMEWORK
+	if (serial_tstc()) {
+		gd->console_evt = serial_getc();
+#else
+	if (debug_uart_tstc()) {
+		gd->console_evt = debug_uart_getc();
+#endif
+		if (gd->console_evt <= 0x1a) /* 'z' */
+			printf("SPL Hotkey: ctrl+%c\n",
+				gd->console_evt + 'a' - 1);
+	}
+
+	return;
+}
+
 void board_init_f(ulong dummy)
 {
 #ifdef CONFIG_SPL_FRAMEWORK
@@ -175,6 +227,9 @@ void board_init_f(ulong dummy)
 	printascii("U-Boot SPL board init");
 #endif
 	gd->sys_start_tick = get_ticks();
+#ifdef CONFIG_SPL_PCIE_EP_SUPPORT
+	rockchip_pcie_ep_init();
+#endif
 #ifdef CONFIG_SPL_FRAMEWORK
 	ret = spl_early_init();
 	if (ret) {
@@ -194,9 +249,16 @@ void board_init_f(ulong dummy)
 	/* Some SoCs like rk3036 does not use any frame work */
 	sdram_init();
 #endif
-
+	/* Get hotkey and store in gd */
+	spl_hotkey_init();
+#ifdef CONFIG_SPL_DM_RESET
+	brom_download();
+#endif
 	arch_cpu_init();
 	rk_board_init_f();
+#if defined(CONFIG_SPL_RAM_DEVICE) && defined(CONFIG_SPL_PCIE_EP_SUPPORT)
+	rockchip_pcie_ep_get_firmware();
+#endif
 #if CONFIG_IS_ENABLED(ROCKCHIP_BACK_TO_BROM) && !defined(CONFIG_SPL_BOARD_INIT)
 	back_to_bootrom(BROM_BOOT_NEXTSTAGE);
 #endif
@@ -217,7 +279,13 @@ int board_init_f_boot_flags(void)
 {
 	int boot_flags = 0;
 
-#ifdef CONFIG_FPGA_ROCKCHIP
+#ifdef CONFIG_ARM64
+	asm volatile("mrs %0, cntfrq_el0" : "=r" (gd->arch.timer_rate_hz));
+#else
+	asm volatile("mrc p15, 0, %0, c14, c0, 0" : "=r" (gd->arch.timer_rate_hz));
+#endif
+
+#if CONFIG_IS_ENABLED(FPGA_ROCKCHIP)
 	arch_fpga_init();
 #endif
 #ifdef CONFIG_PSTORE
@@ -305,14 +373,6 @@ void spl_board_init(void)
 }
 #endif
 
-void spl_perform_fixups(struct spl_image_info *spl_image)
-{
-#ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
-	atags_set_bootdev_by_spl_bootdevice(spl_image->boot_device);
-#endif
-	return;
-}
-
 #ifdef CONFIG_SPL_KERNEL_BOOT
 static int spl_rockchip_dnl_key_pressed(void)
 {
@@ -345,35 +405,51 @@ bool spl_is_low_power(void)
 
 void spl_next_stage(struct spl_image_info *spl)
 {
+	const char *reason[] = { "Recovery key", "Ctrl+c", "LowPwr", "Other" };
 	uint32_t reg_boot_mode;
+	int i = 0;
 
 	if (spl_rockchip_dnl_key_pressed()) {
+		i = 0;
 		spl->next_stage = SPL_NEXT_STAGE_UBOOT;
-		return;
+		goto out;
 	}
+
+	if (gd->console_evt == 0x03) {
+		i = 1;
+		spl->next_stage = SPL_NEXT_STAGE_UBOOT;
+		goto out;
+	}
+
 #ifdef CONFIG_SPL_DM_FUEL_GAUGE
 	if (spl_is_low_power()) {
+		i = 2;
 		spl->next_stage = SPL_NEXT_STAGE_UBOOT;
-		return;
+		goto out;
 	}
 #endif
 
 	reg_boot_mode = readl((void *)CONFIG_ROCKCHIP_BOOT_MODE_REG);
 	switch (reg_boot_mode) {
-	case BOOT_COLD:
-	case BOOT_PANIC:
-	case BOOT_WATCHDOG:
-	case BOOT_NORMAL:
-	case BOOT_RECOVERY:
-		spl->next_stage = SPL_NEXT_STAGE_KERNEL;
+	case BOOT_LOADER:
+	case BOOT_FASTBOOT:
+	case BOOT_CHARGING:
+	case BOOT_UMS:
+	case BOOT_DFU:
+		i = 3;
+		spl->next_stage = SPL_NEXT_STAGE_UBOOT;
 		break;
 	default:
-		spl->next_stage = SPL_NEXT_STAGE_UBOOT;
+		spl->next_stage = SPL_NEXT_STAGE_KERNEL;
 	}
-}
-#endif
 
-#ifdef CONFIG_SPL_KERNEL_BOOT
+out:
+	if (spl->next_stage == SPL_NEXT_STAGE_UBOOT)
+		printf("Enter uboot reason: %s\n", reason[i]);
+
+	return;
+}
+
 const char *spl_kernel_partition(struct spl_image_info *spl,
 				 struct spl_load_info *info)
 {
@@ -408,7 +484,149 @@ const char *spl_kernel_partition(struct spl_image_info *spl,
 
 	return (boot_mode == BOOT_RECOVERY) ? PART_RECOVERY : PART_BOOT;
 }
+
+__weak void spl_fdt_fixup_memory(struct spl_image_info *spl_image)
+{
+	void *blob = spl_image->fdt_addr;
+	struct tag *t;
+	u64 start[CONFIG_NR_DRAM_BANKS];
+	u64 size[CONFIG_NR_DRAM_BANKS];
+	int i, count, err;
+
+	err = fdt_check_header(blob);
+	if (err < 0) {
+		printf("Invalid dtb\n");
+		return;
+	}
+
+	/* Fixup memory node based on ddr_mem atags */
+	t = atags_get_tag(ATAG_DDR_MEM);
+	if (t && t->u.ddr_mem.count) {
+		count = t->u.ddr_mem.count;
+		for (i = 0; i < count; i++) {
+			start[i] = t->u.ddr_mem.bank[i];
+			size[i] = t->u.ddr_mem.bank[i + count];
+#ifdef SPL_RESV_MEM_SIZE
+			if ((start[i] == CONFIG_SYS_SDRAM_BASE) &&
+			    (start[i] + size[i] > CONFIG_SYS_SDRAM_BASE + SPL_RESV_MEM_SIZE)) {
+				start[i] += SPL_RESV_MEM_SIZE;
+				size[i] -= SPL_RESV_MEM_SIZE;
+			}
 #endif
+			if (size[i] == 0)
+				continue;
+			debug("Adding bank: 0x%08llx - 0x%08llx (size: 0x%08llx)\n",
+			       start[i], start[i] + size[i], size[i]);
+		}
+
+		fdt_increase_size(blob, 512);
+
+		err = fdt_fixup_memory_banks(blob, start, size, count);
+		if (err < 0) {
+			printf("Fixup kernel dtb memory node failed: %s\n", fdt_strerror(err));
+			return;
+		}
+	}
+
+	return;
+}
+
+#if defined(CONFIG_SPL_ROCKCHIP_HWID_DTB)
+int spl_find_hwid_dtb(const char *fdt_name)
+{
+	hwid_init_data();
+
+	return hwid_dtb_is_available(fdt_name);
+}
+#endif
+
+int spl_fdt_chosen_bootargs(struct spl_load_info *info, void *fdt)
+{
+	__maybe_unused struct blk_desc *desc = info->dev;
+	__maybe_unused char *env = NULL;
+	__maybe_unused int ret = 0;
+
+#ifdef CONFIG_SPL_AB
+	char slot_suffix[3] = {0};
+
+	if (!spl_get_current_slot(desc, "misc", slot_suffix))
+		spl_ab_bootargs_append_slot(fdt, slot_suffix);
+#endif
+
+#ifdef CONFIG_SPL_ENVF
+	char *part_type[] = { "mtdparts", "blkdevparts" };
+	char *part_list;
+	int id = 0;
+
+#ifdef CONFIG_MTD_BLK
+	env = envf_get(desc, part_type[id]);
+	if (!env)
+#endif
+		env = envf_get(desc, part_type[++id]);
+	if (env) {
+		if (!strstr(env, part_type[id])) {
+			part_list = calloc(1, strlen(env) + strlen(part_type[id]) + 2);
+			if (part_list) {
+				strcat(part_list, part_type[id]);
+				strcat(part_list, "=");
+				strcat(part_list, env);
+			}
+		} else {
+			part_list = env;
+		}
+		ret = fdt_bootargs_append(fdt, part_list);
+		if (ret) {
+			printf("Append parts info to bootargs fail");
+			return ret;
+		}
+		debug("## parts: %s\n\n", part_list);
+
+		env = envf_get(desc, "sys_bootargs");
+		if (env) {
+			env = env + strlen("sys_bootargs=");
+			ret = fdt_bootargs_append(fdt, env);
+			if (ret) {
+				printf("Append sys_bootargs to bootargs fail, ret=%d\n", ret);
+				return ret;
+			}
+			debug("## sys_bootargs: %s\n\n", env);
+		}
+	}
+#endif
+#ifdef CONFIG_MTD_BLK
+	if (!env && desc->if_type == IF_TYPE_MTD) {
+		char *mtd_par_info = mtd_part_parse(desc);
+
+		ret = fdt_bootargs_append(fdt, mtd_par_info);
+		if (ret) {
+			printf("Append mtdparts info to bootargs fail");
+			return ret;
+		}
+		debug("## mtdparts: %s\n\n", mtd_par_info);
+	}
+#endif
+#ifdef CONFIG_ROCKCHIP_META
+	rk_meta_bootargs_append(fdt);
+#endif
+
+	return 0;
+}
+#endif
+
+void spl_perform_fixups(struct spl_image_info *spl_image)
+{
+#ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
+	atags_set_bootdev_by_spl_bootdevice(spl_image->boot_device);
+  #ifdef BUILD_SPL_TAG
+	atags_set_shared_fwver(FW_SPL, "spl-"BUILD_SPL_TAG);
+  #endif
+#endif
+#if defined(CONFIG_SPL_KERNEL_BOOT)
+	if (spl_image->next_stage == SPL_NEXT_STAGE_KERNEL)
+		spl_fdt_fixup_memory(spl_image);
+#endif
+	return;
+}
 
 void spl_hang_reset(void)
 {
@@ -520,5 +738,7 @@ int spl_board_prepare_for_jump(struct spl_image_info *spl_image)
 #ifdef CONFIG_SPL_ROCKCHIP_HW_DECOMPRESS
 	misc_decompress_cleanup();
 #endif
+	spl_rk_board_prepare_for_jump(spl_image);
+
 	return 0;
 }

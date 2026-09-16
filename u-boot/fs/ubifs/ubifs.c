@@ -126,6 +126,7 @@ crypto_comp_decompress(const struct ubifs_info *c, struct crypto_comp *tfm,
 {
 	struct ubifs_compressor *compr = ubifs_compressors[tfm->compressor];
 	int err;
+	size_t tmp_len = *dlen;
 
 	if (compr->compr_type == UBIFS_COMPR_NONE) {
 		memcpy(dst, src, slen);
@@ -133,11 +134,12 @@ crypto_comp_decompress(const struct ubifs_info *c, struct crypto_comp *tfm,
 		return 0;
 	}
 
-	err = compr->decompress(src, slen, dst, (size_t *)dlen);
+	err = compr->decompress(src, slen, dst, &tmp_len);
 	if (err)
 		ubifs_err(c, "cannot decompress %d bytes, compressor %s, "
 			  "error %d", slen, compr->name, err);
 
+	*dlen = tmp_len;
 	return err;
 
 	return 0;
@@ -466,14 +468,10 @@ out:
 		dbg_gen("cannot find next direntry, error %d", err);
 
 out_free:
-	if (file->private_data)
-		kfree(file->private_data);
-	if (file)
-		free(file);
-	if (dentry)
-		free(dentry);
-	if (dir)
-		free(dir);
+	kfree(file->private_data);
+	free(file);
+	free(dentry);
+	free(dir);
 
 	return ret;
 }
@@ -586,7 +584,6 @@ int ubifs_set_blk_dev(struct blk_desc *rbdd, disk_partition_t *info)
 
 int ubifs_ls(const char *filename)
 {
-	struct ubifs_info *c = ubifs_sb->s_fs_info;
 	struct file *file;
 	struct dentry *dentry;
 	struct inode *dir;
@@ -594,7 +591,6 @@ int ubifs_ls(const char *filename)
 	unsigned long inum;
 	int ret = 0;
 
-	c->ubi = ubi_open_volume(c->vi.ubi_num, c->vi.vol_id, UBI_READONLY);
 	inum = ubifs_findfile(ubifs_sb, (char *)filename);
 	if (!inum) {
 		ret = -1;
@@ -628,30 +624,23 @@ out_mem:
 		free(dir);
 
 out:
-	ubi_close_volume(c->ubi);
 	return ret;
 }
 
 int ubifs_exists(const char *filename)
 {
-	struct ubifs_info *c = ubifs_sb->s_fs_info;
 	unsigned long inum;
 
-	c->ubi = ubi_open_volume(c->vi.ubi_num, c->vi.vol_id, UBI_READONLY);
 	inum = ubifs_findfile(ubifs_sb, (char *)filename);
-	ubi_close_volume(c->ubi);
 
 	return inum != 0;
 }
 
 int ubifs_size(const char *filename, loff_t *size)
 {
-	struct ubifs_info *c = ubifs_sb->s_fs_info;
 	unsigned long inum;
 	struct inode *inode;
 	int err = 0;
-
-	c->ubi = ubi_open_volume(c->vi.ubi_num, c->vi.vol_id, UBI_READONLY);
 
 	inum = ubifs_findfile(ubifs_sb, (char *)filename);
 	if (!inum) {
@@ -670,7 +659,6 @@ int ubifs_size(const char *filename, loff_t *size)
 
 	ubifs_iput(inode);
 out:
-	ubi_close_volume(c->ubi);
 	return err;
 }
 
@@ -801,6 +789,8 @@ static int do_readpage(struct ubifs_info *c, struct inode *inode,
 
 				if (last_block_size)
 					dlen = last_block_size;
+				else if (ret)
+					dlen = UBIFS_BLOCK_SIZE;
 				else
 					dlen = le32_to_cpu(dn->size);
 
@@ -863,7 +853,6 @@ int ubifs_read(const char *filename, void *buf, loff_t offset,
 		return -1;
 	}
 
-	c->ubi = ubi_open_volume(c->vi.ubi_num, c->vi.vol_id, UBI_READONLY);
 	/* ubifs_findfile will resolve symlinks, so we know that we get
 	 * the real file here */
 	inum = ubifs_findfile(ubifs_sb, (char *)filename);
@@ -927,7 +916,6 @@ put_inode:
 	ubifs_iput(inode);
 
 out:
-	ubi_close_volume(c->ubi);
 	return err;
 }
 
