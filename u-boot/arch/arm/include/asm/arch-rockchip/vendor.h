@@ -23,8 +23,9 @@
 #define SENSOR_CALIBRATION_ID		14
 #define IMEI_ID				15
 #define LAN_RGMII_DL_ID			16
-#define EINK_VCOM_ID			17
+#define EBOOK_VCOM_ID			17
 #define FIRMWARE_VER_ID			18
+#define MULTI_MODULE_KEY_ID		1068
 
 struct vendor_item {
 	u16  id;
@@ -46,4 +47,7 @@ int flash_vendor_dev_ops_register(int (*read)(struct blk_desc *dev_desc,
 					       void *p_data));
 
 int vendor_handle_hdcp(struct vendor_item *vhead);
+
+void vendor_storage_fixup(void *blob);
+
 #endif /* _ROCKCHIP_VENDOR_ */

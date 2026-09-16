@@ -6,6 +6,7 @@
 
 #include <common.h>
 #include <boot_rkimg.h>
+#include <malloc.h>
 #include <misc.h>
 #ifdef CONFIG_SPL_BUILD
 #include <spl.h>
@@ -24,8 +25,14 @@ DECLARE_GLOBAL_DATA_PTR;
  */
 #if CONFIG_IS_ENABLED(FIT_IMAGE_POST_PROCESS)
 
+__weak int rk_board_fit_image_post_process(void *fit, int node, ulong *load_addr,
+					    ulong **src_addr, size_t *src_len)
+{
+	return 0;
+}
+
 #define FIT_UNCOMP_HASH_NODENAME	"digest"
-#if CONFIG_IS_ENABLED(MISC_DECOMPRESS) || CONFIG_IS_ENABLED(GZIP)
+#if CONFIG_IS_ENABLED(MISC_DECOMPRESS) || CONFIG_IS_ENABLED(GZIP) || CONFIG_IS_ENABLED(LZMA)
 static int fit_image_get_uncomp_digest(const void *fit, int parent_noffset)
 {
 	const char *name;
@@ -62,13 +69,16 @@ static int fit_decomp_image(void *fit, int node, ulong *load_addr,
 	int ret = -ENOSYS;
 	u8 comp;
 #if CONFIG_IS_ENABLED(MISC_DECOMPRESS)
+	const void *prop = NULL;
 	u32 flags = 0;
+
+	prop = fdt_getprop(fit, node, "decomp-async", NULL);
 #endif
 
 	if (fit_image_get_comp(fit, node, &comp))
 		return 0;
 
-	if (comp != IH_COMP_GZIP && comp != IH_COMP_LZMA)
+	if (comp != IH_COMP_GZIP && comp != IH_COMP_LZMA && comp != IH_COMP_LZ4)
 		return 0;
 
 #ifndef CONFIG_SPL_BUILD
@@ -78,24 +88,14 @@ static int fit_decomp_image(void *fit, int node, ulong *load_addr,
 	 */
 	if (fit_image_check_type(fit, node, IH_TYPE_KERNEL))
 		return 0;
-#elif defined(CONFIG_SPL_MTD_SUPPORT) && defined(CONFIG_SPL_MISC_DECOMPRESS) && \
-      defined(CONFIG_SPL_KERNEL_BOOT)
+#elif defined(CONFIG_SPL_MISC_DECOMPRESS) && defined(CONFIG_SPL_KERNEL_BOOT)
 	/*
-	 * SPL Thunder-boot policty on spi-nand:
+	 * SPL Thunder-boot policty:
 	 *	enable and use interrupt status as a sync signal for
 	 *	kernel to poll that whether ramdisk decompress is done.
 	 */
-	struct spl_load_info *info = spec;
-	struct blk_desc *desc;
-
-	if (info && info->dev) {
-		desc = info->dev;
-		if ((desc->if_type == IF_TYPE_MTD) &&
-		    (desc->devnum == BLK_MTD_SPI_NAND) &&
-		    fit_image_check_type(fit, node, IH_TYPE_RAMDISK)) {
-			flags |= DCOMP_FLG_IRQ_ONESHOT;
-		}
-	}
+	if (prop && fit_image_check_type(fit, node, IH_TYPE_RAMDISK))
+		flags |= DCOMP_FLG_IRQ_ONESHOT;
 #endif
 	if (comp == IH_COMP_LZMA) {
 #if CONFIG_IS_ENABLED(LZMA)
@@ -104,13 +104,12 @@ static int fit_decomp_image(void *fit, int node, ulong *load_addr,
 					       (uchar *)(*src_addr), *src_len);
 		len = lzma_len;
 #endif
-	} else if (comp == IH_COMP_GZIP) {
+#if CONFIG_IS_ENABLED(MISC_DECOMPRESS)
+	} else {
 		/*
 		 * For smaller spl size, we don't use misc_decompress_process()
 		 * inside the gunzip().
 		 */
-#if CONFIG_IS_ENABLED(MISC_DECOMPRESS)
-		const void *prop;
 		bool sync = true;
 
 		if (fit_image_get_uncomp_digest(fit, node) < 0)
@@ -120,14 +119,16 @@ static int fit_decomp_image(void *fit, int node, ulong *load_addr,
 					      (ulong)(*src_addr), (ulong)(*src_len),
 					      DECOM_GZIP, sync, &len, flags);
 		/* mark for misc_decompress_cleanup() */
-		prop = fdt_getprop(fit, node, "decomp-async", NULL);
 		if (prop)
 			misc_decompress_async(comp);
 		else
 			misc_decompress_sync(comp);
 #else
+#if CONFIG_IS_ENABLED(GZIP)
+	} else if (comp == IH_COMP_GZIP) {
 		ret = gunzip((void *)(*load_addr), ALIGN(len, FIT_MAX_SPL_IMAGE_SZ),
 			     (void *)(*src_addr), (void *)(&len));
+#endif
 #endif
 	}
 
@@ -151,11 +152,15 @@ static int fit_decomp_image(void *fit, int node, ulong *load_addr,
 }
 #endif
 
-void board_fit_image_post_process(void *fit, int node, ulong *load_addr,
+int board_fit_image_post_process(void *fit, int node, ulong *load_addr,
 				  ulong **src_addr, size_t *src_len, void *spec)
 {
-#if CONFIG_IS_ENABLED(MISC_DECOMPRESS) || CONFIG_IS_ENABLED(GZIP)
-	fit_decomp_image(fit, node, load_addr, src_addr, src_len, spec);
+#if CONFIG_IS_ENABLED(MISC_DECOMPRESS) || CONFIG_IS_ENABLED(GZIP) || CONFIG_IS_ENABLED(LZMA)
+	int ret = 0;
+
+	ret = fit_decomp_image(fit, node, load_addr, src_addr, src_len, spec);
+	if (ret)
+		return ret;
 #endif
 
 #if CONFIG_IS_ENABLED(USING_KERNEL_DTB)
@@ -169,6 +174,35 @@ void board_fit_image_post_process(void *fit, int node, ulong *load_addr,
 		}
 	}
 #endif
+
+#ifndef CONFIG_SPL_BUILD
+	if (fit_image_check_type(fit, node, IH_TYPE_FIRMWARE)) {
+		const char *uname;
+		char *old, *new;
+		size_t len;
+
+		uname = fdt_get_name(fit, node, NULL);
+		if (strcmp("bootargs", uname))
+			return 0;
+
+		old = env_get("bootargs");
+		if (!old)
+			return -EIO;
+
+		len = strlen(old) + (*src_len) + 2;
+		new = calloc(1, len);
+		if (new) {
+			strcpy(new, old);
+			strcat(new, " ");
+			strcat(new, (char *)(*src_addr));
+			env_set("bootargs", new);
+			free(new);
+		}
+
+	}
+#endif
+
+	return rk_board_fit_image_post_process(fit, node, load_addr, src_addr, src_len);
 }
 #endif /* FIT_IMAGE_POST_PROCESS */
 /*

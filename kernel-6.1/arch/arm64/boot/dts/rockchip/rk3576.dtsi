@@ -79,6 +79,10 @@
 		spi8 = &flexbus_fspi;
 	};
 
+	system {
+		cpu,model = "Rockchip RK3576 (Cortex-A72*4 / Cortex-A53*4)";
+	};
+	
 	clocks {
 		compatible = "simple-bus";
 		#address-cells = <2>;

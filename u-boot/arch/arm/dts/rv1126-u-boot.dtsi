@@ -38,6 +38,7 @@
 
 &sdmmc {
 	u-boot,dm-spl;
+	pwr-en-gpios = <&gpio0 RK_PC0 GPIO_ACTIVE_LOW>;
 	status = "okay";
 };
 
@@ -58,6 +59,14 @@
 };
 
 &sdmmc0_det {
+	u-boot,dm-spl;
+};
+
+&sdmmc0_idle_pins {
+	u-boot,dm-spl;
+};
+
+&sdmmc1_idle_pins {
 	u-boot,dm-spl;
 };
 
@@ -175,16 +184,6 @@
 	status = "okay";
 };
 
-&usbdrd {
-	u-boot,dm-pre-reloc;
-	status = "okay";
-};
-
-&usbdrd_dwc3 {
-	u-boot,dm-pre-reloc;
-	status = "okay";
-};
-
 &pinctrl {
 	u-boot,dm-spl;
 	status = "okay";
@@ -205,6 +204,14 @@
 };
 
 &pcfg_pull_none {
+	u-boot,dm-spl;
+};
+
+&pcfg_pull_down{
+	u-boot,dm-spl;
+};
+
+&pcfg_pull_up{
 	u-boot,dm-spl;
 };
 

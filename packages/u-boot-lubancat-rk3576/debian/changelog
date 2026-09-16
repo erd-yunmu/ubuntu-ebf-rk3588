@@ -1,0 +1,5 @@
+u-boot-lubancat-rk3576 (2017.09+20230711.gitddc91cd0-1) jammy; urgency=medium
+
+  * Add initial RK3576 support for LubanCat 3.
+
+ -- Joshua Riek <jjriek@verizon.net>  Tue, 15 Sep 2026 00:00:00 +0800

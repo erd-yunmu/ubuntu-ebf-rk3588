@@ -16,6 +16,7 @@
 #define ANDROID_PARTITION_INIT_BOOT "init_boot"
 #define ANDROID_PARTITION_MISC "misc"
 #define ANDROID_PARTITION_OEM  "oem"
+#define ANDROID_PARTITION_RESOURCE  "resource"
 #define ANDROID_PARTITION_RECOVERY  "recovery"
 #define ANDROID_PARTITION_SYSTEM "system"
 #define ANDROID_PARTITION_VBMETA "vbmeta"
@@ -30,6 +31,8 @@
 #else
 #define ANDROID_ARG_FDT_FILENAME "kernel.dtb"
 #endif
+#define ANDROID_IMAGE_DEFAULT_KERNEL_ADDR	0x10008000
+
 #define OEM_UNLOCK_ARG_SIZE 30
 #define UUID_SIZE 37
 

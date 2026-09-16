@@ -237,6 +237,163 @@ int dm_pci_find_class(uint find_class, int index, struct udevice **devp)
 	return -ENODEV;
 }
 
+/**
+ * pci_retrain_link - Trigger PCIe link retrain for a device
+ * @udev: PCI device to retrain link
+ * @dev:  PCI device and function address
+ *
+ * Return: 0 on success, negative error code on failure.
+ */
+int pci_retrain_link(struct udevice *udev, pci_dev_t dev)
+{
+	u16 link_control, link_status;
+	int pcie_cap_ptr;
+	int timeout = 100; /* Timeout in milliseconds */
+
+	/* Find the PCIe Capability */
+	pcie_cap_ptr = dm_pci_find_capability(udev, PCI_CAP_ID_EXP);
+	if (!pcie_cap_ptr) {
+		printf("PCIe Capability not found for device %04x:%04x\n",
+			PCI_BUS(dev), PCI_DEV(dev));
+		return -ENODEV;
+	}
+
+	/* Read the Link Control Register */
+	dm_pci_read_config16(udev, pcie_cap_ptr + PCI_EXP_LNKCTL, &link_control);
+
+	/* Set the Retrain Link bit (bit 5) */
+	link_control |= (1 << 5);
+
+	/* Write the updated value back to the Link Control Register */
+	dm_pci_write_config16(udev, pcie_cap_ptr + PCI_EXP_LNKCTL, link_control);
+
+	printf("Retrain triggered for device %04x:%04x\n", PCI_BUS(dev), PCI_DEV(dev));
+
+	/* Wait for the link to complete training */
+	while (timeout--) {
+		/* Read the Link Status Register */
+		dm_pci_read_config16(udev, pcie_cap_ptr + PCI_EXP_LNKSTA, &link_status);
+
+		/* Check if the link is up and training is complete */
+		if (!(link_status & PCI_EXP_LNKSTA_LT))
+			break;
+
+		mdelay(10); /* Wait 1 millisecond */
+	}
+
+	if (link_status & PCI_EXP_LNKSTA_LT) {
+		printf("Link training failed for device %04x:%04x\n",
+			PCI_BUS(dev), PCI_DEV(dev));
+		return -ETIMEDOUT;
+	}
+
+	printf("Link Status for device %04x:%04x: 0x%x\n",
+		PCI_BUS(dev), PCI_DEV(dev), link_status);
+	printf("  Speed: Gen%d\n", (link_status & PCI_EXP_LNKSTA_CLS) >> 0);
+	printf("  Width: x%d\n", (link_status & PCI_EXP_LNKSTA_NLW) >> 4);
+	printf("  Link Up: %s\n", (link_status & PCI_EXP_LNKSTA_LT) ? "No" : "Yes");
+
+	return 0;
+}
+
+static int pci_is_bridge(pci_dev_t dev)
+{
+	u8 header_type;
+
+	pci_read_config8(dev, PCI_HEADER_TYPE, &header_type);
+	header_type = header_type & 0x7f;
+
+	return (header_type == PCI_HEADER_TYPE_BRIDGE);
+}
+
+static void save_pci_state(pci_dev_t dev, struct pci_device_state *state)
+{
+	int i;
+
+	/* Save BARs */
+	for (i = 0; i < 6; i++)
+		pci_read_config32(dev, PCI_BASE_ADDRESS_0 + i * 4, &state->bar[i]);
+
+	/* Save Command Register */
+	pci_read_config16(dev, PCI_COMMAND, &state->command);
+
+	/* Save Bus Numbers (for bridge devices) */
+	if (pci_is_bridge(dev)) {
+		pci_read_config8(dev, PCI_PRIMARY_BUS, &state->primary_bus);
+		pci_read_config8(dev, PCI_SECONDARY_BUS, &state->secondary_bus);
+		pci_read_config8(dev, PCI_SUBORDINATE_BUS, &state->subordinate_bus);
+	}
+}
+
+static void restore_pci_state(pci_dev_t dev, struct pci_device_state *state)
+{
+	int i;
+
+	/* Restore BARs */
+	for (i = 0; i < 6; i++)
+		pci_write_config32(dev, PCI_BASE_ADDRESS_0 + i * 4,
+				   state->bar[i]);
+
+	/* Restore Command Register */
+	pci_write_config16(dev, PCI_COMMAND, state->command);
+
+	/* Restore Bus Numbers (for bridge devices) */
+	if (pci_is_bridge(dev)) {
+		pci_write_config8(dev, PCI_PRIMARY_BUS, state->primary_bus);
+		pci_write_config8(dev, PCI_SECONDARY_BUS, state->secondary_bus);
+		pci_write_config8(dev, PCI_SUBORDINATE_BUS, state->subordinate_bus);
+	}
+}
+
+static int pci_flr(struct udevice *udev, pci_dev_t dev)
+{
+	u32 pcie_cap;
+	u16 devctl;
+	int pos;
+
+	pos = dm_pci_find_capability(udev, PCI_CAP_ID_EXP);
+	if (!pos) {
+		printf("PCIe Capability not found\n");
+		return -1;
+	}
+
+	/* Check if FLR is supported */
+	dm_pci_read_config32(udev, pos + PCI_EXP_DEVCAP, &pcie_cap);
+	if (!(pcie_cap & PCI_EXP_DEVCAP_FLR)) {
+		printf("FLR not supported by device, pos 0x%x, cap 0x%x\n", pos, pcie_cap);
+		return -1;
+	}
+
+	devctl = pcie_cap | PCI_EXP_DEVCTL_FLR;
+	dm_pci_write_config16(udev, pos + PCI_EXP_DEVCTL, devctl);
+	mdelay(100);
+	dm_pci_write_config16(udev, pos + PCI_EXP_DEVCTL, pcie_cap);
+
+	return 0;
+}
+
+int pci_reset_function(struct udevice *udev, pci_dev_t dev)
+{
+	struct pci_device_state state;
+
+	/* Save the current state */
+	save_pci_state(dev, &state);
+
+	/* Trigger FLR */
+	if (pci_flr(udev, dev)) {
+		printf("FLR failed\n");
+		return -1;
+	}
+
+	/* Restore the saved state */
+	restore_pci_state(dev, &state);
+
+	printf("FLR completed and state restored for device %02x:%02x.%d\n",
+		PCI_BUS(dev), PCI_DEV(dev), PCI_FUNC(dev));
+
+	return 0;
+}
+
 int pci_bus_write_config(struct udevice *bus, pci_dev_t bdf, int offset,
 			 unsigned long value, enum pci_size_t size)
 {
@@ -799,6 +956,10 @@ static int decode_regions(struct pci_controller *hose, ofnode parent_node,
 		if (space_code & 2) {
 			type = flags & (1U << 30) ? PCI_REGION_PREFETCH :
 					PCI_REGION_MEM;
+#ifndef CONFIG_SYS_PCI_64BIT
+			if (upper_32_bits(pci_addr))
+				continue;
+#endif
 		} else if (space_code & 1) {
 			type = PCI_REGION_IO;
 		} else {
@@ -806,8 +967,18 @@ static int decode_regions(struct pci_controller *hose, ofnode parent_node,
 		}
 		pos = -1;
 		for (i = 0; i < hose->region_count; i++) {
-			if (hose->regions[i].flags == type)
+			if (hose->regions[i].flags == type) {
+#if defined(CONFIG_SYS_PCI_64BIT)
+				if (type == PCI_REGION_MEM) {
+					if ((upper_32_bits(pci_addr) &&
+					    !upper_32_bits(hose->regions[i].bus_start)) ||
+					    (!upper_32_bits(pci_addr) &&
+					    upper_32_bits(hose->regions[i].bus_start)))
+					    continue;
+				}
+#endif
 				pos = i;
+			}
 		}
 		if (pos == -1)
 			pos = hose->region_count++;
@@ -947,7 +1118,6 @@ static int pci_bridge_write_config(struct udevice *bus, pci_dev_t bdf,
 static int skip_to_next_device(struct udevice *bus, struct udevice **devp)
 {
 	struct udevice *dev;
-	int ret = 0;
 
 	/*
 	 * Scan through all the PCI controllers. On x86 there will only be one
@@ -959,9 +1129,7 @@ static int skip_to_next_device(struct udevice *bus, struct udevice **devp)
 			*devp = dev;
 			return 0;
 		}
-		ret = uclass_next_device(&bus);
-		if (ret)
-			return ret;
+		uclass_next_device(&bus);
 	} while (bus);
 
 	return 0;
@@ -971,7 +1139,6 @@ int pci_find_next_device(struct udevice **devp)
 {
 	struct udevice *child = *devp;
 	struct udevice *bus = child->parent;
-	int ret;
 
 	/* First try all the siblings */
 	*devp = NULL;
@@ -984,9 +1151,7 @@ int pci_find_next_device(struct udevice **devp)
 	}
 
 	/* We ran out of siblings. Try the next bus */
-	ret = uclass_next_device(&bus);
-	if (ret)
-		return ret;
+	uclass_next_device(&bus);
 
 	return bus ? skip_to_next_device(bus, devp) : 0;
 }
@@ -994,12 +1159,9 @@ int pci_find_next_device(struct udevice **devp)
 int pci_find_first_device(struct udevice **devp)
 {
 	struct udevice *bus;
-	int ret;
 
 	*devp = NULL;
-	ret = uclass_first_device(UCLASS_PCI, &bus);
-	if (ret)
-		return ret;
+	uclass_first_device(UCLASS_PCI, &bus);
 
 	return skip_to_next_device(bus, devp);
 }
@@ -1220,6 +1382,11 @@ void *dm_pci_map_bar(struct udevice *dev, int bar, int flags)
 	dm_pci_read_config32(dev, bar, &bar_response);
 	pci_bus_addr = (pci_addr_t)(bar_response & ~0xf);
 
+#if defined(CONFIG_SYS_PCI_64BIT)
+        if (bar_response & PCI_BASE_ADDRESS_MEM_TYPE_64) {
+		dm_pci_read_config32(dev, bar + 4, &bar_response);
+		pci_bus_addr |= (pci_addr_t)bar_response << 32;				        }
+#endif /* CONFIG_SYS_PCI_64BIT */
 	/*
 	 * Pass "0" as the length argument to pci_bus_to_virt.  The arg
 	 * isn't actualy used on any platform because u-boot assumes a static
@@ -1227,6 +1394,95 @@ void *dm_pci_map_bar(struct udevice *dev, int bar, int flags)
 	 * and pass that as the size if needed.
 	 */
 	return dm_pci_bus_to_virt(dev, pci_bus_addr, flags, 0, MAP_NOCACHE);
+}
+
+static int _dm_pci_find_next_capability(struct udevice *dev, u8 pos, int cap)
+{
+	int ttl = PCI_FIND_CAP_TTL;
+	u8 id;
+	u16 ent;
+
+	dm_pci_read_config8(dev, pos, &pos);
+
+	while (ttl--) {
+		if (pos < PCI_STD_HEADER_SIZEOF)
+			break;
+		pos &= ~3;
+		dm_pci_read_config16(dev, pos, &ent);
+
+		id = ent & 0xff;
+		if (id == 0xff)
+			break;
+		if (id == cap)
+			return pos;
+		pos = (ent >> 8);
+	}
+
+	return 0;
+}
+
+int dm_pci_find_next_capability(struct udevice *dev, u8 start, int cap)
+{
+	return _dm_pci_find_next_capability(dev, start + PCI_CAP_LIST_NEXT,
+					    cap);
+}
+
+int dm_pci_find_capability(struct udevice *dev, int cap)
+{
+	u16 status;
+	u8 header_type;
+	u8 pos;
+
+	dm_pci_read_config16(dev, PCI_STATUS, &status);
+	if (!(status & PCI_STATUS_CAP_LIST))
+		return 0;
+
+	dm_pci_read_config8(dev, PCI_HEADER_TYPE, &header_type);
+	if ((header_type & 0x7f) == PCI_HEADER_TYPE_CARDBUS)
+		pos = PCI_CB_CAPABILITY_LIST;
+	else
+		pos = PCI_CAPABILITY_LIST;
+
+	return _dm_pci_find_next_capability(dev, pos, cap);
+}
+
+int dm_pci_find_next_ext_capability(struct udevice *dev, int start, int cap)
+{
+	u32 header;
+	int ttl;
+	int pos = PCI_CFG_SPACE_SIZE;
+
+	/* minimum 8 bytes per capability */
+	ttl = (PCI_CFG_SPACE_EXP_SIZE - PCI_CFG_SPACE_SIZE) / 8;
+
+	if (start)
+		pos = start;
+
+	dm_pci_read_config32(dev, pos, &header);
+	/*
+	 * If we have no capabilities, this is indicated by cap ID,
+	 * cap version and next pointer all being 0.
+	 */
+	if (header == 0)
+		return 0;
+
+	while (ttl--) {
+		if (PCI_EXT_CAP_ID(header) == cap)
+			return pos;
+
+		pos = PCI_EXT_CAP_NEXT(header);
+		if (pos < PCI_CFG_SPACE_SIZE)
+			break;
+
+		dm_pci_read_config32(dev, pos, &header);
+	}
+
+	return 0;
+}
+
+int dm_pci_find_ext_capability(struct udevice *dev, int cap)
+{
+	return dm_pci_find_next_ext_capability(dev, 0, cap);
 }
 
 UCLASS_DRIVER(pci) = {

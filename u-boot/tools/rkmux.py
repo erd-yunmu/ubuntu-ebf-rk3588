@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 
 # Script to create enums from datasheet register tables
 #
@@ -43,7 +43,7 @@ class RegField:
         self.desc.append(desc)
 
     def Show(self):
-        print self
+        print(self)
         print
         self.__init__()
 
@@ -65,16 +65,16 @@ class Printer:
             self.output_footer()
 
     def output_header(self):
-        print '/* %s */' % self.name
-        print 'enum {'
+        print('/* %s */' % self.name)
+        print('enum {')
 
     def output_footer(self):
-        print '};';
+        print('};';)
 
     def output_regfield(self, regfield):
         lines = regfield.desc
         field = lines[0]
-        #print 'field:', field
+        #print('field:', field)
         if field in ['reserved', 'reserve', 'write_enable', 'write_mask']:
             return
         if field.endswith('_sel') or field.endswith('_con'):
@@ -84,7 +84,7 @@ class Printer:
         elif field.endswith('_mode') or field.endswith('_mask'):
             field = field[:-5]
         #else:
-            #print 'bad field %s' % field
+            #print('bad field %s' % field)
             #return
         field = field.upper()
         if ':' in regfield.bits:
@@ -101,7 +101,7 @@ class Printer:
         out_enum(field, 'shift', bit_low)
         out_enum(field, 'mask', mask)
         next_val = -1
-        #print 'lines: %s', lines
+        #print('lines: %s', lines)
         for line in lines:
             m = self.re_sel.match(line)
             if m:
@@ -154,14 +154,14 @@ def process_file(name, fd):
             if cols[0] == 'Bit' or len(cols) < 3:
                 continue
             #print
-            #print field
+            #print(field)
             field = add_it(field)
             field.Setup(cols)
     field = add_it(field)
 
     with Printer(name) as printer:
         for field in fields:
-            #print field
+            #print(field)
             printer.output_regfield(field)
             #print
 
@@ -175,7 +175,7 @@ def out_enum(field, suffix, value, skip_val=False):
             val_str = '%d' % value
 
         str += '%s= %s' % ('\t' * tabs, val_str)
-    print '\t%s,' % str
+    print('\t%s,' % str)
 
 # Process a CSV file, e.g. from tabula
 def process_csv(name, fd):
@@ -185,19 +185,19 @@ def process_csv(name, fd):
 
     field = RegField()
     for row in reader:
-        #print field.desc
+        #print(field.desc)
         if not row[0]:
             field.desc.append(row[3])
             continue
         if field.bits:
             if field.bits != 'Bit':
                 rows.append(field)
-        #print row
+        #print(row)
         field = RegField(row)
 
     with Printer(name) as printer:
         for row in rows:
-            #print field
+            #print(field)
             printer.output_regfield(row)
             #print
 
