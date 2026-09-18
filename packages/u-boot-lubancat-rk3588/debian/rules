@@ -40,6 +40,7 @@ ${u-boot-rockchip_platforms}:
 	  ARCH=arm \
 	  $(NJOBS) \
 	  BL31=../../../debian/rkbin/$($@_bl31) \
+	  TEE=../../../debian/rkbin/$($@_bl32) \
 	  spl/u-boot-spl.bin u-boot.dtb u-boot.itb
 
 	./debian/build/$@/tools/mkimage -n rk3588 -T rksd -d \
