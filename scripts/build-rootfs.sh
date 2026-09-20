@@ -36,7 +36,7 @@ export DEBIAN_FRONTEND=noninteractive
 # Debootstrap options
 arch=arm64
 release=jammy
-mirror=https://mirrors.aliyun.com/ubuntu-ports/
+mirror=https://mirrors.huaweicloud.com/ubuntu-ports/
 chroot_dir=rootfs
 overlay_dir=../overlay
 
