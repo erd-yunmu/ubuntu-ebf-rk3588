@@ -76,6 +76,40 @@ config_boards() {
     echo "已保存板卡: ${boards[$((choice - 1))]} (${names[$((choice - 1))]})"
 }
 
+load_board() {
+    unset BOARD_NAME
+    for file in config/boards/*; do
+        if [ "${BOARD}" == "$(basename "${file%.conf}")" ]; then
+            # shellcheck source=/dev/null
+            set -o allexport && source "${file}" && set +o allexport
+        fi
+    done
+
+    if [[ -z ${BOARD_NAME} ]]; then
+        echo "Error: \"${BOARD}\" is an unsupported board"
+        echo "Available boards: $(list_boards)"
+        exit 1
+    fi
+}
+
+build_board() {
+    # Build the Linux kernel if not found
+    if [[ ! -e "$(find build/linux-image-*.deb | sort | tail -n1)" || ! -e "$(find build/linux-headers-*.deb | sort | tail -n1)" ]]; then
+        eval "${DOCKER}" ./scripts/build-kernel.sh
+    fi
+
+    # Build U-Boot if not found
+    if [[ ! -e "$(find build/u-boot-"${BOARD}"_*.deb | sort | tail -n1)" ]]; then
+        eval "${DOCKER}" ./scripts/build-u-boot.sh
+    fi
+
+    # Create the root filesystem
+    eval "${DOCKER}" ./scripts/build-rootfs.sh
+
+    # Create the disk image
+    eval "${DOCKER}" ./scripts/config-image.sh
+}
+
 usage() {
 cat << HEREDOC
 Usage: $0 board [$(list_boards)]
@@ -111,6 +145,9 @@ for i in "$@"; do
         uboot|u-boot) i="-u" ;;
         server)       i="-so" ;;
         desktop)      i="-do" ;;
+        i)            I_WORD=Y ;;
+        love)         LOVE_WORD=Y ;;
+        embedfire)    EMBEDFIRE_WORD=Y ;;
     esac
 
     case $i in
@@ -160,9 +197,27 @@ for i in "$@"; do
     esac
 done
 
+if [[ ${I_WORD} == "Y" && ${LOVE_WORD} == "Y" && ${EMBEDFIRE_WORD} == "Y" ]]; then
+    ALL_BOARDS=Y
+fi
+
 # List boards and save the selected one
 if [[ ${CONFIG_MODE} == "Y" ]]; then
     config_boards
+    exit 0
+fi
+
+# Build every board in sequence
+if [[ ${ALL_BOARDS} == "Y" ]]; then
+    mkdir -p build/logs && exec > >(tee "build/logs/build-$(date +"%Y%m%d%H%M%S").log") 2>&1
+
+    IFS='|' read -r -a targets <<< "$(list_boards)"
+    for BOARD in "${targets[@]}"; do
+        export BOARD
+        load_board
+        echo "===== ${BOARD_NAME} (${BOARD}) ====="
+        build_board
+    done
     exit 0
 fi
 
@@ -193,20 +248,7 @@ if [[ -z ${BOARD} ]]; then
     exit 1
 fi
 
-# Read board configuration files
-for file in config/boards/*; do
-    if [ "${BOARD}" == "$(basename "${file%.conf}")" ]; then
-        # shellcheck source=/dev/null
-        set -o allexport && source "${file}" && set +o allexport
-    fi
-done
-
-# Exit with error if invalid board
-if [[ -z ${BOARD_NAME} ]]; then
-    echo "Error: \"${BOARD}\" is an unsupported board"
-    echo "Available boards: $(list_boards)"
-    exit 1
-fi
+load_board
 
 # Start logging the build process
 mkdir -p build/logs && exec > >(tee "build/logs/build-$(date +"%Y%m%d%H%M%S").log") 2>&1
@@ -223,20 +265,6 @@ if [[ ${UBOOT_ONLY} == "Y" ]]; then
     exit 0
 fi
 
-# Build the Linux kernel if not found
-if [[ ! -e "$(find build/linux-image-*.deb | sort | tail -n1)" || ! -e "$(find build/linux-headers-*.deb | sort | tail -n1)" ]]; then
-    eval "${DOCKER}" ./scripts/build-kernel.sh
-fi
-
-# Build U-Boot if not found
-if [[ ! -e "$(find build/u-boot-"${BOARD}"_*.deb | sort | tail -n1)" ]]; then
-    eval "${DOCKER}" ./scripts/build-u-boot.sh
-fi
-
-# Create the root filesystem
-eval "${DOCKER}" ./scripts/build-rootfs.sh
-
-# Create the disk image
-eval "${DOCKER}" ./scripts/config-image.sh
+build_board
 
 exit 0
