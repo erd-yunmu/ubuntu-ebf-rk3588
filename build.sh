@@ -213,10 +213,12 @@ if [[ ${ALL_BOARDS} == "Y" ]]; then
 
     IFS='|' read -r -a targets <<< "$(list_boards)"
     for BOARD in "${targets[@]}"; do
-        export BOARD
-        load_board
-        echo "===== ${BOARD_NAME} (${BOARD}) ====="
-        build_board
+        (
+            export BOARD
+            load_board
+            echo "===== ${BOARD_NAME} (${BOARD}) ====="
+            build_board
+        )
     done
     exit 0
 fi
