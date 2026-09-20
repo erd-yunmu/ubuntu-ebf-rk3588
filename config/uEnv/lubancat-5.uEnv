@@ -1,4 +1,4 @@
-overlays=rk3588-lubancat-5-hdmi0-vp0-overlay rk3588-lubancat-dp0-vp1-overla rk3588-lubancat-5-hdmi1-vp2-overla
+overlays=rk3588-lubancat-5-hdmi0-vp0-overlay rk3588-lubancat-dp0-vp1-overlay rk3588-lubancat-5-hdmi1-vp2-overlay
 
 # 正确的方法是将所有需要的设备树覆盖文件名列在一个overlays=后面，用空格分隔。例如：
 # 下面是为鲁班猫5使用两个覆盖层的示例:      
