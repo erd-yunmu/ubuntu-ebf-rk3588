@@ -5,24 +5,93 @@ trap 'echo Error: in $0 on line $LINENO' ERR
 
 cd "$(dirname -- "$(readlink -f -- "$0")")"
 
+BOARD_CONFIG_FILE="build/.board"
+
+list_boards() {
+    local file board
+    local boards=()
+    for file in config/boards/*.conf; do
+        [ -e "${file}" ] || continue
+        board="$(basename "${file%.conf}")"
+        boards+=("${board}")
+    done
+    local IFS='|'
+    echo "${boards[*]}"
+}
+
+config_boards() {
+    local file board name arch label index
+    local boards=() names=() archs=()
+    for file in config/boards/*.conf; do
+        [ -e "${file}" ] || continue
+        board="$(basename "${file%.conf}")"
+        name="$(unset BOARD_NAME; . "${file}" >/dev/null 2>&1; echo "${BOARD_NAME}")"
+        arch="$(unset OVERLAY_PREFIX; . "${file}" >/dev/null 2>&1; echo "${OVERLAY_PREFIX}")"
+        boards+=("${board}")
+        names+=("${name:-${board}}")
+        archs+=("${arch}")
+    done
+
+    if [ "${#boards[@]}" -eq 0 ]; then
+        echo "错误：config/boards 下未找到任何板卡配置"
+        exit 1
+    fi
+
+    local saved=""
+    if [ -f "${BOARD_CONFIG_FILE}" ]; then
+        saved="$(<"${BOARD_CONFIG_FILE}")"
+    fi
+
+    echo "可选的板卡配置："
+    for index in "${!boards[@]}"; do
+        if [ -n "${archs[$index]}" ]; then
+            label="[${archs[$index]}] ${boards[$index]} (${names[$index]})"
+        else
+            label="${boards[$index]} (${names[$index]})"
+        fi
+        if [ "${boards[$index]}" == "${saved}" ]; then
+            printf '  %d) %s *\n' "$((index + 1))" "${label}"
+        else
+            printf '  %d) %s\n' "$((index + 1))" "${label}"
+        fi
+    done
+
+    local choice
+    while true; do
+        read -r -p "请选择板卡 [1-${#boards[@]}] (q/exit 退出): " choice || exit 0
+        case "${choice}" in
+            q|Q|exit|quit)
+                echo "已取消"
+                exit 0
+                ;;
+        esac
+        if [[ "${choice}" =~ ^[0-9]+$ ]] && [ "${choice}" -ge 1 ] && [ "${choice}" -le "${#boards[@]}" ]; then
+            break
+        fi
+        echo "选择无效，请输入 1 到 ${#boards[@]} 之间的数字"
+    done
+
+    mkdir -p "$(dirname -- "${BOARD_CONFIG_FILE}")"
+    printf '%s\n' "${boards[$((choice - 1))]}" > "${BOARD_CONFIG_FILE}"
+    echo "已保存板卡: ${boards[$((choice - 1))]} (${names[$((choice - 1))]})"
+}
+
 usage() {
 cat << HEREDOC
-Usage: $0 --board=[lubancat-3|lubancat-3io|lubancat-4|lubancat-4io|lubancat-5|lubancat-5-v2|lubancat-5io]
+Usage: $0 board [$(list_boards)]
+       $0 config
+       $0 all|clean|kernel|uboot
 
-Required arguments:
-  -b, --board=BOARD      target board 
-
-Optional arguments:
-  -h,  --help            show this help message and exit
-  -c,  --clean           clean the build directory
-  -d,  --docker          use docker to build
-  -k,  --kernel-only     only compile the kernel
-  -u,  --uboot-only      only compile uboot
-  -so, --server-only     only build server image
-  -do, --desktop-only    only build desktop image
-  -m,  --mainline        use mainline linux sources
-  -l,  --launchpad       use kernel and uboot from launchpad repo
-  -v,  --verbose         increase the verbosity of the bash script
+Commands:
+  board, -b BOARD            target board, one of: $(list_boards)
+  config                     list boards and save the selected board
+  all                        build everything with the saved board
+  clean, -c                  remove the build directory
+  kernel, -k                 only compile the kernel
+  uboot, -u                  only compile uboot
+  help, -h                   show this help message and exit
+  server, -so                only build server image
+  desktop, -do               only build desktop image
 HEREDOC
 }
 
@@ -34,6 +103,16 @@ fi
 cd "$(dirname -- "$(readlink -f -- "$0")")"
 
 for i in "$@"; do
+    case $i in
+        help)         i="-h" ;;
+        board)        i="-b" ;;
+        clean)        i="-c" ;;
+        kernel)       i="-k" ;;
+        uboot|u-boot) i="-u" ;;
+        server)       i="-so" ;;
+        desktop)      i="-do" ;;
+    esac
+
     case $i in
         -h|--help)
             usage
@@ -47,10 +126,11 @@ for i in "$@"; do
             export BOARD="${2}"
             shift
             ;;
-        -d|--docker)
-            DOCKER="docker run --privileged --network=host --rm -it -v \"$(pwd)\":/opt -e BOARD -e VENDOR -e LAUNCHPAD -e MAINLINE -e SERVER_ONLY -e DESKTOP_ONLY -e KERNEL_ONLY -e UBOOT_ONLY ubuntu-rockchip-build /bin/bash"
-            docker build -t ubuntu-rockchip-build docker
-            shift
+        config)
+            CONFIG_MODE=Y
+            ;;
+        all)
+            BUILD_ALL=Y
             ;;
         -k|--kernel-only)
             export KERNEL_ONLY=Y
@@ -68,20 +148,8 @@ for i in "$@"; do
             export SERVER_ONLY=Y
             shift
             ;;
-        -m|--mainline)
-            export MAINLINE=Y
-            shift
-            ;;
-        -l|--launchpad)
-            export LAUNCHPAD=Y
-            shift
-            ;;
         -c|--clean)
             export CLEAN=Y
-            ;;
-        -v|--verbose)
-            set -x
-            shift
             ;;
         -*)
             echo "Error: unknown argument \"$i\""
@@ -92,32 +160,37 @@ for i in "$@"; do
     esac
 done
 
-if [[ ${MAINLINE} != "Y" ]]; then
-    export MAINLINE=N
-fi
-
-# Build only the Linux kernel then exit
-if [[ ${KERNEL_ONLY} == "Y" ]]; then
-    # Start logging the build process
-    mkdir -p build/logs && exec > >(tee "build/logs/build-$(date +"%Y%m%d%H%M%S").log") 2>&1
-
-    eval "${DOCKER}" ./scripts/build-kernel.sh
+# List boards and save the selected one
+if [[ ${CONFIG_MODE} == "Y" ]]; then
+    config_boards
     exit 0
 fi
 
-# No board param passed
-if [[ -z ${BOARD} ]]; then
-    usage
-    exit 1
+# Use the saved board when no board is passed
+if [[ -z ${BOARD} && -f ${BOARD_CONFIG_FILE} ]]; then
+    BOARD="$(<"${BOARD_CONFIG_FILE}")"
+    export BOARD
 fi
 
-# Clean the build directory
+# Clean the build directory then exit
 if [[ ${CLEAN} == "Y" ]]; then
     if [ -d build/rootfs ]; then
         umount -lf build/rootfs/dev/pts 2> /dev/null || true
         umount -lf build/rootfs/* 2> /dev/null || true
     fi
     rm -rf build
+    if [ -n "${BOARD}" ]; then
+        mkdir -p build
+        printf '%s\n' "${BOARD}" > "${BOARD_CONFIG_FILE}"
+    fi
+    echo "Removed build"
+    exit 0
+fi
+
+# No board param passed
+if [[ -z ${BOARD} ]]; then
+    echo "错误：尚未配置目标板，请先执行: sudo ./build.sh config"
+    exit 1
 fi
 
 # Read board configuration files
@@ -131,6 +204,7 @@ done
 # Exit with error if invalid board
 if [[ -z ${BOARD_NAME} ]]; then
     echo "Error: \"${BOARD}\" is an unsupported board"
+    echo "Available boards: $(list_boards)"
     exit 1
 fi
 
@@ -150,17 +224,13 @@ if [[ ${UBOOT_ONLY} == "Y" ]]; then
 fi
 
 # Build the Linux kernel if not found
-if [[ ${LAUNCHPAD} != "Y" ]]; then
-    if [[ ! -e "$(find build/linux-image-*.deb | sort | tail -n1)" || ! -e "$(find build/linux-headers-*.deb | sort | tail -n1)" ]]; then
-        eval "${DOCKER}" ./scripts/build-kernel.sh
-    fi
+if [[ ! -e "$(find build/linux-image-*.deb | sort | tail -n1)" || ! -e "$(find build/linux-headers-*.deb | sort | tail -n1)" ]]; then
+    eval "${DOCKER}" ./scripts/build-kernel.sh
 fi
 
 # Build U-Boot if not found
-if [[ ${LAUNCHPAD} != "Y" ]]; then
-    if [[ ! -e "$(find build/u-boot-"${BOARD}"_*.deb | sort | tail -n1)" ]]; then
-        eval "${DOCKER}" ./scripts/build-u-boot.sh
-    fi
+if [[ ! -e "$(find build/u-boot-"${BOARD}"_*.deb | sort | tail -n1)" ]]; then
+    eval "${DOCKER}" ./scripts/build-u-boot.sh
 fi
 
 # Create the root filesystem
