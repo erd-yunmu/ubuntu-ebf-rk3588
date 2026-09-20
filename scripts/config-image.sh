@@ -16,24 +16,22 @@ if [[ -z ${BOARD} ]]; then
     exit 1
 fi
 
-if [[ ${LAUNCHPAD} != "Y" ]]; then
-    uboot_package="$(basename "$(find u-boot-"${BOARD}"_*.deb | sort | tail -n1)")"
-    if [ ! -e "$uboot_package" ]; then
-        echo 'Error: could not find the u-boot .deb file'
-        exit 1
-    fi
+uboot_package="$(basename "$(find u-boot-"${BOARD}"_*.deb | sort | tail -n1)")"
+if [ ! -e "$uboot_package" ]; then
+    echo 'Error: could not find the u-boot .deb file'
+    exit 1
+fi
 
-    linux_image_package="$(basename "$(find linux-image-*.deb | sort | tail -n1)")"
-    if [ ! -e "$linux_image_package" ]; then
-        echo 'Error: could not find the linux image .deb file'
-        exit 1
-    fi
+linux_image_package="$(basename "$(find linux-image-*.deb | sort | tail -n1)")"
+if [ ! -e "$linux_image_package" ]; then
+    echo 'Error: could not find the linux image .deb file'
+    exit 1
+fi
 
-    linux_headers_package="$(basename "$(find linux-headers-*.deb | sort | tail -n1)")"
-    if [ ! -e "$linux_headers_package" ]; then
-        echo 'Error: could not find the linux headers .deb file'
-        exit 1
-    fi
+linux_headers_package="$(basename "$(find linux-headers-*.deb | sort | tail -n1)")"
+if [ ! -e "$linux_headers_package" ]; then
+    echo 'Error: could not find the linux headers .deb file'
+    exit 1
 fi
 
 if [[ ${SERVER_ONLY} == "Y" ]]; then

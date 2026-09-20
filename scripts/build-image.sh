@@ -56,13 +56,8 @@ if [[ -z ${BOARD} ]]; then
     exit 1
 fi
 
-KVER=""
-if [[ "${MAINLINE}" == "Y" ]]; then
-    KVER="-mainline-6.7.0-rc4"
-fi
-
 # Create an empty disk image
-img="../images/$(basename "${rootfs}" .rootfs.tar)${KVER}.img"
+img="../images/$(basename "${rootfs}" .rootfs.tar).img"
 size="$(( $(wc -c < "${rootfs}" ) / 1024 / 1024 ))"
 truncate -s "$(( size + 1024 + 512 ))M" "${img}"
 
