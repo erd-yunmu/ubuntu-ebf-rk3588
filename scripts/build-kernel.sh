@@ -11,12 +11,10 @@ fi
 cd "$(dirname -- "$(readlink -f -- "$0")")" && cd ..
 mkdir -p build && cd build
 
-if [[ "${MAINLINE}" != "Y" ]]; then
-    if [ -d "linux-rockchip" ]; then
-        rm -rf linux-rockchip
-    fi
-    cp -r ../kernel-6.1 linux-rockchip
+if [ -d "linux-rockchip" ]; then
+    rm -rf linux-rockchip
 fi
+cp -r ../kernel-6.1 linux-rockchip
 cd linux-rockchip
 
 # Compile kernel into a deb package
