@@ -313,6 +313,9 @@ mkdir -p ${chromium_rkmpp_chroot_dir}
 find ${chromium_rkmpp_package_dir}/ -maxdepth 1 -type f -name "*.deb" \
     -exec cp -f {} ${chromium_rkmpp_chroot_dir}/ \;
 
+# Copy the isolated Mesa package into the desktop chroot
+cp ../packages/mesa/*.deb ${chroot_dir}/tmp/
+
 # Download and update packages
 cat << EOF | chroot ${chroot_dir} /bin/bash
 set -eE 
@@ -326,6 +329,12 @@ libdvbv5-0 libdvbv5-dev libdvbv5-doc libv4l-0 libv4l2rds0 libv4lconvert0 \
 libegl-mesa0 libegl1-mesa-dev libgbm-dev guvcview \
 libgl1-mesa-dev libgles2-mesa-dev libglx-mesa0 mesa-common-dev mesa-vulkan-drivers \
 language-pack-zh-han*
+
+# Install Mesa 26.2.3 and resolve its runtime dependencies from Noble
+apt-get -y install /tmp/mesa-panfrost-panvk-26.2.3-ubuntu24.04-arm64.deb
+rm -f /tmp/mesa-panfrost-panvk-26.2.3-ubuntu24.04-arm64.deb
+getent group render > /dev/null || groupadd --system render
+usermod -aG render cat
 
 export LANGUAGE="zh_CN"
 export LANG="zh_CN.UTF-8"
@@ -398,6 +407,11 @@ rm -rf ${chroot_dir}/etc/systemd/system/systemd-networkd-wait-online.service.d/o
 
 # Enable wayland session
 cp ${overlay_dir}/etc/gdm3/custom.conf ${chroot_dir}/etc/gdm3/custom.conf
+
+# Use the isolated Mesa 26.2.3 build for desktop and GDM
+cat ${overlay_dir}/etc/mesa-26.2.3.environment >> ${chroot_dir}/etc/environment
+mkdir -p ${chroot_dir}/etc/systemd/system/gdm3.service.d
+cp ${overlay_dir}/etc/systemd/system/gdm3.service.d/mesa-26.2.3.conf ${chroot_dir}/etc/systemd/system/gdm3.service.d/
 
 # default image background
 rm -rf ${chroot_dir}/usr/share/backgrounds/Jammy-Jellyfish_WP_4096x2304_Grey.png
