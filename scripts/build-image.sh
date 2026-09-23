@@ -100,7 +100,7 @@ partition_char="$(if [[ ${disk: -1} == [0-9] ]]; then echo p; fi)"
 sleep 1
 
 wait_loopdev "${disk}${partition_char}2" 60 || {
-    echo "Failure to create ${disk}${partition_char}1 in time"
+    echo "Failure to create ${disk}${partition_char}2 in time"
     exit 1
 }
 
@@ -152,30 +152,25 @@ cat > ${mount_point}/system-boot/boot.cmd << 'EOF'
 # mkimage -A arm64 -O linux -T script -C none -n "Boot Script" -d boot.cmd boot.scr
 
 setenv load_addr "${kernel_addr_r}"
-setenv overlay_error "false"
+setenv ubuntu_env_size 0
 
 echo "Boot script loaded from ${devtype} ${devnum}"
 
 if test -e ${devtype} ${devnum}:${distro_bootpart} /ubuntuEnv.txt; then
 	load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} /ubuntuEnv.txt
 	env import -t ${load_addr} ${filesize}
+	setenv ubuntu_env_size ${filesize}
 fi
 
 setenv bootargs "${bootargs} root=LABEL=writable"
 printenv bootargs
 
 load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} /dtbs/rockchip/${fdtfile}
-fdt addr ${fdt_addr_r} && fdt resize 0x10000
+fdt addr ${fdt_addr_r} && fdt resize 0x40000
 
-for overlay_file in ${overlays}; do
-    for file in "${overlay_prefix}-${overlay_file}.dtbo ${overlay_prefix}-${overlay_file} ${overlay_file}.dtbo ${overlay_file}"; do
-        test -e ${devtype} ${devnum}:${distro_bootpart} /dtbs/rockchip/overlay/${file} \
-        && load ${devtype} ${devnum}:${distro_bootpart} ${fdtoverlay_addr_r} /dtbs/rockchip/overlay/${file} \
-        && echo "Applying device tree overlay: /dtbs/rockchip/overlay/${file}" \
-        && fdt apply ${fdtoverlay_addr_r} || setenv overlay_error "true"
-    done
-done
-if test "${overlay_error}" = "true"; then
+if dtoverlay ${load_addr} ${ubuntu_env_size} ${devtype} ${devnum}:${distro_bootpart}; then
+    echo "Device tree overlays applied"
+else
     echo "Error applying device tree overlays, restoring original device tree"
     load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} /dtbs/rockchip/${fdtfile}
 fi
@@ -195,10 +190,33 @@ bootargs=rootfstype=ext4 rootwait rw console=ttyS2,1500000 console=tty1 console=
 fdtfile=${DEVICE_TREE_FILE}
 overlay_prefix=${OVERLAY_PREFIX}
 EOF
+
 cat ../config/uEnv/${BOARD}.uEnv >> ${mount_point}/system-boot/ubuntuEnv.txt
+
+overlay_list="$(tr -d '\r' < ../config/uEnv/${BOARD}.uEnv \
+    | sed -e 's/#.*//' \
+    | sed -n -e 's|^[[:space:]]*dtoverlay=[[:space:]]*||p' \
+             -e 's|^[[:space:]]*\([A-Za-z0-9][A-Za-z0-9._-]*-ove[rt]*lay\)[[:space:]]*$|\1|p' \
+    | sed -e 's|[[:space:]]*$||' -e 's|.*/||' -e 's|\.dtbo$||' \
+    | grep -v '^$' \
+    | awk '!seen[$0]++' \
+    | tr '\n' ' ')"
 
 # Copy the device trees, kernel, and initrd to the boot partition
 mv ${mount_point}/writable/boot/firmware/* ${mount_point}/system-boot/
+
+if [ -d "${mount_point}/system-boot/dtbs/rockchip/overlay" ]; then
+    rm -rf "${mount_point}/system-boot/dtb/overlay"
+    mkdir -p "${mount_point}/system-boot/dtb"
+    mv "${mount_point}/system-boot/dtbs/rockchip/overlay" "${mount_point}/system-boot/dtb/overlay"
+fi
+
+for overlay in ${overlay_list}; do
+    if [ ! -f "${mount_point}/system-boot/dtb/overlay/${overlay}.dtbo" ]; then
+        echo "Error: overlay ${overlay} not found in dtb/overlay"
+        exit 1
+    fi
+done
 
 # Write bootloader to disk image
 if [ -f "${mount_point}/writable/usr/lib/u-boot/u-boot-rockchip.bin" ]; then
