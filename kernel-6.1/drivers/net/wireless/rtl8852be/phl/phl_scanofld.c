@@ -183,7 +183,7 @@ _scanofld_start(struct phl_info_t *phl_info, struct rtw_wifi_role_link_t *rlink,
 		return pstatus;
 
 	rtw_hal_notification(phl_info->hal, MSG_EVT_SCANOFLD_START, rlink->hw_band);
-	rtw_hal_en_fw_log(phl_info->hal, FL_COMP_SCAN, true);
+	rtw_hal_en_fw_log_comp(phl_info->hal, FL_COMP_SCAN, true);
 
 	/* trigger fw to start scan */
 	cfg.operation = SCAN_OFLD_OP_START;
@@ -215,7 +215,7 @@ _scanofld_stop(struct phl_info_t *phl_info, struct rtw_wifi_role_link_t *rlink,
 	rtw_hal_scan_ofld(phl_info->hal, sta->macid, rlink->hw_band,
 			  rlink->hw_port, &cfg);
 	rtw_hal_notification(phl_info->hal, MSG_EVT_SCANOFLD_END, rlink->hw_band);
-	rtw_hal_en_fw_log(phl_info->hal, FL_COMP_SCAN, false);
+	rtw_hal_en_fw_log_comp(phl_info->hal, FL_COMP_SCAN, false);
 }
 
 static void
@@ -368,25 +368,6 @@ _cmd_scanofld_start(struct phl_info_t *phl_info,
 	rtw_hal_scan_ofld_cfg_en(phl_info->hal, true);
 	rtw_hal_notification(phl_info->hal, MSG_EVT_SCAN_START,
                              band_idx);
-}
-
-static void
-_scanofld_get_scan_ch_info(struct phl_info_t *phl_info,
-			   struct rtw_phl_scan_param *param,
-			   enum band_type band,
-			   u8 chnl,
-			   struct phl_scan_channel *scan_ch)
-{
-	u8 i = 0;
-
-	for (i = 0; i < param->ch_num; i++) {
-		if (param->ch[i].band == band && param->ch[i].channel == chnl) {
-			scan_ch = &param->ch[i];
-			return;
-		}
-	}
-
-	scan_ch = NULL;
 }
 
 enum phl_mdl_ret_code

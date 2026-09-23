@@ -237,9 +237,9 @@ struct wpa_eapol_key {
 	u8 key_iv[16];
 	u8 key_rsc[WPA_KEY_RSC_LEN];
 	u8 key_id[8]; /* Reserved in IEEE 802.11i/RSN */
-	u8 key_mic[16];
-	u8 key_data_length[2]; /* big endian */
-	/* followed by key_data_length bytes of key_data */
+	/* variable length Key MIC field */
+	/* big endian 2-octet Key Data Length field */
+	/* followed by Key Data Length bytes of Key Data */
 };
 
 #define is_legacy_only(net_type)  ((net_type) == ((net_type) & (WLAN_MD_11BG | WLAN_MD_11A)))
@@ -265,7 +265,7 @@ typedef struct ieee_param {
 		struct {
 			u32 len;
 			u8 reserved[32];
-			u8 data[0];
+			u8 data[];
 		} wpa_ie;
 		struct {
 			int command;
@@ -278,7 +278,7 @@ typedef struct ieee_param {
 			u8 idx;
 			u8 seq[8]; /* sequence counter (set: RX, get: TX) */
 			u16 key_len;
-			u8 key[0];
+			u8 key[];
 		} crypt;
 #ifdef CONFIG_AP_MODE
 		struct {
@@ -290,7 +290,7 @@ typedef struct ieee_param {
 		} add_sta;
 		struct {
 			u8	reserved[2];/* for set max_num_sta */
-			u8	buf[0];
+			u8	buf[];
 		} bcn_ie;
 #endif
 
@@ -301,7 +301,7 @@ typedef struct ieee_param {
 typedef struct ieee_param_ex {
 	u32 cmd;
 	u8 sta_addr[ETH_ALEN];
-	u8 data[0];
+	u8 data[];
 } ieee_param_ex;
 
 struct sta_data {
@@ -716,6 +716,7 @@ struct ieee80211_snap_hdr {
 #define WLAN_EID_EXTENSION_HE_CAPABILITY	35
 #define WLAN_EID_EXTENSION_HE_OPERATION	36
 #define WLAN_EID_EXTENSION_HE_MU_EDCA	38
+#define WLAN_EID_EXT_NON_INHERITANCE 56
 #define WLAN_EID_EXT_HE_6G_CAP 59
 
 #define WLAN_EID_EXT_CAP_MAX_LEN 10
@@ -1254,7 +1255,7 @@ struct ieee80211_info_element_hdr {
 struct ieee80211_info_element {
 	u8 id;
 	u8 len;
-	u8 data[0];
+	u8 data[];
 } __attribute__((packed));
 #endif
 
@@ -1370,8 +1371,15 @@ struct ieee80211_txb {
 
 #define DEFAULT_MAX_SCAN_AGE (15 * HZ)
 #define DEFAULT_FTS 2346
+
+#ifdef CONFIG_RTW_HIDDEN_MAC_ADDR
+#define MAC_FMT "%02x:%02x:%02x:xx:xx:xx"
+#define MAC_ARG(x) ((u8 *)(x))[0], ((u8 *)(x))[1], ((u8 *)(x))[2]
+#else
 #define MAC_FMT "%02x:%02x:%02x:%02x:%02x:%02x"
 #define MAC_ARG(x) ((u8 *)(x))[0], ((u8 *)(x))[1], ((u8 *)(x))[2], ((u8 *)(x))[3], ((u8 *)(x))[4], ((u8 *)(x))[5]
+#endif /* CONFIG_RTW_HIDDEN_MAC_ADDR */
+
 #define MAC_SFMT "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx"
 #define MAC_SARG(x) ((u8*)(x)),((u8*)(x)) + 1,((u8*)(x)) + 2,((u8*)(x)) + 3,((u8*)(x)) + 4,((u8*)(x)) + 5
 #define IP_FMT "%d.%d.%d.%d"
@@ -1813,9 +1821,9 @@ struct rtw_ieee802_11_elems {
 	u8 *he_capabilities;
 	u8 he_capabilities_len;
 	u8 *he_operation;
+	u8 he_operation_len;
 	u8 *he_6g_band_cap;
 	u8 he_6g_band_cap_len;
-	u8 he_operation_len;
 	u8 *rm_en_cap;
 	u8 rm_en_cap_len;
 #ifdef CONFIG_RTW_MESH
@@ -1837,12 +1845,14 @@ struct rtw_ieee802_11_elems {
 	u8 *country_info;
 	u8 country_info_len;
 #ifdef CONFIG_STA_MULTIPLE_BSSID
-	u8 *mbssid;
+	u8 *mbssid; /* possible multiple ie, used for checking existence */
 	u8 mbssid_len;
 
 	/* exist in nontransmitted bssid profile */
 	u8 *non_tx_bssid_cap;
 	u8 non_tx_bssid_cap_len;
+	u8 *non_inheritance;
+	u8 non_inheritance_len;
 #endif
 };
 
@@ -1853,9 +1863,8 @@ ParseRes rtw_ieee802_11_parse_elems(u8 *start, uint len,
 				int show_errors);
 
 #ifdef CONFIG_STA_MULTIPLE_BSSID
-ParseRes rtw_ieee802_11_override_elems_by_mbssid(
-	u8 *mbssid_ie, uint mbssid_ie_len, u8 mbssid_idx, struct rtw_ieee802_11_elems *elems
-	, int show_errors);
+ParseRes rtw_ieee802_11_override_elems_by_mbssid(u8 *start, uint len
+	, u8 tgt_mbssid_idx, struct rtw_ieee802_11_elems *elems, int show_errors);
 #endif
 
 u8 *rtw_set_fixed_ie(unsigned char *pbuf, unsigned int len, unsigned char *source, unsigned int *frlen);
@@ -1889,6 +1898,7 @@ u8 *rtw_set_ie_wide_bw_ch_switch(u8 *buf, u32 *buf_len,
 u8 *rtw_set_ie_mesh_ch_switch_parm(u8 *buf, u32 *buf_len, u8 ttl, u8 flags, u16 reason, u16 precedence);
 
 u8 *rtw_get_ie(const u8 *pbuf, sint index, sint *len, sint limit);
+u8 *rtw_get_ext_ie(const u8 *pbuf, sint ext_id, sint *len, sint limit);
 u8 rtw_update_rate_bymode(WLAN_BSSID_EX *pbss_network, u32 mode);
 
 u8 *rtw_get_ie_ex(const u8 *in_ie, uint in_len, u8 eid, const u8 *oui, u8 oui_len, u8 *ie, uint *ielen);
@@ -1979,11 +1989,16 @@ void dump_ht_cap_ie_content(void *sel, const u8 *buf, u32 buf_len);
 
 void dump_wps_ie(void *sel, const u8 *ie, u32 ie_len);
 
-RTW_FUNC_2G_5G_ONLY void rtw_ies_get_chbw(u8 *ies, int ies_len, u8 *ch, u8 *bw, u8 *offset, u8 ht, u8 vht);
 u8 *rtw_ies_get_he_6g_op_info_ie(u8 *ies, int ies_len);
-void rtw_ies_get_bchbw(u8 *ies, int ies_len, enum band_type *band, u8 *chan, u8 *bw,
-	u8 *offset, u8 *freq0, u8 *freq1, u8 ht, u8 vht, u8 he);
-void rtw_bss_get_chbw(WLAN_BSSID_EX *bss, enum band_type *band, u8 *ch, u8 *bw, u8 *offset, u8 ht, u8 vht, u8 he);
+
+RTW_FUNC_2G_5G_ONLY void rtw_ies_get_chbw(u8 *ies, int ies_len, u8 *ch, u8 *bw, u8 *offset, u8 ht, u8 vht);
+RTW_FUNC_2G_5G_ONLY void rtw_bss_get_chbw(WLAN_BSSID_EX *bss, u8 *ch, u8 *bw, u8 *offset, u8 ht, u8 vht);
+void rtw_ies_get_bchbw(u8 *ies, int ies_len, enum band_type *band, u8 *ch, u8 *bw, u8 *offset, u8 ht, u8 vht, u8 he, u8 eht);
+void rtw_bss_get_bchbw(WLAN_BSSID_EX *bss, enum band_type *band, u8 *ch, u8 *bw, u8 *offset, u8 ht, u8 vht, u8 he, u8 eht);
+
+struct rtw_chan_def;
+void rtw_ies_get_chdef(u8 *ies, int ies_len, struct rtw_chan_def *chdef, u8 ht, u8 vht, u8 he, u8 eht);
+void rtw_bss_get_chdef(WLAN_BSSID_EX *bss, struct rtw_chan_def *chdef, u8 ht, u8 vht, u8 he, u8 eht);
 
 u32 rtw_get_p2p_merged_ies_len(u8 *in_ie, u32 in_len);
 int rtw_p2p_merge_ies(u8 *in_ie, u32 in_len, u8 *merge_ie);
@@ -2048,6 +2063,7 @@ u32	rtw_ht_mcs_set_to_bitmap(u8 *mcs_set, u8 nss);
 int rtw_action_frame_parse(const u8 *frame, u32 frame_len, u8 *category, u8 *action);
 const char *action_public_str(u8 action);
 
+u8 key_char2num(u8 ch);
 u8 key_2char2num(u8 hch, u8 lch);
 u8 str_2char2num(u8 hch, u8 lch);
 void macstr2num(u8 *dst, u8 *src);
@@ -2058,5 +2074,5 @@ int wifirate2_ratetbl_inx(unsigned char rate);
 /*void rtw_set_spp_amsdu_mode(u8 mode, u8 *rsn_ie, int rsn_ie_len);*/
 u8 rtw_check_amsdu_disable(u8 mode, u8 spp_opt);
 
-
+char *get_macaddr_str(char *str, void *sel, const u8 *addr);
 #endif /* IEEE80211_H */

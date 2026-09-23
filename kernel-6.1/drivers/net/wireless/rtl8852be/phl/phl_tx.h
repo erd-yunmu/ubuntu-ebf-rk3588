@@ -35,6 +35,8 @@ void phl_release_ring_sts(struct phl_info_t *phl_info,
 u8 phl_check_xmit_ring_resource(struct phl_info_t *phl_info,
 				_os_list *sta_list);
 void phl_tx_flow_ctrl(struct phl_info_t *phl_info, _os_list *sta_list);
+void phl_tx_ting_rr_sw_tid_turn(struct phl_info_t *phl_info,
+				enum rtw_phl_ring_cat cat);
 enum rtw_phl_status rtw_phl_tx_req_notify(void *phl);
 enum rtw_phl_status phl_register_handler(struct rtw_phl_com_t *phl_com,
 				struct rtw_phl_handler *handler);
@@ -55,6 +57,11 @@ enum rtw_phl_status phl_enqueue_busy_h2c_pkt(struct phl_info_t *phl_info,
 
 enum rtw_phl_status phl_enqueue_idle_h2c_pkt(struct phl_info_t *phl_info,
 				struct rtw_h2c_pkt *h2c_pkt);
+
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+void phl_set_h2c_pkt_alloc_cnt(struct phl_info_t *phl_info, struct rtw_h2c_pkt *h2c_pkt);
+void phl_unset_h2c_pkt_alloc_cnt(struct phl_info_t *phl_info, struct rtw_h2c_pkt *h2c_pkt);
+#endif
 
 struct rtw_h2c_pkt *phl_query_busy_h2c_pkt(struct phl_info_t *phl_info);
 struct rtw_h2c_pkt *phl_query_idle_h2c_pkt(struct phl_info_t *phl_info, u8 type);

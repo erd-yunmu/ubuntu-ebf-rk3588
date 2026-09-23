@@ -62,9 +62,9 @@ static inline void __role_queue_before(struct mac_ax_adapter *adapter,
 	__role_insert(adapter, new_role, next->prev, next, list);
 }
 
-static inline void __role_unlink(struct mac_ax_adapter *adapter,
-				 struct mac_role_tbl *role,
-				 struct mac_role_tbl_head *list)
+static void __role_unlink(struct mac_ax_adapter *adapter,
+			  struct mac_role_tbl *role,
+			  struct mac_role_tbl_head *list)
 {
 	struct mac_role_tbl *next, *prev;
 
@@ -105,8 +105,8 @@ static inline u32 role_queue_len(struct mac_role_tbl_head *list)
 	return list->qlen;
 }
 
-static inline void role_queue_head_init(struct mac_ax_adapter *adapter,
-					struct mac_role_tbl_head *list)
+static void role_queue_head_init(struct mac_ax_adapter *adapter,
+				 struct mac_role_tbl_head *list)
 {
 	PLTFM_MUTEX_INIT(&list->lock);
 	__role_queue_head_init(adapter, list);
@@ -120,8 +120,8 @@ static inline void role_enqueue(struct mac_ax_adapter *adapter,
 			    list, (struct mac_role_tbl *)list, new_role);
 }
 
-static inline struct mac_role_tbl *role_dequeue(struct mac_ax_adapter *adapter,
-						struct mac_role_tbl_head *list)
+static struct mac_role_tbl *role_dequeue(struct mac_ax_adapter *adapter,
+					 struct mac_role_tbl_head *list)
 {
 	struct mac_role_tbl *role = NULL;
 
@@ -514,6 +514,7 @@ u32 role_init(struct mac_ax_adapter *adapter,
 	role->wmm = (info->band ? MAC_AX_ACTUAL_WMM_BAND : 0) |
 		    (info->wmm ? MAC_AX_ACTUAL_WMM_DRV_WMM : 0);
 
+#if MAC_FEAT_DBCC
 	if (info->dbcc_role) {
 		ret = dbcc_wmm_add_macid(adapter, info);
 		if (ret != MACSUCCESS) {
@@ -521,6 +522,7 @@ u32 role_init(struct mac_ax_adapter *adapter,
 			return ret;
 		}
 	}
+#endif /* MAC_FEAT_DBCC */
 
 	role->info = *info;
 
@@ -699,11 +701,13 @@ static u32 _add_role(struct mac_ax_adapter *adapter,
 
 role_add_fail:
 	role_enqueue(adapter, list_head->role_tbl_pool, role);
+#if MAC_FEAT_DBCC
 	if (role->info.dbcc_role) {
 		ret = dbcc_wmm_rm_macid(adapter, &role->info);
 		if (ret != MACSUCCESS)
 			PLTFM_MSG_ERR("add role fail dbcc wmm rm macid %d\n", ret);
 	}
+#endif /* MAC_FEAT_DBCC */
 	return ret;
 }
 
@@ -728,6 +732,7 @@ static u32 _change_role(struct mac_ax_adapter *adapter,
 		return MACNOITEM;
 	}
 
+#if MAC_FEAT_DBCC
 	if (info->upd_mode == MAC_AX_ROLE_BAND_SW) {
 		if (!role->info.dbcc_role) {
 			PLTFM_MSG_ERR("role band sw runs only for dbcc role\n");
@@ -741,6 +746,7 @@ static u32 _change_role(struct mac_ax_adapter *adapter,
 			return ret;
 		}
 	}
+#endif /* MAC_FEAT_DBCC */
 	info->a_info = role->info.a_info;
 	info->b_info = role->info.b_info;
 	info->s_info = role->info.s_info;
@@ -811,16 +817,13 @@ static u32 _change_role(struct mac_ax_adapter *adapter,
 		}
 	} else if (info->upd_mode == MAC_AX_ROLE_INFO_CHANGE ||
 		   info->upd_mode == MAC_AX_ROLE_BAND_SW) {
-		if (info->self_role == MAC_AX_SELF_ROLE_CLIENT) {
-		} else {
-			ret = mac_h2c_join_info(adapter, info);
-			if (ret != MACSUCCESS) {
-				if (ret == MACFWNONRDY) {
-					PLTFM_MSG_WARN("skip join info\n");
-				} else {
-					PLTFM_MSG_ERR("mac_h2c_join_info: %d\n", ret);
-					return ret;
-				}
+		ret = mac_h2c_join_info(adapter, info);
+		if (ret != MACSUCCESS) {
+			if (ret == MACFWNONRDY) {
+				PLTFM_MSG_WARN("skip join info\n");
+			} else {
+				PLTFM_MSG_ERR("mac_h2c_join_info: %d\n", ret);
+				return ret;
 			}
 		}
 	} else {
@@ -864,6 +867,7 @@ static u32 _remove_role(struct mac_ax_adapter *adapter, u8 macid)
 		return ret;
 	}
 
+#if MAC_FEAT_DBCC
 	if (role->info.dbcc_role) {
 		role->info.dbcc_role = 0;
 		ret = dbcc_wmm_rm_macid(adapter, &role->info);
@@ -872,6 +876,7 @@ static u32 _remove_role(struct mac_ax_adapter *adapter, u8 macid)
 			return ret;
 		}
 	}
+#endif /* MAC_FEAT_DBCC */
 
 	role_return(adapter, role);
 

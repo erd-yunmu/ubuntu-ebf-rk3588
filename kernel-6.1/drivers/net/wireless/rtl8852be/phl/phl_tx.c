@@ -134,13 +134,58 @@ void phl_dump_h2c_pool_stats(struct phl_h2c_pkt_pool *h2c_pkt_pool)
 				h2c_pkt_pool->busy_h2c_pkt_list.cnt);
 }
 
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+struct phl_h2c_pkt_alloc_cnt *
+rtw_phl_dump_h2c_pool_alloc_stats(void *phl)
+{
+	struct phl_info_t *phl_info = (struct phl_info_t *)phl;
+	struct phl_h2c_pkt_pool *h2c_pkt_pool = phl_info->h2c_pool;
+	struct phl_h2c_pkt_alloc_cnt *h2c_pkt_alloc_cnt = &phl_info->h2c_alloc_cnt;
+	struct rtw_h2c_pkt_return_list *h2c_pkt_return_list = &phl_info->h2c_pkt_return_list;
+	void *drv = phl_to_drvpriv(phl_info);
+	int i;
+
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt->busy_h2c_pkt_cmd_cnt,
+		       _H2CB_CMD_QLEN - h2c_pkt_pool->idle_h2c_pkt_cmd_list.cnt);
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt->busy_h2c_pkt_data_cnt,
+		       _H2CB_DATA_QLEN - h2c_pkt_pool->idle_h2c_pkt_data_list.cnt);
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt->busy_h2c_pkt_ldata_cnt,
+		       _H2CB_LONG_DATA_QLEN - h2c_pkt_pool->idle_h2c_pkt_ldata_list.cnt);
+
+	PHL_PRINT("[PHL][H2C_STATS] alloc cmd=%d, alloc data=%d, alloc ldata=%d\n",
+		  _os_atomic_read(drv, &h2c_pkt_alloc_cnt->busy_h2c_pkt_cmd_cnt),
+		  _os_atomic_read(drv, &h2c_pkt_alloc_cnt->busy_h2c_pkt_data_cnt),
+		  _os_atomic_read(drv, &h2c_pkt_alloc_cnt->busy_h2c_pkt_ldata_cnt));
+	PHL_PRINT("[PHL][H2C_STATS] query=%d, mac=%d, bb=%d, rf=%d, btc=%d\n",
+		  _os_atomic_read(drv, &h2c_pkt_alloc_cnt->h2c_query_cnt),
+		  _os_atomic_read(drv, &h2c_pkt_alloc_cnt->h2c_mac_cnt),
+		  _os_atomic_read(drv, &h2c_pkt_alloc_cnt->h2c_bb_cnt),
+		  _os_atomic_read(drv, &h2c_pkt_alloc_cnt->h2c_rf_cnt),
+		  _os_atomic_read(drv, &h2c_pkt_alloc_cnt->h2c_btc_cnt));
+
+	PHL_PRINT("[PHL][H2C_STATS] last return %d h2c pkt\n", H2C_LAST_RETURN_NUM);
+	_os_spinlock(drv, &h2c_pkt_return_list->lock, _bh, NULL);
+	i = h2c_pkt_return_list->oldest_index;
+	do {
+		PHL_PRINT("[PHL][H2C_STATS] timestamp=%u, src=%d, id=0x%x\n",
+			  h2c_pkt_return_list->h2c_pkt_return[i].timestamp,
+			  h2c_pkt_return_list->h2c_pkt_return[i].pkt_src,
+			  h2c_pkt_return_list->h2c_pkt_return[i].id);
+		i = (i + 1) % H2C_LAST_RETURN_NUM;
+	} while (i != h2c_pkt_return_list->oldest_index);
+	_os_spinunlock(drv, &h2c_pkt_return_list->lock, _bh, NULL);
+
+	return h2c_pkt_alloc_cnt;
+}
+#endif
+
 void phl_reset_tx_stats(struct rtw_stats *stats)
 {
 	stats->tx_byte_uni = 0;
 	stats->tx_byte_total = 0;
 	stats->tx_tp_kbits = 0;
 	stats->last_tx_time_ms = 0;
-	stats->txtp.last_calc_time_ms = 0;
+	stats->txtp.last_calc_bits = 0;
 	stats->txtp.last_calc_time_ms = 0;
 	stats->tx_traffic.lvl = RTW_TFC_IDLE;
 	stats->tx_traffic.sts = 0;
@@ -614,40 +659,47 @@ void _phl_reset_tx_plan(struct phl_info_t *phl_info,
 }
 
 
-void _phl_sort_ring_by_tid(struct phl_ring_status *ring_sts,
+void _phl_sort_ring_by_tid(struct phl_info_t *phl_info,
+			   struct phl_ring_status *ring_sts,
 			   struct phl_tx_plan *tx_plan,
 			   enum rtw_phl_ring_cat cat)
 {
 	struct phl_ring_status *last_sts = NULL;
+	struct rtw_phl_com_t *phl_com = phl_info->phl_com;
 
-	if (ring_sts->ring_ptr->cat == RTW_PHL_RING_CAT_TID1) {
-		list_add_tail(&ring_sts->list,
-			      &tx_plan->sorted_ring);
-	} else if (ring_sts->ring_ptr->cat == RTW_PHL_RING_CAT_TID2) {
-		if (list_empty(&tx_plan->sorted_ring)) {
-			list_add_tail(&ring_sts->list,
-				      &tx_plan->sorted_ring);
-		} else {
-			last_sts = list_last_entry(&tx_plan->sorted_ring,
-			                   struct phl_ring_status, list);
-			if (RTW_PHL_RING_CAT_TID1 == last_sts->ring_ptr->cat) {
-				__list_add(&ring_sts->list,
-					   _get_prev(&last_sts->list),
-					   &last_sts->list);
-			} else {
-				list_add_tail(&ring_sts->list,
-					      &tx_plan->sorted_ring);
-                        }
-		}
-	} else {
+	if (phl_com->dev_cap.tx_ring_tid_rr == true) {
 		list_add(&ring_sts->list,
 			 &tx_plan->sorted_ring);
-		if (RTW_PHL_RING_CAT_MGNT == cat)
-			tx_plan->has_mgnt = true;
-		else if (RTW_PHL_RING_CAT_HIQ == cat)
-			tx_plan->has_hiq = true;
+	} else {
+		if (ring_sts->ring_ptr->cat == RTW_PHL_RING_CAT_TID1) {
+			list_add_tail(&ring_sts->list,
+				      &tx_plan->sorted_ring);
+		} else if (ring_sts->ring_ptr->cat == RTW_PHL_RING_CAT_TID2) {
+			if (list_empty(&tx_plan->sorted_ring)) {
+				list_add_tail(&ring_sts->list,
+					      &tx_plan->sorted_ring);
+			} else {
+				last_sts = list_last_entry(&tx_plan->sorted_ring,
+				                   struct phl_ring_status, list);
+				if (RTW_PHL_RING_CAT_TID1 == last_sts->ring_ptr->cat) {
+					__list_add(&ring_sts->list,
+						   _get_prev(&last_sts->list),
+						   &last_sts->list);
+				} else {
+					list_add_tail(&ring_sts->list,
+						      &tx_plan->sorted_ring);
+	                        }
+			}
+		} else {
+			list_add(&ring_sts->list,
+				 &tx_plan->sorted_ring);
+		}
 	}
 
+	if (RTW_PHL_RING_CAT_MGNT == cat)
+		tx_plan->has_mgnt = true;
+	else if (RTW_PHL_RING_CAT_HIQ == cat)
+		tx_plan->has_hiq = true;
 }
 
 void _phl_check_tring_list(struct phl_info_t *phl_info,
@@ -657,16 +709,20 @@ void _phl_check_tring_list(struct phl_info_t *phl_info,
 	struct phl_ring_status *ring_sts = NULL;
 	struct rtw_phl_tx_ring *ring = NULL;
 	struct phl_tx_plan *tx_plan = &tring_list->tx_plan;
+	struct rtw_phl_com_t *phl_com = phl_info->phl_com;
 	u8 i = 0;
 
 	for (i = 0; i < MAX_PHL_RING_CAT_NUM; i++) {
 
-		ring = &tring_list->phl_ring[i];
+		if (phl_com->dev_cap.tx_ring_tid_rr == true && i < 8)
+			ring = &tring_list->phl_ring[((phl_info->tx_tid_turn + i + 1) % 8)];
+		else
+			ring = &tring_list->phl_ring[i];
 
 		ring_sts = _phl_check_ring_status(phl_info, ring, tring_list);
 
 		if (NULL != ring_sts) {
-			_phl_sort_ring_by_tid(ring_sts, tx_plan, i);
+			_phl_sort_ring_by_tid(phl_info, ring_sts, tx_plan, i);
 		} else {
 			continue;
 		}
@@ -763,6 +819,17 @@ void phl_tx_flow_ctrl(struct phl_info_t *phl_info, _os_list *sta_list)
 		/* clear tx plan */
 		list_del(&tx_plan->list);
 		_phl_reset_tx_plan(phl_info, tx_plan);
+	}
+}
+
+void phl_tx_ting_rr_sw_tid_turn(struct phl_info_t *phl_info,
+					 enum rtw_phl_ring_cat cat)
+{
+	if ((cat != RTW_PHL_RING_CAT_MGNT) && (cat != RTW_PHL_RING_CAT_HIQ)) {
+		if (cat == RTW_PHL_RING_CAT_TID0)
+			phl_info->tx_tid_turn = RTW_PHL_RING_CAT_TID7;
+		else
+			phl_info->tx_tid_turn = (u8)(cat - 1);
 	}
 }
 
@@ -924,6 +991,69 @@ enum rtw_phl_status phl_schedule_handler(
 	return phl_status;
 }
 
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+void phl_set_h2c_pkt_alloc_cnt(struct phl_info_t *phl_info, struct rtw_h2c_pkt *h2c_pkt)
+{
+	struct phl_h2c_pkt_alloc_cnt *h2c_alloc_cnt = &(phl_info->h2c_alloc_cnt);
+	enum rtw_phl_comm_module pkt_src = h2c_pkt->pkt_src;
+
+	_os_atomic_dec(phl_to_drvpriv(phl_info), &h2c_alloc_cnt->h2c_query_cnt);
+	switch (pkt_src) {
+	case RTW_MODULE_MAC:
+		_os_atomic_inc(phl_to_drvpriv(phl_info), &h2c_alloc_cnt->h2c_mac_cnt);
+		break;
+	case RTW_MODULE_BB:
+		_os_atomic_inc(phl_to_drvpriv(phl_info), &h2c_alloc_cnt->h2c_bb_cnt);
+		break;
+	case RTW_MODULE_RF:
+		_os_atomic_inc(phl_to_drvpriv(phl_info), &h2c_alloc_cnt->h2c_rf_cnt);
+		break;
+	case RTW_MODULE_BTC:
+		_os_atomic_inc(phl_to_drvpriv(phl_info), &h2c_alloc_cnt->h2c_btc_cnt);
+		break;
+	}
+}
+
+void phl_unset_h2c_pkt_alloc_cnt(struct phl_info_t *phl_info, struct rtw_h2c_pkt *h2c_pkt)
+{
+	struct phl_h2c_pkt_alloc_cnt *h2c_alloc_cnt = &(phl_info->h2c_alloc_cnt);
+
+	switch (h2c_pkt->pkt_src) {
+	case RTW_MODULE_MAC:
+		_os_atomic_dec(phl_to_drvpriv(phl_info), &h2c_alloc_cnt->h2c_mac_cnt);
+		break;
+	case RTW_MODULE_BB:
+		_os_atomic_dec(phl_to_drvpriv(phl_info), &h2c_alloc_cnt->h2c_bb_cnt);
+		break;
+	case RTW_MODULE_RF:
+		_os_atomic_dec(phl_to_drvpriv(phl_info), &h2c_alloc_cnt->h2c_rf_cnt);
+		break;
+	case RTW_MODULE_BTC:
+		_os_atomic_dec(phl_to_drvpriv(phl_info), &h2c_alloc_cnt->h2c_btc_cnt);
+		break;
+	}
+}
+
+void phl_set_return_h2c_pkt(struct phl_info_t *phl_info, struct rtw_h2c_pkt *h2c_pkt)
+{
+	struct rtw_h2c_pkt_return_list *h2c_pkt_return_list = &phl_info->h2c_pkt_return_list;
+	struct rtw_h2c_pkt_return *h2c_pkt_return = h2c_pkt_return_list->h2c_pkt_return;
+	void *drv = phl_to_drvpriv(phl_info);
+	_os_spinlockfg sp_flags;
+	int oldest_index;
+
+	_os_spinlock(drv, &h2c_pkt_return_list->lock, _irq, &sp_flags);
+	oldest_index = h2c_pkt_return_list->oldest_index;
+
+	h2c_pkt_return[oldest_index].id = h2c_pkt->id;
+	h2c_pkt_return[oldest_index].pkt_src = h2c_pkt->pkt_src;
+	h2c_pkt_return[oldest_index].timestamp = _os_get_cur_time_us();
+	h2c_pkt_return_list->oldest_index = (oldest_index + 1) % H2C_LAST_RETURN_NUM;
+
+	_os_spinunlock(drv, &h2c_pkt_return_list->lock, _irq, &sp_flags);
+}
+#endif
+
 static enum rtw_phl_status enqueue_h2c_pkt(
 					struct phl_info_t *phl_info,
 					struct phl_queue	*pool_list,
@@ -1059,6 +1189,13 @@ enum rtw_phl_status phl_enqueue_idle_h2c_pkt(
 				__func__, h2c_pkt->type);
 		break;
 	}
+	if (!queue)
+		return pstatus;
+
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+	phl_set_return_h2c_pkt(phl_info, h2c_pkt);
+	phl_unset_h2c_pkt_alloc_cnt(phl_info, h2c_pkt);
+#endif
 
 	_phl_reset_h2c_pkt(phl_info, h2c_pkt, buf_len);
 
@@ -1116,11 +1253,18 @@ struct rtw_h2c_pkt *phl_query_idle_h2c_pkt(struct phl_info_t *phl_info, u8 type)
 				h2c_type);
 		break;
 	}
+	if (!queue)
+		return NULL;
+
 	PHL_TRACE(COMP_PHL_DBG, _PHL_DEBUG_,
 		  "phl_query_idle_h2c_pkt => remaining %d (type %d).\n",
 		  *idle_cnt, h2c_type);
 
 	h2c_pkt = dequeue_h2c_pkt(phl_info, queue);
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+	if (h2c_pkt)
+		_os_atomic_inc(phl_to_drvpriv(phl_info), &(phl_info->h2c_alloc_cnt.h2c_query_cnt));
+#endif
 
 	return h2c_pkt;
 }
@@ -1326,6 +1470,40 @@ _phl_alloc_h2c_pool(struct phl_info_t *phl_info)
 	return pstatus;
 }
 
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+static enum rtw_phl_status
+phl_alloc_h2c_cnt(struct phl_info_t *phl_info)
+{
+	struct phl_h2c_pkt_alloc_cnt h2c_pkt_alloc_cnt = phl_info->h2c_alloc_cnt;
+	struct rtw_h2c_pkt_return_list *h2c_pkt_return_list = &phl_info->h2c_pkt_return_list;
+	struct rtw_h2c_pkt_return *h2c_pkt_return = phl_info->h2c_pkt_return_list.h2c_pkt_return;
+	void *drv = phl_to_drvpriv(phl_info);
+	_os_spinlockfg sp_flags;
+	u16 i;
+
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt.busy_h2c_pkt_cmd_cnt, 0);
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt.busy_h2c_pkt_data_cnt, 0);
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt.busy_h2c_pkt_ldata_cnt, 0);
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt.h2c_query_cnt, 0);
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt.h2c_mac_cnt, 0);
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt.h2c_bb_cnt, 0);
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt.h2c_rf_cnt, 0);
+	_os_atomic_set(drv, &h2c_pkt_alloc_cnt.h2c_btc_cnt, 0);
+
+	_os_spinlock_init(drv, &h2c_pkt_return_list->lock);
+	_os_spinlock(drv, &h2c_pkt_return_list->lock, _irq, &sp_flags);
+	for (i = 0; i < H2C_LAST_RETURN_NUM; i++) {
+		h2c_pkt_return[i].id = 0;
+		h2c_pkt_return[i].pkt_src = 0;
+		h2c_pkt_return[i].timestamp = 0;
+	}
+	h2c_pkt_return_list->oldest_index = 0;
+	_os_spinunlock(drv, &h2c_pkt_return_list->lock, _irq, &sp_flags);
+
+	return RTW_PHL_STATUS_SUCCESS;
+}
+#endif
+
 void
 phl_trx_free_handler(void *phl)
 {
@@ -1362,6 +1540,9 @@ phl_trx_free_sw_rsc(void *phl)
 
 	_phl_ring_status_deinit(phl_info);
 
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+	_os_spinlock_free(drv_priv, &phl_info->h2c_pkt_return_list.lock);
+#endif
 	_os_spinlock_free(drv_priv, &phl_info->t_ring_list_lock);
 	_os_spinlock_free(drv_priv, &phl_info->rx_ring_lock);
 	_os_spinlock_free(drv_priv, &phl_info->t_fctrl_result_lock);
@@ -1456,6 +1637,7 @@ enum rtw_phl_status phl_datapath_init(struct phl_info_t *phl_info)
 		_os_spinlock_init(drv_priv, &phl_info->t_ring_list_lock);
 		_os_spinlock_init(drv_priv, &phl_info->rx_ring_lock);
 		_os_spinlock_init(drv_priv, &phl_info->t_fctrl_result_lock);
+		phl_info->tx_tid_turn = RTW_PHL_RING_CAT_TID7;
 		pq_init(drv_priv, &phl_info->t_ring_free_q);
 
 #if defined(CONFIG_RTW_EVENT_HDL_USE_WQ) || defined(CONFIG_PHL_HANDLER_WQ_HIGHPRI)
@@ -1497,6 +1679,11 @@ enum rtw_phl_status phl_datapath_init(struct phl_info_t *phl_info)
 		if (RTW_PHL_STATUS_SUCCESS != pstatus)
 			break;
 
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+		pstatus = phl_alloc_h2c_cnt(phl_info);
+		if (RTW_PHL_STATUS_SUCCESS != pstatus)
+			break;
+#endif
 	}while (false);
 
 	if (RTW_PHL_STATUS_SUCCESS != pstatus)
@@ -1613,9 +1800,9 @@ static bool _phl_datapath_chk_pwr(struct phl_info_t *phl_info, u8 type)
 	 * entering/leaving low power state. In this case, the pause_id will also be
 	 * "DATA_CTRL_MDL_PS" but we don't need to send msg "MSG_EVT_TRX_PWR_REQ"
 	 * to leave low power state for this situation. Thus we check the capability
-	 * "lps_pause_tx" before sending msg "MSG_EVT_TRX_PWR_REQ".
+	 * "ps_pause_tx" before sending msg "MSG_EVT_TRX_PWR_REQ".
 	 */
-	if (!ps_cap->lps_pause_tx)
+	if (!ps_cap->ps_pause_tx)
 		return false;
 
 	/* only paused by ps module */
@@ -2307,7 +2494,7 @@ _phl_sw_tx_pause(struct phl_info_t *phl_info,
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	if (PHL_TX_STATUS_SW_PAUSE ==
 	    _os_atomic_read(drv, &phl_info->phl_sw_tx_sts)) {
@@ -2381,7 +2568,7 @@ _phl_sw_tx_pause(struct phl_info_t *phl_info,
 	}
 exit:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(phl_info->phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return sts;
 }
@@ -2458,7 +2645,7 @@ _phl_sw_rx_pause(struct phl_info_t *phl_info,
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	if (PHL_RX_STATUS_SW_PAUSE ==
 	    _os_atomic_read(drv, &phl_info->phl_sw_rx_sts)) {
@@ -2541,7 +2728,7 @@ _phl_sw_rx_pause(struct phl_info_t *phl_info,
 	}
 exit:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(phl_info->phl_com, &start_t,  TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return sts;
 }
@@ -3313,3 +3500,12 @@ bool
 rtw_phl_check_sta_has_busy_wp(struct rtw_phl_stainfo_t *sta) {
 	return rtw_hal_check_sta_has_busy_wp(sta);
 }
+
+void rtw_phl_get_mac_sel_tx_status(void *phl, enum phl_band_idx bidx, void *out_tx_cnt)
+{
+	struct phl_info_t *phl_info = (struct phl_info_t *)phl;
+
+	rtw_hal_get_mac_sel_tx_status(phl_info->hal, bidx, out_tx_cnt);
+
+}
+

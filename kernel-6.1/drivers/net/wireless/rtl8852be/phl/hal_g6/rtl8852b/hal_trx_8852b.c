@@ -658,63 +658,14 @@ hal_handle_rx_buffer_8852b(struct rtw_phl_com_t *phl_com,
 		#endif /*CONFIG_PHL_DFS*/
 	}
 	break;
+
 	case RX_8852B_DESC_PKT_T_CHANNEL_INFO :
-	{
+		phl_rx->type = RTW_RX_TYPE_CHANNEL_INFO;
 		#ifdef  CONFIG_PHL_CHANNEL_INFO
-		enum rtw_hal_status status= RTW_HAL_STATUS_SUCCESS;
-		u8* buf_addr;
-		struct ch_rpt_hdr_info ch_hdr_rpt = {0};
-		struct phy_info_rpt phy_rpt = {0};
-		struct ch_info_drv_rpt drv_rpt = {0};
-		u32 idle_num = CHAN_INFO_PKT_TOTAL;
-		struct chan_info_t *chan_info_old = NULL;
+		hal_handle_ch_info_from_chan_sts(phl_com, hal, pkt, mdata);
+		#endif
+		break;
 
-		phl_rx->type = RTW_RX_TYPE_CHANNEL_INFO;
-		/* Channel Report */
-		/* TODO: need to discuss the final csi header format further.*/
-		idle_num = rtw_phl_get_chaninfo_idle_number(drv, phl_com);
-
-		if (idle_num == CHAN_INFO_PKT_TOTAL)
-			phl_com->chan_info = rtw_phl_query_idle_chaninfo(drv, phl_com);
-
-		if (phl_com->chan_info == NULL) {
-			/*hstatus = RTW_HAL_STATUS_SUCCESS is expected*/
-			PHL_INFO("channel info packet not avaialbe due to no pakcet handle\n");
-			break;
-		}
-		buf_addr = phl_com->chan_info->chan_info_buffer;
-		status = rtw_hal_bb_ch_info_parsing(hal, pkt->vir_addr, mdata,
-			buf_addr + phl_com->chan_info->length,
-			&ch_hdr_rpt, &phy_rpt, &drv_rpt);
-
-		if (status == RTW_HAL_STATUS_FAILURE)
-			phl_com->chan_info->length = 0;
-		else
-			phl_com->chan_info->length += drv_rpt.raw_data_len;
-		/* store phy info if seg#0 is success*/
-		if (drv_rpt.seg_idx_curr == 0 && status != RTW_HAL_STATUS_FAILURE)
-			_hal_fill_csi_header_phy_info(hal, &(phl_com->chan_info->csi_header),
-				&ch_hdr_rpt, &phy_rpt);
-		if (status == RTW_HAL_STATUS_BB_CH_INFO_LAST_SEG) {
-			/* Fill remain csi header to buffer  */
-			_hal_fill_csi_header_remain(hal,
-				&(phl_com->chan_info->csi_header), mdata);
-#ifdef CONFIG_PHL_CHANNEL_INFO_DBG
-			hal_print_csi_raw_data(phl_com->chan_info);
-#endif
-			/* push compelete channel info resourecs to busy queue */
-			chan_info_old = rtw_phl_recycle_busy_chaninfo(drv, phl_com, phl_com->chan_info);
-			if (chan_info_old)
-				rtw_phl_enqueue_idle_chaninfo(drv, phl_com, chan_info_old);
-			phl_com->chan_info = rtw_phl_query_idle_chaninfo(drv, phl_com);
-			if(phl_com->chan_info == NULL)
-				PHL_INFO("channel info packet not avaialbe after recycle\n");
-		}
-		#else
-		phl_rx->type = RTW_RX_TYPE_CHANNEL_INFO;
-		#endif /* CONFIG_PHL_CHANNEL_INFO */
-	}
-	break;
 	case RX_8852B_DESC_PKT_T_F2P_TX_CMD_RPT :
 	{
 		/* DL MU Report ; UL OFDMA Trigger Report */

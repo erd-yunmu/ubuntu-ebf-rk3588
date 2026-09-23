@@ -244,11 +244,9 @@ u8 rtw_set_802_11_bssid(_adapter *padapter, u8 *bssid)
 			rtw_disassoc_cmd(padapter, 0, 0);
 
 			if (check_fwstate(pmlmepriv, WIFI_ASOC_STATE) == _TRUE) {
-				#ifdef CONFIG_STA_CMD_DISPR
 				if (MLME_IS_STA(padapter) == _FALSE)
-				#endif /* CONFIG_STA_CMD_DISPR */
 					rtw_free_assoc_resources_cmd(padapter, _TRUE, 0);
-				rtw_indicate_disconnect(padapter, 0, _FALSE);
+				rtw_indicate_disconnect(padapter, 0, _TRUE);
 				pmlmeinfo->disconnect_occurred_time = rtw_systime_to_ms(rtw_get_current_time());
 				pmlmeinfo->disconnect_code = DISCONNECTION_BY_SYSTEM_DUE_TO_HIGH_LAYER_COMMAND;
 				pmlmeinfo->wifi_reason_code = WLAN_REASON_UNSPECIFIED;
@@ -324,7 +322,7 @@ u8 rtw_set_802_11_ssid(_adapter *padapter, NDIS_802_11_SSID *ssid)
 
 					if (check_fwstate(pmlmepriv, WIFI_ASOC_STATE) == _TRUE) {
 						rtw_free_assoc_resources_cmd(padapter, _TRUE, 0);
-						rtw_indicate_disconnect(padapter, 0, _FALSE);
+						rtw_indicate_disconnect(padapter, 0, _TRUE);
 						pmlmeinfo->disconnect_occurred_time = rtw_systime_to_ms(rtw_get_current_time());
 						pmlmeinfo->disconnect_code = DISCONNECTION_BY_SYSTEM_DUE_TO_HIGH_LAYER_COMMAND;
 						pmlmeinfo->wifi_reason_code = WLAN_REASON_UNSPECIFIED;
@@ -342,11 +340,9 @@ u8 rtw_set_802_11_ssid(_adapter *padapter, NDIS_802_11_SSID *ssid)
 			rtw_disassoc_cmd(padapter, 0, 0);
 
 			if (check_fwstate(pmlmepriv, WIFI_ASOC_STATE) == _TRUE){
-				#ifdef CONFIG_STA_CMD_DISPR
 				if (MLME_IS_STA(padapter) == _FALSE)
-				#endif /* CONFIG_STA_CMD_DISPR */
 					rtw_free_assoc_resources_cmd(padapter, _TRUE, 0);
-				rtw_indicate_disconnect(padapter, 0, _FALSE);
+				rtw_indicate_disconnect(padapter, 0, _TRUE);
 				pmlmeinfo->disconnect_occurred_time = rtw_systime_to_ms(rtw_get_current_time());
 				pmlmeinfo->disconnect_code = DISCONNECTION_BY_SYSTEM_DUE_TO_HIGH_LAYER_COMMAND;
 				pmlmeinfo->wifi_reason_code = WLAN_REASON_UNSPECIFIED;
@@ -491,17 +487,13 @@ u8 rtw_set_802_11_infrastructure_mode(_adapter *padapter,
 			rtw_disassoc_cmd(padapter, 0, flags);
 
 		if ((is_adhoc_master == _TRUE)
-		    || ((is_linked == _TRUE)
-#ifdef CONFIG_STA_CMD_DISPR
-			&& (MLME_IS_STA(padapter) == _FALSE)
-#endif /* CONFIG_STA_CMD_DISPR */
-		       )
+		    || ((is_linked == _TRUE) && (MLME_IS_STA(padapter) == _FALSE))
 		   )
 			rtw_free_assoc_resources_cmd(padapter, _TRUE, flags);
 
 		if ((*pold_state == Ndis802_11Infrastructure) || (*pold_state == Ndis802_11IBSS)) {
 			if (is_linked == _TRUE) {
-				rtw_indicate_disconnect(padapter, 0, _FALSE); /*will clr Linked_state; before this function, we must have checked whether issue dis-assoc_cmd or not*/
+				rtw_indicate_disconnect(padapter, 0, _TRUE); /*will clr Linked_state; before this function, we must have checked whether issue dis-assoc_cmd or not*/
 				pmlmeinfo->disconnect_occurred_time = rtw_systime_to_ms(rtw_get_current_time());
 				pmlmeinfo->disconnect_code = DISCONNECTION_BY_SYSTEM_DUE_TO_HIGH_LAYER_COMMAND;
 				pmlmeinfo->wifi_reason_code = WLAN_REASON_UNSPECIFIED;
@@ -574,13 +566,9 @@ u8 rtw_set_802_11_disassociate(_adapter *padapter)
 	if (check_fwstate(pmlmepriv, WIFI_ASOC_STATE) == _TRUE) {
 		rtw_disassoc_cmd(padapter, 0, 0);
 		/* modify for CONFIG_IEEE80211W, none 11w can use it */
-		if (1
-#ifdef CONFIG_STA_CMD_DISPR
-		    && (MLME_IS_STA(padapter) == _FALSE)
-#endif /* CONFIG_STA_CMD_DISPR */
-		   )
+		if (MLME_IS_STA(padapter) == _FALSE)
 			rtw_free_assoc_resources_cmd(padapter, _TRUE, 0);
-		rtw_indicate_disconnect(padapter, 0, _FALSE);
+		rtw_indicate_disconnect(padapter, 0, _TRUE);
 		pmlmeinfo->disconnect_occurred_time = rtw_systime_to_ms(rtw_get_current_time());
 		pmlmeinfo->disconnect_code = DISCONNECTION_BY_SYSTEM_DUE_TO_HIGH_LAYER_COMMAND;
 		pmlmeinfo->wifi_reason_code = WLAN_REASON_UNSPECIFIED;
@@ -792,12 +780,13 @@ int rtw_set_scan_mode(_adapter *adapter, enum rtw_phl_scan_type scan_mode)
 *
 * Return _SUCCESS or _FAIL
 */
-int rtw_set_channel_plan(_adapter *adapter, u8 channel_plan, u8 chplan_6g, enum rtw_regd_inr inr)
+int rtw_set_channel_plan(_adapter *adapter, u8 channel_plan, u8 chplan_6g
+	, enum rtw_env_t env, enum rtw_regd_inr inr)
 {
 	struct registry_priv *regsty = adapter_to_regsty(adapter);
 
 	if (!REGSTY_REGD_SRC_FROM_OS(regsty))
-		return rtw_set_chplan_cmd(adapter, RTW_CMDF_WAIT_ACK, channel_plan, chplan_6g, inr);
+		return rtw_set_chplan_cmd(adapter, RTW_CMDF_WAIT_ACK, channel_plan, chplan_6g, env, inr);
 	RTW_WARN("%s(): not applied\n", __func__);
 	return _SUCCESS;
 }
@@ -809,7 +798,8 @@ int rtw_set_channel_plan(_adapter *adapter, u8 channel_plan, u8 chplan_6g, enum 
 *
 * Return _SUCCESS or _FAIL
 */
-int rtw_set_country(_adapter *adapter, const char *country_code, enum rtw_regd_inr inr)
+int rtw_set_country(_adapter *adapter, const char *country_code
+	, enum rtw_env_t env, enum rtw_regd_inr inr)
 {
 #ifdef CONFIG_RTW_IOCTL_SET_COUNTRY
 #if ((0 - CONFIG_RTW_IOCTL_SET_COUNTRY - 1) == 1) && ((CONFIG_RTW_IOCTL_SET_COUNTRY + 0) != -2) /* defined to empty */
@@ -824,11 +814,29 @@ int rtw_set_country(_adapter *adapter, const char *country_code, enum rtw_regd_i
 	struct registry_priv *regsty = adapter_to_regsty(adapter);
 
 	if (!REGSTY_REGD_SRC_FROM_OS(regsty))
-		return rtw_set_country_cmd(adapter, RTW_CMDF_WAIT_ACK, country_code, inr);
+		return rtw_set_country_cmd(adapter, RTW_CMDF_WAIT_ACK, country_code, env, inr);
 #endif
 	RTW_WARN("%s(): not applied\n", __func__);
 	return _SUCCESS;
 }
+
+#if CONFIG_IEEE80211_BAND_6GHZ
+/*
+* rtw_set_env -
+* @adapter: pointer to _adapter structure
+* @env: environment
+*
+* Return _SUCCESS or _FAIL
+*/
+int rtw_set_env(_adapter *adapter, enum rtw_env_t env, enum rtw_regd_inr inr)
+{
+	struct registry_priv *regsty = adapter_to_regsty(adapter);
+
+	return rtw_set_env_cmd(adapter, RTW_CMDF_WAIT_ACK, env
+		, REGSTY_REGD_SRC_FROM_OS(regsty) ? REGD_SRC_OS : REGD_SRC_RTK_PRIV
+		, inr);
+}
+#endif
 
 /*
 * rtw_set_band -

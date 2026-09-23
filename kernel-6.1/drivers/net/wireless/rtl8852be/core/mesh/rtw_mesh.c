@@ -212,7 +212,7 @@ int rtw_bss_is_candidate_mesh_peer(_adapter *adapter, WLAN_BSSID_EX *target, u8 
 
 			if (!ch) {
 				/* off-channel, check target with our hardcode capability */
-				if (target->Configuration.DSConfig > 14)
+				if (BSS_EX_OP_BAND(target) != BAND_ON_24G)
 					match = rtw_is_basic_rate_ofdm(target->SupportedRates[i]);
 				else
 					match = rtw_is_basic_rate_mix(target->SupportedRates[i]);
@@ -888,7 +888,7 @@ flush_add:
 			sta = rtw_get_stainfo_by_offset(stapriv, flush_list[i]);
 			_rtw_memcpy(sta_addr, sta->phl_sta->mac_addr, ETH_ALEN);
 
-			updated |= ap_free_sta(adapter, sta, _TRUE, WLAN_REASON_DEAUTH_LEAVING, _FALSE, _FALSE);
+			updated |= ap_free_sta(adapter, sta, _TRUE, 0, WLAN_REASON_DEAUTH_LEAVING, _FALSE);
 			rtw_mesh_expire_peer(adapter, sta_addr);
 		}
 
@@ -1758,7 +1758,7 @@ bypass_sync_bss:
 						, FUNC_ADPT_ARG(adapter), MAC_ARG(sac->phl_sta->mac_addr));
 
 					_rtw_memcpy(sta_addr, sac->phl_sta->mac_addr, ETH_ALEN);
-					updated = ap_free_sta(adapter, sac, 0, 0, 1, 0);
+					updated = ap_free_sta(adapter, sac, 0, 0, 0, 1);
 					rtw_mesh_expire_peer(stapriv->padapter, sta_addr);
 
 					associated_clients_update(adapter, updated, STA_INFO_UPDATE_ALL);
@@ -2649,7 +2649,7 @@ release_plink_ctl:
 		u8 updated = _FALSE;
 
 		_rtw_memcpy(sta_addr, del_sta->phl_sta->mac_addr, ETH_ALEN);
-		updated = ap_free_sta(adapter, del_sta, 0, 0, 1, 0);
+		updated = ap_free_sta(adapter, del_sta, 0, 0, 0, 1);
 		rtw_mesh_expire_peer(stapriv->padapter, sta_addr);
 
 		associated_clients_update(adapter, updated, STA_INFO_UPDATE_ALL);
@@ -3682,6 +3682,7 @@ s8 rtw_mesh_tx_set_whdr_mctrl_len(u8 mesh_frame_mode, struct pkt_attrib *attrib)
 	switch (mesh_frame_mode) {
 	case MESH_UCAST_DATA:
 		attrib->hdrlen = WLAN_HDR_A4_QOS_LEN;
+		attrib->a4_hdr = 1;
 		/* mesh flag + mesh TTL + Mesh SN. no ext addr. */
 		attrib->meshctrl_len = 6;
 		break;
@@ -3692,6 +3693,7 @@ s8 rtw_mesh_tx_set_whdr_mctrl_len(u8 mesh_frame_mode, struct pkt_attrib *attrib)
 		break;
 	case MESH_UCAST_PX_DATA:
 		attrib->hdrlen = WLAN_HDR_A4_QOS_LEN;
+		attrib->a4_hdr = 1;
 		/* mesh flag + mesh TTL + Mesh SN + extaddr1 + extaddr2. */
 		attrib->meshctrl_len = 18;
 		break;

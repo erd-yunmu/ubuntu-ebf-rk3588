@@ -21,9 +21,13 @@
 /* maximum 4 digits */
 #define PHL_MAJOR_VER 1
 #define PHL_MINOR_VER 19
-#define PHL_HOTFIX_VER 86
+#define PHL_HOTFIX_VER 135
 #define PHL_BRANCH_IDX 100
 
+#define PHL_MAC_DEPD_VER 190001
+
 #define PHL_VER_CODE PHL_VERSION(PHL_MAJOR_VER, PHL_MINOR_VER, PHL_HOTFIX_VER, PHL_BRANCH_IDX)
+
+bool phl_check_submodule_vers(void);
 
 #endif /*_PHL_VERSION_H_*/

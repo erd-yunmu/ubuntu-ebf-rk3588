@@ -253,11 +253,19 @@ _cmd_scan_enqueue_opch(void *drv, struct cmd_scan_ctrl *sctrl)
 			break;
 	}
 }
+
+static inline void
+_reset_backop_immed_info(struct backop_immed_info *backop_immed)
+{
+	backop_immed->notify_backop = false;
+}
+
 static struct phl_scan_channel *_cmd_scan_select_chnl(
 	void *drv, struct rtw_phl_scan_param *param, u8 band_idx)
 {
 	struct phl_scan_channel *scan_ch = NULL;
 	struct cmd_scan_ctrl *sctrl = NULL;
+	struct backop_immed_info *backop_immed = &(param->back_op.backop_immed);
 	_os_list* obj = NULL;
 	bool back_op_is_required = false;
 	u8 sctrl_idx = 0;
@@ -269,8 +277,18 @@ static struct phl_scan_channel *_cmd_scan_select_chnl(
 	}
 	back_op_is_required = (sctrl->back_op_ch[0].channel)? true:false;
 
-
 next_ch:
+	if (backop_immed->notify_backop) {
+		_reset_backop_immed_info(backop_immed);
+		if (pq_get_front(drv, &sctrl->chlist, &obj, _ps)) {
+			scan_ch = (struct phl_scan_channel*)obj;
+			/* if next ch is not OP, enqueue OP at the front.
+			   Others(OP or P2P), no need to enqueue OP. */
+			if(scan_ch->scan_mode == NORMAL_SCAN_MODE)
+				_cmd_scan_enqueue_opch(drv, sctrl);
+		}
+	}
+
 	if(pq_pop(drv, &sctrl->chlist, &obj, _first, _ps)) {
 		scan_ch = (struct phl_scan_channel*)obj;
 
@@ -371,7 +389,7 @@ static void _cmd_scan_timer(void *context)
 
 	phl_status = phl_disp_eng_send_msg(phl_info, &msg, &attr, NULL);
 	if(phl_status != RTW_PHL_STATUS_SUCCESS)
-		PHL_ERR("%s: [SCAN_TIMER] phl_disp_eng_send_msg failed(%X) !\n", __func__, phl_status);
+		PHL_ERR("%s: [SCAN_TIMER] send_msg failed(%X) !\n", __func__, phl_status);
 }
 
 /* Notification complete */
@@ -418,7 +436,7 @@ enum rtw_phl_status _cmd_swch_done_notify(
 	msg.band_idx = band_idx;
 	pstatus = phl_disp_eng_send_msg(phl_info, &msg, &attr, NULL);
 	if(pstatus != RTW_PHL_STATUS_SUCCESS) {
-		PHL_ERR("%s: [SWCH_DONE] phl_disp_eng_send_msg failed!\n", __func__);
+		PHL_ERR("%s: [SWCH_DONE] send_msg failed!\n", __func__);
 		_os_mem_free(drv, info, sizeof(struct phl_scan_channel));
 	}
 	return pstatus;
@@ -515,7 +533,7 @@ void _cmd_abort_notify(void *dispr, void *drv,
 	struct phl_info_t *phl = (struct phl_info_t *) phl_com->phl_priv;
 	struct cmd_scan_ctrl *sctrl = NULL;
 	bool indicate = true;
-	u8 band_idx = 0xff, sctrl_idx = 0xff;
+	u8 band_idx = 0, sctrl_idx = 0xff;
 
 	phl_dispr_get_idx(dispr, &band_idx);
 
@@ -547,7 +565,7 @@ void _cmd_abort_notify(void *dispr, void *drv,
 			/* (1) dispr_stop
 			   (2) idle msg empty .*/
 
-			PHL_ERR("%s :: [Abort] dispr_send_msg failed (0x%X)\n",
+			PHL_ERR("%s :: [Abort] send_msg failed (0x%X)\n",
 				__func__, pstatus);
 
 			if(pstatus == RTW_PHL_STATUS_UNEXPECTED_ERROR ||
@@ -580,16 +598,15 @@ void _cmd_abort_notify(void *dispr, void *drv,
 	}
 }
 
-enum phl_mdl_ret_code _cmd_scan_fail_ev_hdlr(
+enum phl_mdl_ret_code _cmd_scan_except_ev_hdlr(
 	void* dispr, void* priv, struct phl_msg* msg)
 {
 	struct rtw_phl_scan_param *param = (struct rtw_phl_scan_param*)priv;
 	struct rtw_phl_com_t *phl_com = param_to_phlcom(param);
 	struct phl_info_t *phl_info = phl_com->phl_priv;
 	void *d = phlcom_to_drvpriv(phl_com);
-	u8 band_idx = 0xff, sctrl_idx = 0xff;
+	u8 band_idx = 0, sctrl_idx = 0xff;
 	struct phl_msg nextmsg = {0};
-	struct phl_msg_attribute attr = {0};
 	enum rtw_phl_status pstatus = RTW_PHL_STATUS_SUCCESS;
 	struct cmd_scan_ctrl *sctrl = NULL;
 
@@ -610,22 +627,31 @@ enum phl_mdl_ret_code _cmd_scan_fail_ev_hdlr(
 		case MSG_EVT_SWCH_START:
 			/* fall through */
 		case MSG_EVT_SWCH_DONE:
-			PHL_INFO("[%d]SCAN_START/SWCH_START/SWCH_DONE:: failed/timeout handler \n", band_idx);
+			PHL_INFO("[%d] SCAN_START/LISTEN_EXPIRE/SWCH :: exception \n", band_idx);
 
 			SET_MSG_EVT_ID_FIELD(nextmsg.msg_id, MSG_EVT_SCAN_END);
 			nextmsg.rsvd[0].ptr = (u8*)sctrl->wrole;
 
-			pstatus = phl_disp_eng_send_msg(phl_info, &nextmsg, &attr, NULL);
-			if(pstatus != RTW_PHL_STATUS_SUCCESS)
-				PHL_ERR("%s :: [SWCH_START] phl_disp_eng_send_msg failed\n", __func__);
+			pstatus = phl_disp_eng_send_msg(phl_info, &nextmsg, NULL, NULL);
+			if(pstatus != RTW_PHL_STATUS_SUCCESS) {
+				PHL_ERR("%s :: [non-SCAN_END] send_msg failed\n", __func__);
+				pstatus = phl_disp_eng_free_token(phl_info, band_idx, &sctrl->token);
+				if (pstatus == RTW_PHL_STATUS_SUCCESS) {
+					param->result = SCAN_REQ_EXCEPTION;
+					if (IS_MSG_CANNOT_IO(msg->msg_id))
+						SET_SCAN_FLAG(param->state, band_idx, CMD_SCAN_DF_IO);
+					_cmd_scan_end(d, param, band_idx);
+				}
+			}
 		break;
 
 		case MSG_EVT_SCAN_END:
 			// free token
 			// release timer
-			PHL_INFO("[%d]MSG_EVT_SCAN_END:: failed/timeout handler \n", band_idx);
+			PHL_INFO("[%d] SCAN_END :: exception \n", band_idx);
 			pstatus = phl_disp_eng_free_token(phl_info, band_idx, &sctrl->token);
 			if (pstatus == RTW_PHL_STATUS_SUCCESS) {
+				param->result = SCAN_REQ_EXCEPTION;
 				if (IS_MSG_CANNOT_IO(msg->msg_id))
 					SET_SCAN_FLAG(param->state, band_idx, CMD_SCAN_DF_IO);
 				_cmd_scan_end(d, param, band_idx);
@@ -669,6 +695,13 @@ u8 phl_cmd_chk_ext_act_scan(struct rtw_phl_scan_param *param, u8 sctrl_idx)
 	return false;
 }
 
+static void _extend_scan_ch_period(struct phl_scan_channel *scan_ch)
+{
+	/* Reset time to extend period */
+	scan_ch->start_t = _os_get_cur_time_ms();
+	scan_ch->last_t = 0;
+}
+
 /*
  * Return value :
  * 	false : cancel cur channel.
@@ -678,6 +711,7 @@ static bool _handle_probing(void *d, struct rtw_phl_scan_param *param, u8 sctrl_
 {
 	struct cmd_scan_ctrl *sctrl = &param->sctrl[sctrl_idx];
 	struct phl_scan_channel *scan_ch = sctrl->scan_ch;
+	struct backop_immed_info *backop_immed = &(param->back_op.backop_immed);
 	u32 dur = 0, diff_t = 0, probe_t = 0;
 	bool check_cancel = true;
 
@@ -691,6 +725,7 @@ static bool _handle_probing(void *d, struct rtw_phl_scan_param *param, u8 sctrl_
 	/* DFS, tx probe and extend scan period */
 	if (phl_cmd_chk_ext_act_scan(param, sctrl_idx)) {
 		scan_ch->duration += (u16)param->ext_act_scan_period;
+		scan_ch->ext_act_done_t = scan_ch->pass_t;
 		check_cancel = false;
 		PHL_INFO("[probing], DFS extend period to %d !\n",
 				scan_ch->duration);
@@ -717,6 +752,21 @@ static bool _handle_probing(void *d, struct rtw_phl_scan_param *param, u8 sctrl_
 
 		/* core probe handler */
 		param->ops->scan_probe(param->priv, param, sctrl_idx);
+	}
+
+	if (backop_immed->notify_backop) {
+		if (scan_ch->scan_mode == BACKOP_MODE) {
+			_extend_scan_ch_period(scan_ch);
+			_reset_backop_immed_info(backop_immed);
+			PHL_INFO("[probing], notify_backop extend OP duration %d !\n",
+				scan_ch->duration);
+		} else {
+			/* OP ch will be added at _cmd_scan_select_chnl */
+			/* push cur off ch because it was NOT canceled by previous chk */
+			pq_push(d, &sctrl->chlist, &scan_ch->list, _tail, _ps);
+			PHL_INFO("[probing], notify_backop push back off channel!\n");
+			return false;
+		}
 	}
 
 	if (scan_ch->remain_t <= param->probe_t)
@@ -753,7 +803,7 @@ enum phl_mdl_ret_code _cmd_scan_hdl_internal_evt(
 	struct phl_msg nextmsg = {0};
 	struct phl_msg_attribute attr = {0};
 	enum rtw_phl_status pstatus = RTW_PHL_STATUS_SUCCESS;
-	u8 band_idx = 0xff, sctrl_idx = 0xff;
+	u8 band_idx = 0, sctrl_idx = 0xff;
 	struct phl_scan_channel *scan_ch = NULL;
 	bool tx_pause = true;
 	struct rtw_chan_def chdef = {0};
@@ -772,7 +822,7 @@ enum phl_mdl_ret_code _cmd_scan_hdl_internal_evt(
 		 * It means that usb dongle always can't do fully scan.
 		 * So, abort scan_req or not, depend on core layer.
 		*/
-		_cmd_scan_fail_ev_hdlr(dispr, priv, msg);
+		_cmd_scan_except_ev_hdlr(dispr, priv, msg);
 		return MDL_RET_FAIL;
 	}
 	else {
@@ -784,7 +834,7 @@ enum phl_mdl_ret_code _cmd_scan_hdl_internal_evt(
 		PHL_WARN("%s:: Timeout! %d > max_listen_time %d\n",
 				 __func__, diff_time, param->max_listen_time);
 		#if 0
-		_cmd_scan_fail_ev_hdlr(dispr, priv, msg);
+		_cmd_scan_except_ev_hdlr(dispr, priv, msg);
 		return MDL_RET_FAIL;
 		#endif
 	}
@@ -815,8 +865,10 @@ enum phl_mdl_ret_code _cmd_scan_hdl_internal_evt(
 			SET_MSG_EVT_ID_FIELD(nextmsg.msg_id, MSG_EVT_SWCH_START);
 			nextmsg.rsvd[0].ptr = (u8*)sctrl->wrole;
 			pstatus = phl_disp_eng_send_msg(phl_info, &nextmsg, &attr, NULL);
-			if(pstatus != RTW_PHL_STATUS_SUCCESS)
-				PHL_ERR("%s :: [SCAN_START] phl_disp_eng_send_msg failed\n", __func__);
+			if(pstatus != RTW_PHL_STATUS_SUCCESS) {
+				PHL_ERR("%s :: [SCAN_START] send_msg failed\n", __func__);
+				_cmd_scan_except_ev_hdlr(dispr, priv, msg);
+			}
 		break;
 		case MSG_EVT_LISTEN_STATE_EXPIRE:
 			if (!param->ops->scan_probe) {
@@ -837,15 +889,13 @@ enum phl_mdl_ret_code _cmd_scan_hdl_internal_evt(
 			nextmsg.rsvd[0].ptr = (u8*)sctrl->wrole;
 
 			pstatus = phl_disp_eng_send_msg(phl_info, &nextmsg, &attr, NULL);
-			if(pstatus != RTW_PHL_STATUS_SUCCESS)
-				PHL_ERR("%s :: [LISTEN_STATE_EXPIRE] dispr_send_msg failed\n", __func__);
-
+			if(pstatus != RTW_PHL_STATUS_SUCCESS) {
+				PHL_ERR("%s :: [LISTEN_STATE_EXPIRE] send_msg failed\n", __func__);
+				_cmd_scan_except_ev_hdlr(dispr, priv, msg);
+			}
 		break;
 
 		case MSG_EVT_SWCH_START:
-			/*	ycx++
-				ycx > length(yclist) ? SCAN_EV_END : switch channel */
-
 			PHL_INFO("[%d]MSG_EVT_SWCH_START \n", band_idx);
 
 			/* For the first time, param->scan_ch would be NULL */
@@ -861,11 +911,7 @@ enum phl_mdl_ret_code _cmd_scan_hdl_internal_evt(
 			scan_ch = _cmd_scan_select_chnl(d, param, band_idx);
 			if (scan_ch == NULL) {
 				/* no more channel, we are done */
-				SET_MSG_EVT_ID_FIELD(nextmsg.msg_id, MSG_EVT_SCAN_END);
-				nextmsg.rsvd[0].ptr = (u8*)sctrl->wrole;
-				pstatus = phl_disp_eng_send_msg(phl_info, &nextmsg, &attr, NULL);
-				if(pstatus != RTW_PHL_STATUS_SUCCESS)
-					PHL_ERR("%s :: [SWCH_START] dispr_send_msg failed\n", __func__);
+				_cmd_scan_except_ev_hdlr(dispr, priv, msg);
 				break;
 			}
 
@@ -902,6 +948,7 @@ enum phl_mdl_ret_code _cmd_scan_hdl_internal_evt(
 				scan_ch->start_t = _os_get_cur_time_ms();
 				scan_ch->last_t = 0;
 				scan_ch->pass_t = 0;
+				scan_ch->ext_act_done_t = 0;
 				scan_ch->remain_t = scan_ch->duration;
 				if (scan_ch->remain_t >= param->probe_t)
 					probe_t = param->probe_t;
@@ -924,6 +971,10 @@ enum phl_mdl_ret_code _cmd_scan_hdl_internal_evt(
 			#endif
 
 			pstatus = _cmd_swch_done_notify(dispr, d, param, sctrl_idx);
+			if(pstatus != RTW_PHL_STATUS_SUCCESS) {
+				PHL_ERR("%s :: [SWCH_START] _swch_done_notify failed\n", __func__);
+				_cmd_scan_except_ev_hdlr(dispr, priv, msg);
+			}
 		break;
 
 		case MSG_EVT_SWCH_DONE:
@@ -937,13 +988,11 @@ enum phl_mdl_ret_code _cmd_scan_hdl_internal_evt(
 			PHL_INFO("[%d]MSG_EVT_SCAN_END \n", band_idx);
 			pstatus = phl_disp_eng_free_token(phl_info, band_idx, &sctrl->token);
 			if(pstatus == RTW_PHL_STATUS_SUCCESS) {
-
 				param->result = SCAN_REQ_COMPLETE;
 				_cmd_scan_end(d, param, band_idx);
 			}
 			else
 				PHL_WARN("%s :: [SCAN_END] Abort occurred, skip!\n", __func__);
-
 		break;
 
 		default:
@@ -965,7 +1014,7 @@ enum phl_mdl_ret_code _phl_cmd_scan_req_acquired(
 	u32 diff_time = 0;
 	struct phl_info_t *phl_info = phl_com->phl_priv;
 	struct cmd_scan_ctrl *sctrl = NULL;
-	u8 band_idx = 0xff, sctrl_idx = 0xff;
+	u8 band_idx = 0, sctrl_idx = 0xff;
 	struct phl_msg msg = {0};
 	struct phl_msg_attribute attr = {0};
 
@@ -1036,13 +1085,15 @@ enum phl_mdl_ret_code _phl_cmd_scan_req_ev_hdlr(
 	struct phl_msg* msg)
 {
 	enum phl_mdl_ret_code ret = MDL_RET_IGNORE;
+#ifdef CONFIG_PHL_SCANOFLD
 	struct rtw_phl_scan_param *param = (struct rtw_phl_scan_param*)priv;
+#endif
 
 	if(IS_MSG_FAIL(msg->msg_id)) {
 		PHL_INFO("%s :: MSG(%d)_FAIL - EVT_ID=%d \n", __func__,
 			 MSG_MDL_ID_FIELD(msg->msg_id), MSG_EVT_ID_FIELD(msg->msg_id));
 
-		_cmd_scan_fail_ev_hdlr(dispr, priv, msg);
+		_cmd_scan_except_ev_hdlr(dispr, priv, msg);
 		return MDL_RET_FAIL;
 	}
 
@@ -1107,6 +1158,27 @@ enum phl_mdl_ret_code _phl_cmd_scan_req_set_info(
 			    scan_ch->channel != channel)
 				PHL_DBG("%s[%d] :: sctrl[%d] channel %d mismatch from listen channel %d\n",
 				        __func__, band_idx, sctrl_idx, channel, scan_ch->channel);
+			ret = MDL_RET_SUCCESS;
+		}
+			break;
+		case FG_REQ_OP_NOTIFY_BACKOP_IMMED:
+		{
+			struct rtw_phl_scan_param *param = (struct rtw_phl_scan_param*)priv;
+			struct backop_immed_info *backop_immed = &(param->back_op.backop_immed);
+			struct cmd_scan_ctrl *sctrl = NULL;
+			u8 sctrl_idx = 0;
+
+			sctrl_idx = phl_cmd_scan_ctrl(param, band_idx, &sctrl);
+			if(sctrl == NULL) {
+				PHL_ERR("%s[%d]: find sctrl failed\n", __func__, band_idx);
+				return ret;
+			}
+
+			if (sctrl->back_op_ch[0].channel) {
+				backop_immed->notify_backop = true;
+				PHL_INFO("%s[%d] :: FG_REQ_OP_NOTIFY_BACKOP_IMMED\n",
+				         __func__, band_idx);
+			}
 			ret = MDL_RET_SUCCESS;
 		}
 			break;
@@ -1508,10 +1580,8 @@ enum rtw_phl_status rtw_phl_cmd_scan_request(void *phl,
 	return RTW_PHL_STATUS_SUCCESS;
 
 error:
-	if(param->sctrl) {
-		_cmd_scan_req_deinit(phl_info, param);
-		param->sctrl_num = 0;
-	}
+	_cmd_scan_req_deinit(phl_info, param);
+	param->sctrl_num = 0;
 
 	return pstatus;
 }

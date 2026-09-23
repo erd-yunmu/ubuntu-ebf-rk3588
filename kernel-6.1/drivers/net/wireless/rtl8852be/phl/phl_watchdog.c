@@ -60,8 +60,8 @@ static void _phl_watchdog_sw_post(struct phl_info_t *phl)
 static void _phl_watchdog_hw(struct phl_info_t *phl)
 {
 	#ifdef DBG_DUMP_TX_COUNTER
-	if (phl->phl_com->dbg_dump_tx)
-		rtw_hal_dump_tx_status(phl->hal, phl->phl_com->dbg_dump_tx_bidx);
+	if (phl->phl_com->dbg_cfg.dbg_dump_tx)
+		rtw_hal_dump_tx_status(phl->hal, phl->phl_com->dbg_cfg.dbg_dump_tx_bidx);
 	#endif
 
 	#ifdef CONFIG_PHL_THERMAL_PROTECT

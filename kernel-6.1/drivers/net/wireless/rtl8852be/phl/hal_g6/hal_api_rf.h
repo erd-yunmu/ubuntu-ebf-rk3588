@@ -31,6 +31,8 @@ void rtw_hal_rf_deinit(struct rtw_phl_com_t *phl_com,
 
 void rtw_hal_init_rf_reg(struct rtw_phl_com_t *phl_com, void *hal);
 
+void rtw_hal_rf_ic_cfg_init(void *hal);
+
 enum rtw_hal_status rtw_hal_rf_get_pwrtrack(struct hal_info_t *hal_info, u8 *txpwr_track_status, u8 phy_idx);
 
 void rtw_hal_rf_dm_init(struct hal_info_t *hal_info);
@@ -139,14 +141,18 @@ enum rtw_hal_status rtw_hal_rf_set_tssi_de_tx_verify(struct hal_info_t *hal_info
 
 enum rtw_hal_status rtw_hal_rf_get_txpwr_final_abs(struct hal_info_t *hal_info);
 
-int rtw_hal_rf_get_predefined_pw_lmt_regu_type_from_str(const char *str);
-const char * const *rtw_hal_rf_get_predefined_pw_lmt_regu_type_str_array(u8 *num);
+int rtw_hal_rf_get_predef_pw_lmt_regu_type_from_str(
+	enum band_type band, const char *str);
+const char * const *rtw_hal_rf_get_predef_pw_lmt_regu_type_str_array(
+	enum band_type band, u8 *num);
 
 u8 rtw_hal_rf_get_pw_lmt_regu_type(struct hal_info_t *hal_info, enum band_type band);
 const char *rtw_hal_rf_get_pw_lmt_regu_type_str(struct hal_info_t *hal_info, enum band_type band);
 
 bool rtw_hal_rf_pw_lmt_regu_tbl_exist(struct hal_info_t *hal_info, enum band_type band, u8 regu);
-int rtw_hal_rf_file_regd_ext_search(struct hal_info_t *hal_info, u16 domain_code, const char *country);
+void rtw_hal_rf_set_pw_lmt_regu_table_exist(struct hal_info_t *hal_info, u8 band, u8 reg);
+int rtw_hal_rf_file_regd_ext_search(struct hal_info_t *hal_info, enum band_type band
+	, u16 domain_code, const char *country);
 
 void rtw_hal_rf_auto_pw_lmt_regu(struct hal_info_t *hal_info);
 void rtw_hal_rf_force_pw_lmt_regu(struct hal_info_t *hal_info,
@@ -277,9 +283,29 @@ s8 rtw_hal_rf_get_power_limit(struct hal_info_t *hal_info,
 	u8 beamforming, u8 tx_num, u8 channel);
 s8 rtw_hal_rf_get_power_by_rate_band(struct hal_info_t *hal_info, enum phl_phy_idx phy,
 	u16 rate, u8 dcm, u8 offset, u32 band);
-s8 rtw_hal_rf_get_power_limit_option(struct hal_info_t *hal_info, enum phl_phy_idx phy, u8 rf_path,
-	u16 rate, u8 bandwidth, u8 beamforming, u8 tx_num, u8 channel, u32 band, u8 reg);
+s8 rtw_hal_rf_get_power_limit_option(struct hal_info_t *hal_info,
+	enum phl_phy_idx phy, u8 rf_path, u16 rate, u8 bandwidth, u8 beamforming,
+	u8 tx_num, u8 channel, u32 band, u8 reg);
+s8 rtw_hal_rf_get_power_limit_ru_option(struct hal_info_t *hal_info,
+	enum phl_phy_idx phy, u8 rf_path, u16 rate, u8 bandwidth,
+	u8 tx_num, u8 channel, u32 band, u8 reg);
 u8 rtw_hal_rf_get_tx_tbl_to_tx_pwr_times(struct hal_info_t *hal_info);
+s8 rtw_hal_rf_get_power_limit_value_ww(struct hal_info_t *hal_info);
+s8 rtw_hal_rf_get_power_limit_value_na(struct hal_info_t *hal_info);
+u32 rtw_hal_rf_get_regulation_max_num(struct hal_info_t *hal_info, enum band_type band);
+
+void rtw_hal_rf_power_by_rate_store_to_array(struct hal_info_t *hal_info,
+	u32 band, u32 tx_num, u32 rate_id, u32 data);
+void rtw_hal_rf_power_limit_store_to_array(struct hal_info_t *hal_info,
+	u8 regulation, u8 band, u8 bandwidth, u8 rate, u8 tx_num, u8 beamforming, u8 chnl, s8 val);
+void rtw_hal_rf_power_limit_shape_store_to_array(struct hal_info_t *hal_info,
+	u8 regulation, u8 band, u8 bandwidth, u8 rate, u8 tx_num, u8 beamforming, u8 val);
+void rtw_hal_rf_power_limit_ru_store_to_array(struct hal_info_t *hal_info,
+	u8 band, u8 bandwidth, u8 tx_num, u8 rate, u8 regulation, u8 chnl, s8 val);
+void rtw_hal_rf_power_limit_ru_shape_store_to_array(struct hal_info_t *hal_info,
+	u8 band, u8 bandwidth, u8 tx_num, u8 rate, u8 regulation, u8 val);
+void rtw_hal_rf_clear_limit_table(struct hal_info_t *hal_info,
+	u8 band_bmp, enum phl_pwr_table pwr_table);
 
 void rtw_hal_rf_rfe_ant_num_chk(struct rtw_hal_com_t *hal_com);
 
@@ -296,4 +322,8 @@ u32 rtw_hal_rf_process_c2h(void *hal, struct rtw_c2h_info *c2h, struct c2h_evt_m
 enum rtw_hal_status
 rtw_hal_rf_ic_hw_setting_init(struct hal_info_t *hal_info);
 
+void rtw_hal_rf_fwredl_config(struct hal_info_t *hal_info, enum phl_phy_idx phy_idx);
+#ifdef CONFIG_PHL_RFK_FCS_SUPPPORT
+u8 rtw_hal_rf_fcs_support_num(struct hal_info_t *hal_info);
+#endif
 #endif /*_HAL_API_RF_H_*/

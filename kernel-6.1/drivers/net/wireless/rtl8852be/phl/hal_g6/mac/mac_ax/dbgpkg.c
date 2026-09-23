@@ -16,15 +16,28 @@
 #include "dbgpkg.h"
 #include "dbgport_hw.h"
 #include "mac_priv.h"
+#include "diagnosis.h"
 
+#if MAC_AX_FEATURE_DBGPKG
 #if MAC_AX_FEATURE_HV
 #include "../hv_ax/phy_rpt_hv.h"
 #endif
+
+#define PHL_DBG_LIMIT_SIZE 900
 
 static u8 *fwcmd_lb_data;
 
 const char *tx_cnt_type_g6[] = {"LCCK", "SCCK", "OFDM", "HT", "HT_GF", "VHTSU", "VHTMU",
 				"HESU", "HEERSU", "HEMU", "HETB"};
+
+static struct c2h_proc_func c2h_proc_sys_cmd_path[] = {
+	{c2h_sys_cmd_lb, FWCMD_C2H_FUNC_C2H_LB,},
+#if MAC_AX_FEATURE_HV
+	{c2h_test_phy_rpt, FWCMD_C2H_FUNC_TEST_PHY_RPT},
+#endif
+	{c2h_pcie_l12_test, FWCMD_C2H_FUNC_C2H_L1_2_TEST},
+	{NULL, FWCMD_C2H_FUNC_NULL},
+};
 
 const char *rx_cnt_type[] = {"OFDM_OK", "OFDM_FAIL", "OFDM_FAM",
 			     "CCK_OK", "CCK_FAIL", "CCK_FAM",
@@ -59,6 +72,12 @@ static u32 base_addr_map_tbl[MAC_AX_MEM_MAX] = {
 	BCN_IE_CAM1_BASE_ADDR,
 	TXD_FIFO_0_BASE_ADDR,
 	TXD_FIFO_1_BASE_ADDR,
+	RXD_FIFO_0_BASE_ADDR,
+	RXD_FIFO_1_BASE_ADDR,
+	DMA_TXFIFO_0_BASE_ADDR,
+	DMA_TXFIFO_1_BASE_ADDR,
+	DMA_RXFIFO_0_BASE_ADDR,
+	DMA_RXFIFO_1_BASE_ADDR,
 	PCIE_CFG_SPC_BASE_ADDR,
 };
 
@@ -115,6 +134,8 @@ static u32 c2h_sys_cmd_lb(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
 
 	PLTFM_MSG_TRACE("receive c2h cmd_lb\n");
 
+	adapter->sm.h2c_lb_st = MAC_AX_H2C_LB_IDLE;
+
 	if (!fwcmd_lb_data)
 		return MACSUCCESS;
 
@@ -135,15 +156,6 @@ END:
 
 	return ret;
 }
-
-static struct c2h_proc_func c2h_proc_sys_cmd_path[] = {
-	{FWCMD_C2H_FUNC_C2H_LB, c2h_sys_cmd_lb},
-#if MAC_AX_FEATURE_HV
-	{FWCMD_C2H_FUNC_TEST_PHY_RPT, c2h_test_phy_rpt},
-#endif
-	{FWCMD_C2H_FUNC_C2H_L1_2_TEST, c2h_pcie_l12_test},
-	{FWCMD_C2H_FUNC_NULL, NULL},
-};
 
 u32 c2h_sys_cmd_path(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
 		     struct rtw_c2h_info *info)
@@ -278,7 +290,7 @@ static u32 __dump_mac_mem(struct mac_ax_adapter *adapter,
 	if (sel >= MAC_AX_MEM_LAST)
 		return MACNOITEM;
 
-	if (adapter->hw_info->is_sec_ic) {
+	if (adapter->fw_info.is_sec_ic) {
 		PLTFM_MSG_ERR("[ERR]%s sec mode ind aces\n", __func__);
 		return MACIOERRINSEC;
 	}
@@ -312,7 +324,7 @@ static u32 __dump_mac_mem(struct mac_ax_adapter *adapter,
 	cnt = 0;
 	while (cnt < len) {
 		if (sel == MAC_AX_MEM_PCIE_CFG_SPC) {
-			if (adapter->hw_info->intf != MAC_AX_INTF_PCIE) {
+			if (adapter->env_info.intf != MAC_AX_INTF_PCIE) {
 				ret = MACINTF;
 				PLTFM_MSG_ERR("[ERR] INTF NOT PCIe\n");
 				return ret;
@@ -337,8 +349,8 @@ static u32 __dump_mac_mem(struct mac_ax_adapter *adapter,
 #endif
 		}
 		//PLTFM_MSG_ERR("%s ind access sel %d start\n", __func__, sel);
-		PLTFM_MUTEX_LOCK(&adapter->hw_info->ind_access_lock);
-		adapter->hw_info->ind_aces_cnt++;
+		PLTFM_MUTEX_LOCK(&adapter->lock_info.ind_access_lock);
+		adapter->dbg_info.ind_aces_cnt++;
 		MAC_REG_W32(R_AX_FILTER_MODEL_ADDR, base_addr);
 		for (i = R_AX_INDIR_ACCESS_ENTRY + residue;
 		     i < R_AX_INDIR_ACCESS_ENTRY + MAC_MEM_DUMP_PAGE_SIZE;
@@ -355,8 +367,8 @@ static u32 __dump_mac_mem(struct mac_ax_adapter *adapter,
 			if (cnt >= len)
 				break;
 		}
-		adapter->hw_info->ind_aces_cnt--;
-		PLTFM_MUTEX_UNLOCK(&adapter->hw_info->ind_access_lock);
+		adapter->dbg_info.ind_aces_cnt--;
+		PLTFM_MUTEX_UNLOCK(&adapter->lock_info.ind_access_lock);
 		//PLTFM_MSG_ERR("%s ind access sel %d end\n", __func__, sel);
 
 		residue = 0;
@@ -409,6 +421,9 @@ u32 mac_get_mem_size(struct mac_ax_adapter *adapter, enum mac_ax_mem_sel sel)
 {
 	u32 size;
 	u16 macid_num = adapter->hw_info->macid_num;
+	u32 ret = MACSUCCESS;
+	struct mac_ax_avl_std_bacam_info idx_info;
+	struct mac_ax_ops *mops = adapter_to_mac_ops(adapter);
 
 	switch (sel) {
 	case MAC_AX_MEM_AXIDMA:
@@ -442,7 +457,24 @@ u32 mac_get_mem_size(struct mac_ax_adapter *adapter, enum mac_ax_mem_sel sel)
 		size = ADDR_CAM_MEM_SIZE;
 		break;
 	case MAC_AX_MEM_BA_CAM:
-		size = BA_CAM_SIZE << BA_CAM_NUM_SH;
+		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
+		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
+		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
+			ret =  mops->bacam_avl_std_entry_idx(adapter, &idx_info);
+			if (ret) {
+				size = 0;
+				break;
+			}
+			size = BA_CAM_SIZE * (idx_info.max_avl_idx + 1);
+		} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
+			   is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
+			   is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT) ||
+			   is_chip_id(adapter, MAC_AX_CHIP_ID_8851B)) {
+			size = BA_CAM_SIZE_LAGACY;
+		} else {
+			size = 0;
+		}
+		break;
 		break;
 	case MAC_AX_MEM_BCN_IE_CAM0:
 		size = BCN_IE_CAM_SIZE * BCN_IE_CAM_NUM;
@@ -453,6 +485,22 @@ u32 mac_get_mem_size(struct mac_ax_adapter *adapter, enum mac_ax_mem_sel sel)
 	case MAC_AX_MEM_TXD_FIFO_0:
 	case MAC_AX_MEM_TXD_FIFO_1:
 		size = TXD_FIFO_SIZE;
+		break;
+	case MAC_AX_MEM_RXD_FIFO_0:
+	case MAC_AX_MEM_RXD_FIFO_1:
+		size = RXD_FIFO_SIZE;
+		break;
+	case MAC_AX_MEM_DMA_TXFIFO_0:
+		size = DMA_TXFIFO_0_SIZE;
+		break;
+	case MAC_AX_MEM_DMA_TXFIFO_1:
+		size = DMA_TXFIFO_1_SIZE;
+		break;
+	case MAC_AX_MEM_DMA_RXFIFO_0:
+		size = DMA_RXFIFO_0_SIZE;
+		break;
+	case MAC_AX_MEM_DMA_RXFIFO_1:
+		size = DMA_RXFIFO_1_SIZE;
 		break;
 	case MAC_AX_MEM_PCIE_CFG_SPC:
 		size = PCIE_CFG_SPC_SIZE;
@@ -468,13 +516,12 @@ u32 mac_get_mem_size(struct mac_ax_adapter *adapter, enum mac_ax_mem_sel sel)
 static u32 __dump_reg_range(struct mac_ax_adapter *adapter,
 			    u32 srt, u32 end)
 {
-#define REG_PAGE_SIZE 0x100
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 	u32 i, j, page, val32_1, val32_2, val32_3, val32_4;
 
 	for (i = srt; i <= end; i++) {
 		page = i << 8;
-		for (j = page; j < page + REG_PAGE_SIZE; j += 16) {
+		for (j = page; j < page + DBG_REG_PAGE_SIZE; j += 16) {
 			val32_1 = MAC_REG_R32(j);
 			val32_2 = MAC_REG_R32(j + 4);
 			val32_3 = MAC_REG_R32(j + 8);
@@ -485,7 +532,6 @@ static u32 __dump_reg_range(struct mac_ax_adapter *adapter,
 	}
 
 	return MACSUCCESS;
-#undef REG_PAGE_SIZE
 }
 
 static u32 __dump_mac_reg(struct mac_ax_adapter *adapter,
@@ -514,15 +560,14 @@ static u32 __dump_mac_reg(struct mac_ax_adapter *adapter,
 			end = MAC_PAGE_HCI_END;
 		} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 			   is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-			   is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 			   is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-			if (adapter->hw_info->intf == MAC_AX_INTF_PCIE) {
+			if (adapter->env_info.intf == MAC_AX_INTF_PCIE) {
 				srt = MAC_PAGE_PCIE_SRT;
 				end = MAC_PAGE_PCIE_END;
-			} else if (adapter->hw_info->intf == MAC_AX_INTF_USB) {
+			} else if (adapter->env_info.intf == MAC_AX_INTF_USB) {
 				srt = MAC_PAGE_USB_SRT;
 				end = MAC_PAGE_USB_END;
-			} else if (adapter->hw_info->intf == MAC_AX_INTF_SDIO) {
+			} else if (adapter->env_info.intf == MAC_AX_INTF_SDIO) {
 				srt = MAC_PAGE_SDIO_SRT;
 				end = MAC_PAGE_SDIO_END;
 			} else {
@@ -1140,7 +1185,7 @@ void print_dbg_port(struct mac_ax_adapter *adapter, struct mac_ax_dbg_port_info 
 u32 dbg_port_dump(struct mac_ax_adapter *adapter, u32 sel)
 {
 	struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
-	struct mac_ax_dbg_port_info *info;
+	struct mac_ax_dbg_port_info *info = NULL;
 	u32 ret;
 
 	ret = p_ops->dbg_port_sel(adapter, &info, sel);
@@ -1158,8 +1203,8 @@ u32 dbg_port_dump(struct mac_ax_adapter *adapter, u32 sel)
 	if (ret != MACSUCCESS)
 		PLTFM_MSG_ERR("[ERR] dbg sel reset %d\n", ret);
 
-	adapter->hw_info->dbg_port_cnt--;
-	PLTFM_MUTEX_UNLOCK(&adapter->hw_info->dbg_port_lock);
+	adapter->dbg_info.dbg_port_cnt--;
+	PLTFM_MUTEX_UNLOCK(&adapter->lock_info.dbg_port_lock);
 
 	return ret;
 }
@@ -1175,6 +1220,11 @@ static u32 ss_poll_own(struct mac_ax_adapter *adapter, u32 addr)
 		if ((val32 & B_AX_SS_OWN) == 0)
 			break;
 		PLTFM_DELAY_US(1);
+	}
+
+	if (!cnt) {
+		PLTFM_MSG_ERR("[STASCH]poll_own fail!!\n");
+		return MACPOLLTO;
 	}
 
 	return val32;
@@ -1193,6 +1243,8 @@ static u32 ss_tx_len_chk(struct mac_ax_adapter *adapter, u16 macid)
 			    SET_WORD(SS_CTRL1_R_TX_LEN, B_AX_SS_CMD_SEL) |
 			    SET_WORD(sel, B_AX_SS_AC) | macid);
 		dw[sel] = ss_poll_own(adapter, R_AX_SS_SRAM_CTRL_1);
+		if (dw[sel] == MACPOLLTO)
+			return MACPOLLTO;
 		if (dw[sel] & (BIT(29) | BIT(30))) {
 			val32 |= SS_POLL_STAT_TX_LEN;
 			PLTFM_MSG_ALWAYS("[WARN]SS_POLL_STAT_TX_LEN, macid %d, ",
@@ -1253,7 +1305,7 @@ static u32 ss_link_chk(struct mac_ax_adapter *adapter,
 	u32 i;
 	u32 cmd;
 	u8 macid;
-	u16 id_empty = adapter->hw_info->sta_empty_flg;
+	u16 id_empty = STA_SCH_LEFT_SHIFT_ONE_SET_MSB(adapter->hw_info->macid_num);
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 
 	if (link->ul) {
@@ -1269,6 +1321,8 @@ static u32 ss_link_chk(struct mac_ax_adapter *adapter,
 		    SET_WORD(wmm, B_AX_SS_WMM) |
 		    SET_WORD(ac, B_AX_SS_AC));
 	poll = ss_poll_own(adapter, R_AX_SS_LINK_INFO);
+	if (poll == MACPOLLTO)
+		return MACPOLLTO;
 	link_head = GET_FIELD(poll, B_AX_SS_LINK_HEAD);
 	link_tail = GET_FIELD(poll, B_AX_SS_LINK_TAIL);
 	link_len = GET_FIELD(poll, B_AX_SS_LINK_LEN);
@@ -1422,7 +1476,7 @@ static void ss_dbgpkg_val_parser(struct mac_ax_adapter *adapter,
 static void ps_dbg_dump(struct mac_ax_adapter *adapter)
 {
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-	enum mac_ax_intf intf = adapter->hw_info->intf;
+	enum mac_ax_intf intf = adapter->env_info.intf;
 	u16 reg32 = 0;
 
 #if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
@@ -1433,10 +1487,9 @@ static void ps_dbg_dump(struct mac_ax_adapter *adapter)
 		reg32 = R_AX_CPWM;
 	}
 #endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		reg32 = R_AX_CPWM_V1;
 	}
@@ -1463,10 +1516,9 @@ static void ps_dbg_dump(struct mac_ax_adapter *adapter)
 					 MAC_REG_R16(R_AX_USB_D2F_F2D_INFO + 2));
 		}
 #endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 			PLTFM_MSG_ALWAYS("USB HRPWM=0x%x\n",
 					 MAC_REG_R16(R_AX_USB_D2F_F2D_INFO_V1 + 2));
@@ -1483,10 +1535,9 @@ static void ps_dbg_dump(struct mac_ax_adapter *adapter)
 					 MAC_REG_R16(R_AX_SDIO_HRPWM1 + 2));
 		}
 #endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 			PLTFM_MSG_ALWAYS("SDIO HRPWM=0x%x\n",
 					 MAC_REG_R16(R_AX_SDIO_HRPWM1_V1 + 2));
@@ -1503,10 +1554,9 @@ static void ps_dbg_dump(struct mac_ax_adapter *adapter)
 					 MAC_REG_R16(R_AX_PCIE_HRPWM));
 		}
 #endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 			PLTFM_MSG_ALWAYS("PCIE HRPWM=0x%x\n",
 					 MAC_REG_R16(R_AX_PCIE_HRPWM_V1));
@@ -1562,8 +1612,6 @@ u32 fw_backtrace_dump(struct mac_ax_adapter *adapter)
 		addr = RSVD_PLE_OFST_8192XB;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851B)) {
 		addr = RSVD_PLE_OFST_8851B;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851E)) {
-		addr = RSVD_PLE_OFST_8851E;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		addr = RSVD_PLE_OFST_8852D;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
@@ -1574,19 +1622,19 @@ u32 fw_backtrace_dump(struct mac_ax_adapter *adapter)
 	}
 
 	// Get FW Backtrace start address and size
-	if (adapter->hw_info->is_sec_ic) {
+	if (adapter->fw_info.is_sec_ic) {
 		PLTFM_MSG_ERR("[ERR]security mode ind accees!\n");
 		PLTFM_MSG_ERR("[ERR]Skip FW Backtrace Check!\n");
 	} else {
 		addr = base_addr_map_tbl[MAC_AX_MEM_SHARED_BUF] + addr;
-		PLTFM_MUTEX_LOCK(&adapter->hw_info->ind_access_lock);
-		adapter->hw_info->ind_aces_cnt++;
+		PLTFM_MUTEX_LOCK(&adapter->lock_info.ind_access_lock);
+		adapter->dbg_info.ind_aces_cnt++;
 		MAC_REG_W32(R_AX_FILTER_MODEL_ADDR, addr);
-		str_addr = MAC_REG_R32(R_AX_INDIR_ACCESS_ENTRY) & ~0xA0000000;
+		str_addr = vir2phy(MAC_REG_R32(R_AX_INDIR_ACCESS_ENTRY));
 		size = MAC_REG_R32(R_AX_INDIR_ACCESS_ENTRY + FW_BACKTRACE_SIZE_OFST);
 		key = MAC_REG_R32(R_AX_INDIR_ACCESS_ENTRY + FW_BACKTRACE_KEY_OFST);
-		adapter->hw_info->ind_aces_cnt--;
-		PLTFM_MUTEX_UNLOCK(&adapter->hw_info->ind_access_lock);
+		adapter->dbg_info.ind_aces_cnt--;
+		PLTFM_MUTEX_UNLOCK(&adapter->lock_info.ind_access_lock);
 		if (str_addr == 0) {
 			PLTFM_MSG_ERR("[FW Backtrace] Invalid address(0x%x)!\n", str_addr);
 			return MACBADDR;
@@ -1603,21 +1651,21 @@ u32 fw_backtrace_dump(struct mac_ax_adapter *adapter)
 	}
 
 	// Dump FW backtrace
-	if (adapter->hw_info->is_sec_ic) {
+	if (adapter->fw_info.is_sec_ic) {
 		PLTFM_MSG_ERR("[ERR]security mode ind accees!\n");
 		PLTFM_MSG_ERR("[ERR]Skip FW Backtrace Check!\n");
 	} else {
 		PLTFM_MSG_WARN("%s ind access FW backtrace start\n", __func__);
-		PLTFM_MUTEX_LOCK(&adapter->hw_info->ind_access_lock);
-		adapter->hw_info->ind_aces_cnt++;
+		PLTFM_MUTEX_LOCK(&adapter->lock_info.ind_access_lock);
+		adapter->dbg_info.ind_aces_cnt++;
 		MAC_REG_W32(R_AX_FILTER_MODEL_ADDR, str_addr);
 		for (i = 0; i < size; i += sizeof(struct fw_backtrace_info)) {
 			info.ra = MAC_REG_R32(R_AX_INDIR_ACCESS_ENTRY + i);
 			info.sp = MAC_REG_R32(R_AX_INDIR_ACCESS_ENTRY + i + 4);
 			PLTFM_MSG_ERR("Next SP:0x%x, Next RA:0x%x\n", info.sp, info.ra);
 		}
-		adapter->hw_info->ind_aces_cnt--;
-		PLTFM_MUTEX_UNLOCK(&adapter->hw_info->ind_access_lock);
+		adapter->dbg_info.ind_aces_cnt--;
+		PLTFM_MUTEX_UNLOCK(&adapter->lock_info.ind_access_lock);
 		PLTFM_MSG_WARN("%s ind access FW backtrace end\n", __func__);
 	}
 
@@ -1628,18 +1676,22 @@ u32 fw_ple_fwerror_dump(struct mac_ax_adapter *adapter)
 {
 	u32 addr = 0;
 	u32 val = 0;
-	u32 i;
+	u32 i, ret;
 
 	addr = mac_get_ple_dbg_addr(adapter);
 
 	// Dump FW Error
-	if (adapter->hw_info->is_sec_ic) {
+	if (adapter->fw_info.is_sec_ic) {
 		PLTFM_MSG_WARN("[ERR]security mode ind accees\n");
 		PLTFM_MSG_WARN("[ERR]Skip FW Error Check!\n");
 	} else {
 		PLTFM_MSG_WARN("%s ind access FW Error PLE start\n", __func__);
 		for (i = R_EXCEPTION_RA0; i <= R_EXCEPTION_RA6; i += 4) {
-			val = mac_sram_dbg_read(adapter, addr + i, SHARED_BUF_SEL);
+			ret = mac_sram_dbg_read(adapter, addr + i, &val, SHARED_BUF_SEL);
+			if (ret != MACSUCCESS) {
+				PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+				return ret;
+			}
 			if (val == 0)
 				continue;
 
@@ -1653,117 +1705,190 @@ u32 fw_ple_fwerror_dump(struct mac_ax_adapter *adapter)
 
 void pltfm_dbg_dump(struct mac_ax_adapter *adapter)
 {
-	u32 val32;
+	u32 val32, ret;
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 
 	PLTFM_MSG_ALWAYS("R_AX_SER_DBG_INFO =0x%08x\n",
 			 MAC_REG_R32(R_AX_SER_DBG_INFO));
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_INIT_CFG1, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
 
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_INIT_CFG1, AXIDMA_SEL);
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_INIT_CFG1 = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_DMA_STOP, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_DMA_STOP, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_DMA_STOP = 0x%x\n", val32);
 #if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_INIT_CFG2, AXIDMA_SEL);
+		ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_INIT_CFG2, &val32, AXIDMA_SEL);
+		if (ret != MACSUCCESS)
+			PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
 		PLTFM_MSG_ALWAYS("R_PL_AXIDMA_INIT_CFG2 = 0x%x\n", val32);
 	}
 #endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-		val32 = mac_sram_dbg_read(adapter, R_AX_HAXI_INIT_CFG1, AXIDMA_SEL);
+		ret = mac_sram_dbg_read(adapter, R_AX_HAXI_INIT_CFG1, &val32, AXIDMA_SEL);
+		if (ret != MACSUCCESS)
+			PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 		PLTFM_MSG_ALWAYS("R_AX_HAXI_INIT_CFG1 = 0x%x\n", val32);
 	}
 #endif
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_INFO, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_INFO, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_INFO = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_BUSY, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_BUSY, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_BUSY = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH0_RXBD_IDX, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH0_RXBD_IDX, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH0_RXBD_IDX = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH1_RXBD_IDX, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH1_RXBD_IDX, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH1_RXBD_IDX = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH2_RXBD_IDX, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH2_RXBD_IDX, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH2_RXBD_IDX = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH3_RXBD_IDX, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH3_RXBD_IDX, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH3_RXBD_IDX = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH4_RXBD_IDX, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH4_RXBD_IDX, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH4_RXBD_IDX = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH5_RXBD_IDX, AXIDMA_SEL);
+	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH5_RXBD_IDX, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH5_RXBD_IDX = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH0_TXBD_IDX, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH0_TXBD_IDX, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH0_TXBD_IDX = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH1_TXBD_IDX, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH1_TXBD_IDX, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH1_TXBD_IDX = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH2_TXBD_IDX, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH2_TXBD_IDX, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH2_TXBD_IDX = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH3_TXBD_IDX, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH3_TXBD_IDX, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH3_TXBD_IDX = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_DBG_ERR_FLAG, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_DBG_ERR_FLAG, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_DBG_ERR_FLAG = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_FWIMR0, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_FWIMR0, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_FWIMR0 = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_FWIMR1, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_FWIMR1, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_FWIMR1 = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_FWISR0, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_FWISR0, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_FWISR0 = 0x%x\n", val32);
-	val32 = mac_sram_dbg_read(adapter, R_PL_AXIDMA_FWISR1, AXIDMA_SEL);
+	ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_FWISR1, &val32, AXIDMA_SEL);
+	if (ret != MACSUCCESS)
+		PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+
 	PLTFM_MSG_ALWAYS("R_PL_AXIDMA_FWISR1 = 0x%x\n", val32);
 }
 
-u32 fw_pc_dbg_dump_ax(struct mac_ax_adapter *adapter)
+u32 fw_pc_dbg_dump_ax(struct mac_ax_adapter *adapter, u32 count, u32 delay_us, u8 hangdetect)
 {
-	u32 val32;
-	u16 index;
-	u8 chip_id;
+	u32 index;
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
+	u32 pc_cr = 0;
+	u32 curr_pc = 0;
+	u32 next_pc = 0;
+	u32 try_cnt = 0;
 
-	chip_id = adapter->hw_info->chip_id;
-
-	PLTFM_MUTEX_LOCK(&adapter->hw_info->dbg_port_lock);
-	adapter->hw_info->dbg_port_cnt++;
-
-	MAC_REG_W32(R_AX_DBG_CTRL, 0xf200f2);
-	val32 = MAC_REG_R32(R_AX_SYS_STATUS1);
-	val32 = SET_CLR_WORD(val32, 0x1, B_AX_SEL_0XC0);
-	MAC_REG_W32(R_AX_SYS_STATUS1, val32);
-
-	for (index = 0; index < 15; index++) {
-		switch (chip_id) {
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-		case MAC_AX_CHIP_ID_8852A:
-		case MAC_AX_CHIP_ID_8852B:
-		case MAC_AX_CHIP_ID_8851B:
-		case MAC_AX_CHIP_ID_8852BT:
-			val32 = MAC_REG_R32(R_AX_DBG_PORT_SEL);
-			break;
+#if FWDL_AX_MIPS_SUPPORT
+	if (FWDL_IS_AX_MIPS)
+		pc_cr = R_AX_DBG_PORT_SEL;
 #endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
-		case MAC_AX_CHIP_ID_8852C:
-		case MAC_AX_CHIP_ID_8192XB:
-		case MAC_AX_CHIP_ID_8851E:
-		case MAC_AX_CHIP_ID_8852D:
-			val32 = MAC_REG_R32(R_AX_WLCPU_PORT_PC);
-			break;
+
+#if FWDL_AX_RISCV_SUPPORT
+	if (FWDL_IS_AX_RISCV)
+		pc_cr = R_AX_WLCPU_PORT_PC;
 #endif
-		default:
-			val32 = 0xEAEAEAEA;
-			PLTFM_MSG_ERR("[ERR]%s :Unknown Chip ID. 0x%X\n", __func__, chip_id);
-			break;
+	if (!pc_cr)
+		return MACNOITEM;
+
+#if FWDL_AX_MIPS_SUPPORT
+	if (FWDL_IS_AX_MIPS) {
+		PLTFM_MUTEX_LOCK(&adapter->lock_info.dbg_port_lock);
+		adapter->dbg_info.dbg_port_cnt++;
+
+		MAC_REG_W32(R_AX_DBG_CTRL, DBG_SEL_FW_PROG_CNTR);
+		MAC_REG_W32(R_AX_SYS_STATUS1, SET_CLR_WORD(MAC_REG_R32(R_AX_SYS_STATUS1), 0x1,
+							   B_AX_SEL_0XC0));
+	}
+#endif
+
+	if (!hangdetect)
+		PLTFM_MSG_ALWAYS("Get FW PC From CR 0x%04X\n", pc_cr);
+	else
+		curr_pc = MAC_REG_R32(pc_cr);
+	for (index = 0; index < count; index++) {
+		if (!hangdetect) {
+			PLTFM_MSG_ALWAYS("fw PC = 0x%08X\n", MAC_REG_R32(pc_cr));
+		} else {
+			next_pc = MAC_REG_R32(pc_cr);
+			if (curr_pc == next_pc)
+				try_cnt++;
+			else
+				break;
 		}
-
-		PLTFM_MSG_ALWAYS("fw PC = 0x%x\n", val32);
-		PLTFM_DELAY_US(10);
+		PLTFM_DELAY_US(delay_us);
 	}
 
-	adapter->hw_info->dbg_port_cnt--;
-	PLTFM_MUTEX_UNLOCK(&adapter->hw_info->dbg_port_lock);
+#if FWDL_AX_MIPS_SUPPORT
+	if (FWDL_IS_AX_MIPS) {
+		adapter->dbg_info.dbg_port_cnt--;
+		PLTFM_MUTEX_UNLOCK(&adapter->lock_info.dbg_port_lock);
+	}
+#endif
+
+	if (hangdetect && (try_cnt == count)) {
+		PLTFM_MSG_ALWAYS("fw PC = 0x%08X, HANG!!\n", curr_pc);
+		return MACFWPCHANG;
+	}
 	return MACSUCCESS;
 }
 
@@ -1780,25 +1905,71 @@ u32 fw_st_dbg_dump(struct mac_ax_adapter *adapter)
 		return MACPROCERR;
 	}
 
-	PLTFM_MSG_ALWAYS("FW status = 0x%x\n", MAC_REG_R32(R_AX_UDM0));
-	PLTFM_MSG_ALWAYS("FW BADADDR = 0x%x\n", MAC_REG_R32(R_AX_UDM1));
-	PLTFM_MSG_ALWAYS("FW EPC/RA = 0x%x\n", MAC_REG_R32(R_AX_UDM2));
-	PLTFM_MSG_ALWAYS("FW MISC = 0x%x\n", MAC_REG_R32(R_AX_UDM3));
-	PLTFM_MSG_ALWAYS("R_AX_HALT_C2H = 0x%x\n", MAC_REG_R32(R_AX_HALT_C2H));
+	PLTFM_MSG_ALWAYS("FW status (0x%04X) = 0x%08X\n", R_AX_UDM0, MAC_REG_R32(R_AX_UDM0));
+	PLTFM_MSG_ALWAYS("FW BADADDR (0x%04X) = 0x%08X\n", R_AX_UDM1, MAC_REG_R32(R_AX_UDM1));
+	PLTFM_MSG_ALWAYS("FW EPC/RA (0x%04X) = 0x%08X\n", R_AX_UDM2, MAC_REG_R32(R_AX_UDM2));
+	PLTFM_MSG_ALWAYS("FW MISC (0x%04X) = 0x%08X\n", R_AX_UDM3, MAC_REG_R32(R_AX_UDM3));
+	PLTFM_MSG_ALWAYS("R_AX_HALT_C2H (0x%04X) = 0x%08X\n", R_AX_HALT_C2H,
+			 MAC_REG_R32(R_AX_HALT_C2H));
+	PLTFM_MSG_ALWAYS("R_AX_WCPU_FW_CTRL (0x%04X) = 0x%08X\n", R_AX_WCPU_FW_CTRL,
+			 MAC_REG_R32(R_AX_WCPU_FW_CTRL));
+	PLTFM_MSG_ALWAYS("R_AX_SYS_CLK_CTRL(0x%04X) = 0x%08X\n", R_AX_SYS_CLK_CTRL,
+			 MAC_REG_R32(R_AX_SYS_CLK_CTRL));
+	PLTFM_MSG_ALWAYS("R_AX_SYS_PAGE_CLK_GATED(0x%04X) = 0x%08X\n",
+			 R_AX_SYS_PAGE_CLK_GATED, MAC_REG_R32(R_AX_SYS_PAGE_CLK_GATED));
+	PLTFM_MSG_ALWAYS("R_AX_PLATFORM_ENABLE(0x%04X) = 0x%08X\n",
+			 R_AX_PLATFORM_ENABLE, MAC_REG_R32(R_AX_PLATFORM_ENABLE));
+	PLTFM_MSG_ALWAYS("R_AX_LDO_AON_CTRL0(0x%04X) = 0x%08X\n",
+			 R_AX_LDO_AON_CTRL0, MAC_REG_R32(R_AX_LDO_AON_CTRL0));
+
+	if (mac_io_chk_access(adapter, R_PL_AXIDMA_CH0_RXBD_IDX) == MACSUCCESS) {
+		ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH0_RXBD_IDX, &val32, AXIDMA_SEL);
+		if (ret != MACSUCCESS)
+			PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+		PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH0_RXBD_IDX(0x%04X) = 0x%08X\n",
+				 R_PL_AXIDMA_CH0_RXBD_IDX, val32);
+	}
+	if (mac_io_chk_access(adapter, R_PL_AXIDMA_CH1_RXBD_IDX) == MACSUCCESS) {
+		ret = mac_sram_dbg_read(adapter, R_PL_AXIDMA_CH1_RXBD_IDX, &val32, AXIDMA_SEL);
+		if (ret != MACSUCCESS)
+			PLTFM_MSG_ERR("%s read sram fail %d\n", __func__, ret);
+		PLTFM_MSG_ALWAYS("R_PL_AXIDMA_CH1_RXBD_IDX(0x%04X) = 0x%08X\n",
+				 R_PL_AXIDMA_CH1_RXBD_IDX, val32);
+	}
+
+#if FWDL_AX_MIPS_SUPPORT
+	if (FWDL_IS_AX_MIPS) {
+		if (mac_io_chk_access(adapter, R_AX_BOOT_DBG) == MACSUCCESS)
+			PLTFM_MSG_ALWAYS("R_AX_BOOT_DBG (0x%04X) = 0x%08X\n", R_AX_BOOT_DBG,
+					 MAC_REG_R32(R_AX_BOOT_DBG));
+	}
+#endif
+#if FWDL_AX_RISCV_SUPPORT
+	if (FWDL_IS_AX_RISCV) {
+		if (mac_io_chk_access(adapter, R_AX_BOOT_DBG_V1) == MACSUCCESS)
+			PLTFM_MSG_ALWAYS("R_AX_BOOT_DBG (0x%04X) = 0x%08X\n", R_AX_BOOT_DBG_V1,
+					 MAC_REG_R32(R_AX_BOOT_DBG_V1));
+		if (mac_io_chk_access(adapter, R_AX_CH12_TXBD_IDX) == MACSUCCESS)
+			PLTFM_MSG_ALWAYS("R_AX_CH12_TXBD_IDX(0x%04X)=0x%08X\n", R_AX_CH12_TXBD_IDX,
+					 MAC_REG_R32(R_AX_CH12_TXBD_IDX));
+	}
+
+#endif
 
 	val32 = MAC_REG_R32(R_AX_HALT_C2H);
 	if (val32 == MAC_AX_ERR_L1_ERR_DMAC || val32 == MAC_AX_ERR_L1_RESET_DISABLE_DMAC_DONE)
 		PLTFM_MSG_ALWAYS("[WARN] SER L1 is occured, but not recovery done yet\n");
 
 	if (mac_io_chk_access(adapter, R_AX_SER_DBG_INFO) == MACSUCCESS) {
-		PLTFM_MSG_ALWAYS("R_AX_SER_DBG_INFO = 0x%x\n", MAC_REG_R32(R_AX_SER_DBG_INFO));
-		PLTFM_MSG_ALWAYS("R_AX_DMAC_ERR_ISR = 0x%x\n", MAC_REG_R32(R_AX_DMAC_ERR_ISR));
+		PLTFM_MSG_ALWAYS("R_AX_SER_DBG_INFO (0x%04X) = 0x%08X\n", R_AX_SER_DBG_INFO,
+				 MAC_REG_R32(R_AX_SER_DBG_INFO));
+		PLTFM_MSG_ALWAYS("R_AX_DMAC_ERR_ISR (0x%04X) = 0x%08X\n", R_AX_DMAC_ERR_ISR,
+				 MAC_REG_R32(R_AX_DMAC_ERR_ISR));
 	}
 
 	/* Dump FW program counter */
-	ret = fw_pc_dbg_dump_ax(adapter);
-	if (ret)
-		return ret;
+	fw_pc_dbg_dump_ax(adapter, FW_PC_DBG_DUMP_CNT, FW_PC_DBG_DUMP_RATE_US,
+			  FW_PC_DBG_DUMP_HANGDETECT_DIS);
 
 	return MACSUCCESS;
 }
@@ -1831,8 +2002,6 @@ u32 rsvd_ple_dump(struct mac_ax_adapter *adapter)
 		addr = RSVD_PLE_OFST_8192XB;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851B)) {
 		addr = RSVD_PLE_OFST_8851B;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851E)) {
-		addr = RSVD_PLE_OFST_8851E;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		addr = RSVD_PLE_OFST_8852D;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
@@ -1899,7 +2068,7 @@ u32 ss_dbgpkg(struct mac_ax_adapter *adapter, struct mac_ax_dbgpkg *val)
 		return MACSUCCESS;
 	}
 
-	switch (adapter->hw_info->chip_id) {
+	switch (adapter->drv_info->sw_chip_id) {
 	case MAC_AX_CHIP_ID_8852A:
 		wmm_num = SS_WMM_NUM_8852A;
 		ul_vld = SS_UL_SUPPORT_8852A;
@@ -1919,10 +2088,6 @@ u32 ss_dbgpkg(struct mac_ax_adapter *adapter, struct mac_ax_dbgpkg *val)
 	case MAC_AX_CHIP_ID_8851B:
 		wmm_num = SS_WMM_NUM_8851B;
 		ul_vld = SS_UL_SUPPORT_8851B;
-		break;
-	case MAC_AX_CHIP_ID_8851E:
-		wmm_num = SS_WMM_NUM_8851E;
-		ul_vld = SS_UL_SUPPORT_8851E;
 		break;
 	case MAC_AX_CHIP_ID_8852D:
 		wmm_num = SS_WMM_NUM_8852D;
@@ -1982,8 +2147,8 @@ u32 dle_dbg_dump(struct mac_ax_adapter *adapter)
 	struct dle_dfi_freepg_t freepg;
 	struct dle_dfi_quota_t quota;
 	struct dle_dfi_qempty_t qempty;
-	u32 qtaid, grpsel;
-	u32 qnum, qtanum, ret, val32;
+	u32 qtaid, grpsel, ret, val32;
+	u32 wde_qempty_num = 0, ple_qempty_num = 0, wde_qta_num = 0, ple_qta_num = 0;
 
 	ret = check_mac_en(adapter, 0, MAC_AX_DMAC_SEL);
 	if (ret != MACSUCCESS) {
@@ -2092,10 +2257,9 @@ u32 dle_dbg_dump(struct mac_ax_adapter *adapter)
 	PLTFM_MSG_ALWAYS("[PLE][CPUIO]max_pgnum=0x%x\n",
 			 GET_FIELD(val32, B_AX_PLE_Q10_MAX_SIZE));
 
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		val32 = MAC_REG_R32(R_AX_PLE_QTA11_CFG);
 		PLTFM_MSG_ALWAYS("[PLE][TXRPT]min_pgnum=0x%x\n",
@@ -2125,8 +2289,62 @@ u32 dle_dbg_dump(struct mac_ax_adapter *adapter)
 	PLTFM_MSG_ALWAYS("[PLE]free_tailpg = 0x%x\n", freepg.free_tailpg);
 	PLTFM_MSG_ALWAYS("[PLE]pub_pgunm = 0x%x\n", freepg.pub_pgnum);
 
+	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A)) {
+#if MAC_AX_8852A_SUPPORT
+		wde_qta_num = DLE_WDE_QTA_NUM_8852A;
+		ple_qta_num = DLE_PLE_QTA_NUM_8852A;
+		wde_qempty_num = WDE_QEMPTY_NUM(8852A);
+		ple_qempty_num = PLE_QEMPTY_NUM(8852A);
+#endif
+	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852B)) {
+#if MAC_AX_8852B_SUPPORT
+		wde_qta_num = DLE_WDE_QTA_NUM_8852B;
+		ple_qta_num = DLE_PLE_QTA_NUM_8852B;
+		wde_qempty_num = WDE_QEMPTY_NUM(8852B);
+		ple_qempty_num = PLE_QEMPTY_NUM(8852B);
+#endif
+	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C)) {
+#if MAC_AX_8852C_SUPPORT
+		wde_qta_num = DLE_WDE_QTA_NUM_8852C;
+		ple_qta_num = DLE_PLE_QTA_NUM_8852C;
+		wde_qempty_num = WDE_QEMPTY_NUM(8852C);
+		ple_qempty_num = PLE_QEMPTY_NUM(8852C);
+#endif
+	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB)) {
+#if MAC_AX_8192XB_SUPPORT
+		wde_qta_num = DLE_WDE_QTA_NUM_8192XB;
+		ple_qta_num = DLE_PLE_QTA_NUM_8192XB;
+		wde_qempty_num = WDE_QEMPTY_NUM(8192XB);
+		ple_qempty_num = PLE_QEMPTY_NUM(8192XB);
+#endif
+	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851B)) {
+#if MAC_AX_8851B_SUPPORT
+		wde_qta_num = DLE_WDE_QTA_NUM_8851B;
+		ple_qta_num = DLE_PLE_QTA_NUM_8851B;
+		wde_qempty_num = WDE_QEMPTY_NUM(8851B);
+		ple_qempty_num = PLE_QEMPTY_NUM(8851B);
+#endif
+	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
+#if MAC_AX_8852D_SUPPORT
+		wde_qta_num = DLE_WDE_QTA_NUM_8852D;
+		ple_qta_num = DLE_PLE_QTA_NUM_8852D;
+		wde_qempty_num = WDE_QEMPTY_NUM(8852D);
+		ple_qempty_num = PLE_QEMPTY_NUM(8852D);
+#endif
+	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
+#if MAC_AX_8852BT_SUPPORT
+		wde_qta_num = DLE_WDE_QTA_NUM_8852BT;
+		ple_qta_num = DLE_PLE_QTA_NUM_8852BT;
+		wde_qempty_num = WDE_QEMPTY_NUM(8852BT);
+		ple_qempty_num = PLE_QEMPTY_NUM(8852BT);
+#endif
+	} else {
+		PLTFM_MSG_ERR("[ERR] wde qempty num not define\n");
+		return MACCHIPID;
+	}
+
 	quota.dle_type = DLE_CTRL_TYPE_WDE;
-	for (qtaid = 0; qtaid < WDE_QTA_NUM; qtaid++) {
+	for (qtaid = 0; qtaid < wde_qta_num; qtaid++) {
 		quota.qtaid = qtaid;
 		ret = dle_dfi_quota(adapter, &quota);
 		if (ret != MACSUCCESS) {
@@ -2168,22 +2386,8 @@ u32 dle_dbg_dump(struct mac_ax_adapter *adapter)
 		}
 	}
 
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		qtanum = PLE_QTA_NUM_8852AB;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
-		   is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		   is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
-		   is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-		qtanum = PLE_QTA_NUM_8852C;
-	} else {
-		PLTFM_MSG_ERR("[ERR] ple qta num not define\n");
-		return MACCHIPID;
-	}
 	quota.dle_type = DLE_CTRL_TYPE_PLE;
-	for (qtaid = 0; qtaid < qtanum; qtaid++) {
+	for (qtaid = 0; qtaid < ple_qta_num; qtaid++) {
 		quota.qtaid = qtaid;
 		ret = dle_dfi_quota(adapter, &quota);
 		if (ret != MACSUCCESS) {
@@ -2270,28 +2474,8 @@ u32 dle_dbg_dump(struct mac_ax_adapter *adapter)
 		}
 	}
 
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A)) {
-		qnum = WDE_QEMPTY_NUM_8852A;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852B)) {
-		qnum = WDE_QEMPTY_NUM_8852B;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C)) {
-		qnum = WDE_QEMPTY_NUM_8852C;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB)) {
-		qnum = WDE_QEMPTY_NUM_8192XB;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851B)) {
-		qnum = WDE_QEMPTY_NUM_8851B;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851E)) {
-		qnum = WDE_QEMPTY_NUM_8851E;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-		qnum = WDE_QEMPTY_NUM_8852D;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		qnum = WDE_QEMPTY_NUM_8852BT;
-	} else {
-		PLTFM_MSG_ERR("[ERR] wde qempty num not define\n");
-		return MACCHIPID;
-	}
 	qempty.dle_type = DLE_CTRL_TYPE_WDE;
-	for (grpsel = 0; grpsel < qnum; grpsel++) {
+	for (grpsel = 0; grpsel < wde_qempty_num; grpsel++) {
 		qempty.grpsel = grpsel;
 		ret = dle_dfi_qempty(adapter, &qempty);
 		if (ret != MACSUCCESS) {
@@ -2303,7 +2487,7 @@ u32 dle_dbg_dump(struct mac_ax_adapter *adapter)
 	}
 
 	qempty.dle_type = DLE_CTRL_TYPE_PLE;
-	for (grpsel = 0; grpsel < PLE_QEMPTY_NUM; grpsel++) {
+	for (grpsel = 0; grpsel < ple_qempty_num; grpsel++) {
 		qempty.grpsel = grpsel;
 		ret = dle_dfi_qempty(adapter, &qempty);
 		if (ret != MACSUCCESS) {
@@ -2507,10 +2691,9 @@ static u32 mac_hci_flow_ctrl_dump(struct mac_ax_adapter *adapter)
 				 MAC_REG_R32(R_AX_HDP_DBG_INFO_4));
 	}
 #endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		PLTFM_MSG_ALWAYS("R_AX_HDP_DBG_INFO_4=0x%x\n",
 				 MAC_REG_R32(R_AX_HDP_DBG_INFO_4_V1));
@@ -2562,10 +2745,9 @@ static u32 mac_quota_dump(struct mac_ax_adapter *adapter)
 				 MAC_REG_R32(R_AX_CH12_PAGE_INFO));
 	}
 #endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		PLTFM_MSG_ALWAYS("R_AX_ACH0_PAGE_INFO_V1=0x%x\n",
 				 MAC_REG_R32(R_AX_ACH0_PAGE_INFO_V1));
@@ -2620,14 +2802,13 @@ static u32 mac_tx_status_dump(struct mac_ax_adapter *adapter)
 			 MAC_REG_R32(R_AX_DMAC_MACID_DROP_3));
 
 #if (MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8852C_SUPPORT || \
-MAC_AX_8192XB_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8851E_SUPPORT || \
+MAC_AX_8192XB_SUPPORT || MAC_AX_8851B_SUPPORT || \
 MAC_AX_8852D_SUPPORT || MAC_AX_8852BT_SUPPORT)
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
     	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		cmac0_en = check_mac_en(adapter, 0, MAC_AX_CMAC_SEL);
@@ -2709,10 +2890,9 @@ MAC_AX_8852D_SUPPORT || MAC_AX_8852BT_SUPPORT)
 		/* Scheduler Tx_en */
 		PLTFM_MSG_ALWAYS("R_AX_CTN_TXEN=0x%x\n",
 				 MAC_REG_R32(R_AX_CTN_TXEN));
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 			PLTFM_MSG_ALWAYS("R_AX_CTN_DRV_TXEN=0x%x\n",
 					 MAC_REG_R32(R_AX_CTN_DRV_TXEN));
@@ -2727,10 +2907,9 @@ MAC_AX_8852D_SUPPORT || MAC_AX_8852BT_SUPPORT)
 		/* Scheduler Tx_en */
 		PLTFM_MSG_ALWAYS("R_AX_CTN_TXEN_C1=0x%x\n",
 				 MAC_REG_R32(R_AX_CTN_TXEN_C1));
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 			PLTFM_MSG_ALWAYS("R_AX_CTN_DRV_TXEN_C1=0x%x\n",
 					 MAC_REG_R32(R_AX_CTN_DRV_TXEN_C1));
@@ -2787,12 +2966,11 @@ static u32 ptcl_status_dump(struct mac_ax_adapter *adapter, u8 band)
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
 #if (MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8852C_SUPPORT || \
-MAC_AX_8192XB_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8851E_SUPPORT || \
-MAC_AX_8852D_SUPPORT || MAC_AX_8852BT_SUPPORT)
+MAC_AX_8192XB_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852D_SUPPORT || \
+MAC_AX_8852BT_SUPPORT)
 		reg = band == MAC_AX_BAND_1 ?
 		      R_AX_PTCL_TX_CTN_SEL_C1 : R_AX_PTCL_TX_CTN_SEL;
 		val32 = MAC_REG_R32(reg);
@@ -2815,9 +2993,8 @@ MAC_AX_8852D_SUPPORT || MAC_AX_8852BT_SUPPORT)
 #endif
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		   is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		   is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		   is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		reg = band == MAC_AX_BAND_1 ?
 		      R_AX_PTCL_TX_MACID_0_V1_C1 : R_AX_PTCL_TX_MACID_0_V1;
 		val32 = MAC_REG_R32(reg);
@@ -2908,10 +3085,9 @@ u32 mac_tx_flow_dbg(struct mac_ax_adapter *adapter)
 					 MAC_REG_R32(R_AX_DEBUG_ZLD_COUNTER_U2_U3));
 		}
 #endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 			for (i = 0; i <= 3; i++) {
 				val32 = MAC_REG_R32(R_AX_MACTX_DBG_SEL_CNT);
@@ -3056,9 +3232,16 @@ u32 mac_sram_dbg_write(struct mac_ax_adapter *adapter, u32 offset,
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 	u32 reg_base;
 
-	if (adapter->hw_info->is_sec_ic) {
+	if (adapter->fw_info.is_sec_ic) {
 		PLTFM_MSG_ERR("[ERR]security mode ind accees\n");
 		return MACIOERRINSEC;
+	}
+
+	if (sel == AXIDMA_SEL) {
+		if(!(MAC_REG_R32(R_AX_PLATFORM_ENABLE) & B_AX_AXIDMA_EN)) {
+			PLTFM_MSG_ERR("[ERR]ind accees fail AXIDMA is disable\n");
+			return MACIOERRPWR;
+		}
 	}
 
 	switch (sel) {
@@ -3110,32 +3293,51 @@ u32 mac_sram_dbg_write(struct mac_ax_adapter *adapter, u32 offset,
 	case BCN_IE_CAM1_SEL:
 		reg_base = BCN_IE_CAM1_BASE_ADDR + offset;
 		break;
+	case TXD_FIFO_0_SEL:
+		reg_base = TXD_FIFO_0_BASE_ADDR + offset;
+		break;
+	case TXD_FIFO_1_SEL:
+		reg_base = TXD_FIFO_1_BASE_ADDR + offset;
+		break;
+	case DMA_TXFIFO_0_SEL:
+		reg_base = DMA_TXFIFO_0_BASE_ADDR + offset;
+		break;
+	case DMA_TXFIFO_1_SEL:
+		reg_base = DMA_TXFIFO_1_BASE_ADDR + offset;
+		break;
 	default:
 		PLTFM_MSG_ERR("[ERR] sel %d", sel);
 		return MACNOITEM;
 	}
 
 	//PLTFM_MSG_TRACE("%s ind access sel %d start\n", __func__, sel);
-	PLTFM_MUTEX_LOCK(&adapter->hw_info->ind_access_lock);
-	adapter->hw_info->ind_aces_cnt++;
+	PLTFM_MUTEX_LOCK(&adapter->lock_info.ind_access_lock);
+	adapter->dbg_info.ind_aces_cnt++;
 	MAC_REG_W32(R_AX_FILTER_MODEL_ADDR, reg_base);
 	MAC_REG_W32(R_AX_INDIR_ACCESS_ENTRY, val);
-	adapter->hw_info->ind_aces_cnt--;
-	PLTFM_MUTEX_UNLOCK(&adapter->hw_info->ind_access_lock);
+	adapter->dbg_info.ind_aces_cnt--;
+	PLTFM_MUTEX_UNLOCK(&adapter->lock_info.ind_access_lock);
 	//PLTFM_MSG_TRACE("%s ind access sel %d end\n", __func__, sel);
 
 	return MACSUCCESS;
 }
 
-u32 mac_sram_dbg_read(struct mac_ax_adapter *adapter, u32 offset,
+u32 mac_sram_dbg_read(struct mac_ax_adapter *adapter, u32 offset, u32 *val,
 		      enum mac_ax_sram_dbg_sel sel)
 {
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-	u32 reg_base, ret;
+	u32 reg_base = 0, ret = MACSUCCESS;
 
-	if (adapter->hw_info->is_sec_ic) {
+	if (adapter->fw_info.is_sec_ic) {
 		PLTFM_MSG_ERR("[ERR]security mode ind accees\n");
 		return MACIOERRINSEC;
+	}
+
+	if (sel == AXIDMA_SEL) {
+		if(!(MAC_REG_R32(R_AX_PLATFORM_ENABLE) & B_AX_AXIDMA_EN)) {
+			PLTFM_MSG_ERR("[ERR]ind accees fail AXIDMA is disable\n");
+			return MACIOERRPWR;
+		}
 	}
 
 	switch (sel) {
@@ -3187,8 +3389,17 @@ u32 mac_sram_dbg_read(struct mac_ax_adapter *adapter, u32 offset,
 	case BCN_IE_CAM1_SEL:
 		reg_base = BCN_IE_CAM1_BASE_ADDR + offset;
 		break;
-	case WD_PAGE_SEL:
-		reg_base = WD_PAGE_BASE_ADDR + offset;
+	case TXD_FIFO_0_SEL:
+		reg_base = TXD_FIFO_0_BASE_ADDR + offset;
+		break;
+	case TXD_FIFO_1_SEL:
+		reg_base = TXD_FIFO_1_BASE_ADDR + offset;
+		break;
+	case DMA_TXFIFO_0_SEL:
+		reg_base = DMA_TXFIFO_0_BASE_ADDR + offset;
+		break;
+	case DMA_TXFIFO_1_SEL:
+		reg_base = DMA_TXFIFO_1_BASE_ADDR + offset;
 		break;
 	default:
 		PLTFM_MSG_ERR("[ERR] sel %d", sel);
@@ -3196,12 +3407,12 @@ u32 mac_sram_dbg_read(struct mac_ax_adapter *adapter, u32 offset,
 	}
 
 	//PLTFM_MSG_TRACE("%s ind access sel %d start\n", __func__, sel);
-	PLTFM_MUTEX_LOCK(&adapter->hw_info->ind_access_lock);
-	adapter->hw_info->ind_aces_cnt++;
+	PLTFM_MUTEX_LOCK(&adapter->lock_info.ind_access_lock);
+	adapter->dbg_info.ind_aces_cnt++;
 	MAC_REG_W32(R_AX_FILTER_MODEL_ADDR, reg_base);
-	ret = MAC_REG_R32(R_AX_INDIR_ACCESS_ENTRY);
-	adapter->hw_info->ind_aces_cnt--;
-	PLTFM_MUTEX_UNLOCK(&adapter->hw_info->ind_access_lock);
+	*val = MAC_REG_R32(R_AX_INDIR_ACCESS_ENTRY);
+	adapter->dbg_info.ind_aces_cnt--;
+	PLTFM_MUTEX_UNLOCK(&adapter->lock_info.ind_access_lock);
 	//PLTFM_MSG_TRACE("%s ind access sel %d end\n", __func__, sel);
 
 	return ret;
@@ -3305,8 +3516,6 @@ u32 mac_dump_fw_rsvd_ple(struct mac_ax_adapter *adapter, u8 **buf)
 		addr = RSVD_PLE_OFST_8192XB;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851B)) {
 		addr = RSVD_PLE_OFST_8851B;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851E)) {
-		addr = RSVD_PLE_OFST_8851E;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		addr = RSVD_PLE_OFST_8852D;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
@@ -3353,8 +3562,6 @@ void mac_dump_ple_dbg_page(struct mac_ax_adapter *adapter, u8 page_num)
 		addr = RSVD_PLE_OFST_8192XB;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851B)) {
 		addr = RSVD_PLE_OFST_8851B;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851E)) {
-		addr = RSVD_PLE_OFST_8851E;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		addr = RSVD_PLE_OFST_8852D;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
@@ -3427,15 +3634,16 @@ u32 mac_event_notify(struct mac_ax_adapter *adapter, enum phl_msg_evt_id id,
 			PLTFM_MSG_ERR("fw st dump %d\n", ret);
 		break;
 	case MSG_EVT_DBG_L2_DIAGNOSE:
+#if MAC_FEAT_LPS
 		ret = mac_ps_pwr_state(adapter, MAC_AX_PWR_STATE_ACT_REQ,
 				       MAC_AX_RPWM_REQ_PWR_STATE_ACTIVE);
 		if (ret != MACSUCCESS)
 			PLTFM_MSG_ERR("PWR_STATE_ACT_REQ fail\n");
-
+#endif
 		PLTFM_MEMSET(&dbg_en, 0, sizeof(struct mac_ax_dbgpkg_en));
 
 		if (ret == MACSUCCESS) {
-			if (adapter->hw_info->intf == MAC_AX_INTF_PCIE) {
+			if (adapter->env_info.intf == MAC_AX_INTF_PCIE) {
 				io_ret = ops->get_io_stat(adapter,
 							  &pcie_io_stat);
 				if (io_ret == MACSUCCESS &&
@@ -3524,8 +3732,8 @@ u32 mac_get_fw_status(struct mac_ax_adapter *adapter)
 {
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 	u8 val8 = FWDL_INITIAL_STATE;
-	u32 i = 0, fw_pc = 0;
-	u32 val32, dbg_ctrl_bk, sys_status_bk;
+	u32 val32;
+    u32 ret = MACSUCCESS;
 
 	val8 = GET_FIELD(MAC_REG_R8(R_AX_WCPU_FW_CTRL), B_AX_WCPU_FWDL_STS);
 	if (val8 == FWDL_WCPU_FW_INIT_RDY) {
@@ -3543,31 +3751,10 @@ u32 mac_get_fw_status(struct mac_ax_adapter *adapter)
 		}
 
 		/* Dump FW program counter */
-		dbg_ctrl_bk = MAC_REG_R32(R_AX_DBG_CTRL);
-		sys_status_bk = MAC_REG_R32(R_AX_SYS_STATUS1);
-		MAC_REG_W32(R_AX_DBG_CTRL, DBG_SEL_FW_PROG_CNTR);
-
-		val32 = MAC_REG_R32(R_AX_SYS_STATUS1);
-		val32 = SET_CLR_WORD(val32, MAC_DBG_SEL, B_AX_SEL_0XC0);
-		MAC_REG_W32(R_AX_SYS_STATUS1, val32);
-		val8 = 0;
-		fw_pc = MAC_REG_R32(R_BE_DBG_PORT_SEL);
-		for (i = 0; i < FW_PROG_CNTR_DMP_CNT; i++) {
-			val32 = MAC_REG_R32(R_AX_DBG_PORT_SEL);
-			if (fw_pc == val32)
-				val8++;
-			else
-				break;
-			fw_pc = val32;
-			PLTFM_DELAY_US(FW_PROG_CNTR_DMP_DLY_US);
-		}
-		if (val8 == FW_PROG_CNTR_DMP_CNT) {
-			PLTFM_MSG_ALWAYS("FW PC = 0x%x\n", val32);
-			return MACFWPCHANG;
-		}
-
-		MAC_REG_W32(R_AX_DBG_CTRL, dbg_ctrl_bk);
-		MAC_REG_W32(R_AX_SYS_STATUS1, sys_status_bk);
+		ret = fw_pc_dbg_dump_ax(adapter, FW_PC_DBG_DUMP_CNT, FW_PC_DBG_DUMP_RATE_US,
+					FW_PC_DBG_DUMP_HANGDETECT_EN);
+		if (ret)
+			return ret;
 	} else {
 		return MACNOFW;
 	}
@@ -3588,8 +3775,6 @@ u32 mac_get_ple_dbg_addr(struct mac_ax_adapter *adapter)
 		addr += RSVD_PLE_OFST_8192XB;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851B)) {
 		addr += RSVD_PLE_OFST_8851B;
-	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8851E)) {
-		addr += RSVD_PLE_OFST_8851E;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		addr += RSVD_PLE_OFST_8852D;
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
@@ -3695,3 +3880,686 @@ u32 mac_wdt_log(struct mac_ax_adapter *adapter)
 	}
 	return ret;
 }
+
+u32 diagnosis_memoryleak(struct mac_ax_adapter *adapter, u32 *check_number)
+{
+	u32 cnt = 0;
+
+#ifdef DBG_HAL_MAC_MEM_MOINTOR
+	struct rtw_hal_com_t *hal_com = (struct rtw_hal_com_t *)adapter->drv_adapter;
+	u32 current_mem = _os_atomic_read(NULL, &hal_com->hal_mac_mem);
+
+	/* Check Memory Leak */
+	*check_number += 1;
+	if (adapter->drv_info->init_mac_mem_baseline == current_mem) {
+		PLTFM_MSG_ALWAYS("No Memory Leak\n");
+	} else {
+		PLTFM_MSG_ERR("Memory usage baseline after mac_hal_init: %d\n",
+			      adapter->drv_info->init_mac_mem_baseline);
+		PLTFM_MSG_ERR("Current memory usage: %d\n", current_mem);
+		cnt += 1;
+	}
+#endif
+
+	return cnt;
+}
+
+u32 diagnosis_h2cbuffer(struct mac_ax_adapter *adapter, u32 *check_number)
+{
+	u32 cnt = 0;
+#if MAC_AX_PHL_H2C
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+	struct phl_h2c_pkt_alloc_cnt *h2cb_status;
+	int alloc_num;
+
+	*check_number += 1;
+	h2cb_status = PLTFM_H2C_ALLOC_STATS();
+	alloc_num = _os_atomic_read(NULL, &h2cb_status->busy_h2c_pkt_cmd_cnt);
+	alloc_num += _os_atomic_read(NULL, &h2cb_status->busy_h2c_pkt_data_cnt);
+	alloc_num += _os_atomic_read(NULL, &h2cb_status->busy_h2c_pkt_ldata_cnt);
+#if MAC_AX_PCIE_SUPPORT
+	if (alloc_num > 1) {
+#else
+	if (alloc_num) {
+#endif
+		cnt++;
+		PLTFM_MSG_ERR("H2C buffer num %d => cmd: %d ,data: %d ,ldata %d\n",
+                              alloc_num, _os_atomic_read(NULL, &h2cb_status->busy_h2c_pkt_cmd_cnt),
+                              _os_atomic_read(NULL, &h2cb_status->busy_h2c_pkt_data_cnt),
+                              _os_atomic_read(NULL, &h2cb_status->busy_h2c_pkt_ldata_cnt));
+		PLTFM_MSG_ERR("=> MAC: %d ,BB: %d ,RF %d,BTC %d\n",
+                              _os_atomic_read(NULL, &h2cb_status->h2c_mac_cnt),
+                              _os_atomic_read(NULL, &h2cb_status->h2c_bb_cnt),
+                              _os_atomic_read(NULL, &h2cb_status->h2c_rf_cnt),
+                              _os_atomic_read(NULL, &h2cb_status->h2c_btc_cnt));
+	}
+#endif
+#else
+	struct h2c_allloc_status h2cb_status = {0};
+	int total;
+
+	*check_number += 1;
+	get_h2cb_status(&h2cb_status);
+	total = h2cb_status.cmd + h2cb_status.data + h2cb_status.ldata;
+	if (!total) {
+		cnt++;
+		PLTFM_MSG_ERR("mac alloc: %d\n", h2cb_status.mac);
+		PLTFM_MSG_ERR("cmd: %d,  data: %d, ldata: %d\n",
+			      h2cb_status.cmd, h2cb_status.data, h2cb_status.ldata);
+	}
+#endif
+	return cnt;
+}
+
+u32 mac_sys_st_check(struct mac_ax_adapter *adapter, u32 diag_level, u32 *total_check_number)
+{
+	u32 cnt = 0;
+#if MAC_SELF_DIAG_INFO
+	u32 check_number = 0;
+	*total_check_number = 0;
+
+	check_number = 0;
+#ifdef DBG_HAL_MAC_MEM_MOINTOR
+	cnt += diagnosis_memoryleak(adapter, &check_number);
+	*total_check_number += check_number;
+#endif
+
+	check_number = 0;
+	cnt += diagnosis_h2cbuffer(adapter, &check_number);
+	*total_check_number += check_number;
+
+#endif
+	return cnt;
+}
+
+u32 mac_trx_st_check(struct mac_ax_adapter *adapter, u32 diag_level, u32 *total_check_number,
+		     char *output, u32 out_len, u32 *used)
+{
+	u32 cnt = 0;
+#if MAC_SELF_DIAG_INFO
+	u32 check_number = 0;
+	*total_check_number = 0;
+
+	cnt += diagnosis_TX_Hang(adapter, &check_number, output, out_len, used);
+	*total_check_number += check_number;
+
+	cnt += diagnosis_RX_Hang(adapter, &check_number, output, out_len, used);
+	*total_check_number += check_number;
+
+	/* Check PCIE Setting */
+#if MAC_AX_PCIE_SUPPORT
+	cnt += diagnosis_PCIE_cfg_spc(adapter, &check_number, output, out_len, used);
+	*total_check_number += check_number;
+	cnt += diagnosis_PCIE_local(adapter, &check_number, output, out_len, used);
+	*total_check_number += check_number;
+#endif
+	/* Check SDIO Setting */
+#if MAC_AX_SDIO_SUPPORT
+	cnt += diagnosis_SDIO_cccr(adapter, &check_number, output, out_len, used);
+	*total_check_number += check_number;
+	cnt += diagnosis_SDIO_local(adapter, &check_number, output, out_len, used);
+	*total_check_number += check_number;
+#endif
+	/* Check Beacon Setting */
+	cnt += diagnosis_Beacon_TX(adapter, &check_number, output, out_len, used);
+	*total_check_number += check_number;
+#endif
+	return cnt;
+}
+
+u32 diagnosis_FW_system(struct mac_ax_adapter *adapter, u32 *check_number)
+{
+#if MAC_SELF_DIAG_INFO
+	struct mac_ax_ops *mac_ops = adapter_to_mac_ops(adapter);
+	struct mac_ax_fwdbg_en dbgpkg_cfg;
+	u32 ring_buffer[4] = { 20, 20, 20, 20 };
+	u32 ret;
+	u32 fwdx_input[2] = { 1, 0 }; // 1 = start record heap info
+	u32 result[2] = { 0 };
+	u32 result_len = 0;
+	u32 fail_number = 0;
+	s32 leak;
+
+	PLTFM_MEMSET(&dbgpkg_cfg, 0, sizeof(struct mac_ax_fwdbg_en));
+	dbgpkg_cfg.status_dbg = 1;
+	dbgpkg_cfg.ps_dbg = 1;
+
+	/* Check PC Hang or Not */
+	(*check_number)++;
+	ret = mac_get_fw_status(adapter);
+	if (ret) {
+		PLTFM_MSG_ERR("FW Status != 0, (%d)!!!\n", ret);
+		mac_fw_dbg_dump(adapter, NULL, &dbgpkg_cfg);
+		fail_number++;
+		return fail_number;
+	}
+
+	(*check_number)++;
+	ret = mac_h2c_path_check(adapter);
+	if (ret) {
+		PLTFM_MSG_ERR("H2C Path Check Fail!!!\n");
+		mac_fw_dbg_dump(adapter, NULL, &dbgpkg_cfg);
+		fail_number++;
+		return fail_number;
+	}
+
+	ret = mac_ops->fwdx_init(adapter, ring_buffer, 4);
+	if (ret) {
+		PLTFM_MSG_ERR("FWDX Initinal Fail, skip FW Self Diagnosis\n");
+		return 0;
+	}
+
+	(*check_number)++;
+	ret = mac_ops->fwdx_detect_error(adapter, FWDX_ITEM_ID_HEAP_REMAIN, sizeof(fwdx_input),
+					 fwdx_input, 0, NULL);
+	if (ret)
+		return ++fail_number;
+	//Do Something
+	PLTFM_DELAY_MS(1000);
+
+	fwdx_input[0] = 0;
+	fwdx_input[1] = 10;
+	ret = mac_ops->fwdx_detect_error(adapter, FWDX_ITEM_ID_HEAP_REMAIN, sizeof(fwdx_input),
+					 fwdx_input, &result_len, result);
+	if (ret)
+		return ++fail_number;
+	leak = (s32)result[1];
+	if (result[0] == MACMEMLEAK) {
+		PLTFM_MSG_ERR("FW Memory Leak Detect!! Leak %d bytes of Heap\n", leak);
+		fail_number++;
+	} else {
+		PLTFM_MSG_ALWAYS("FW Memory No Leak\n");
+	}
+
+	mac_ops->fwdx_deinit(adapter);
+
+	return fail_number;
+#else
+	return 0;
+#endif //MAC_SELF_DIAG_INFO
+}
+
+#if MAC_SELF_DIAG_INFO
+u32 diagnosis_FW_nic_feat(struct mac_ax_adapter *adapter, u32 *total_check_number,
+			  char *output, u32 out_len, u32 *used)
+{
+	struct mac_ax_ops *mac_ops = adapter_to_mac_ops(adapter);
+	u32 err_number = 0;
+	u32 ret = MACSUCCESS;
+
+	ret = mac_ops->req_sta_diagnosis(adapter, total_check_number, &err_number,
+					 output, out_len, used);
+	if (ret)
+		PLTFM_MSG_ALWAYS("NIC FW Status Check Fail. ret(%d)\n", ret);
+
+	return err_number;
+}
+#endif
+
+u32 mac_fw_st_check(struct mac_ax_adapter *adapter, u32 diag_level, u32 *total_check_number,
+		    char *output, u32 out_len, u32 *used)
+{
+	u32 cnt = 0;
+#if MAC_SELF_DIAG_INFO
+	u32 num_tmp;
+	u32 cnt_tmp;
+
+	*total_check_number = 0;
+
+	cnt_tmp = cnt;
+	num_tmp = *total_check_number;
+	cnt += diagnosis_FW_system(adapter, total_check_number);
+	if (cnt - cnt_tmp > 0)
+		MAC_DBG_MSG(out_len, *used, output + *used, out_len - *used,
+			    "FW system diagnosis fail. fail_cnt(%d). check_num(%d)\n",
+			    cnt - cnt_tmp, *total_check_number - num_tmp);
+
+#ifdef PHL_FEATURE_NIC
+	cnt_tmp = cnt;
+	num_tmp = *total_check_number;
+	cnt += diagnosis_FW_nic_feat(adapter, total_check_number, output, out_len, used);
+	if (cnt - cnt_tmp > 0)
+		MAC_DBG_MSG(out_len, *used, output + *used, out_len - *used,
+			    "FW NIC diagnosis fail. fail_cnt(%d). check_num(%d)\n",
+			    cnt - cnt_tmp, *total_check_number - num_tmp);
+#endif
+
+#ifdef PHL_FEATURE_AP
+	/* num_tmp = *total_check_number;
+	 * ret = diagnosis_FW_ap_feat(adapter, total_check_number, &total_fail_number);
+	 * if (ret != MACSUCCESS) {
+	 *	PLTFM_MSG_ERR("diagnosis FW ap feat fail\n");
+	 *	MAC_DBG_MSG(out_len, *used, output + *used, out_len - *used,
+	 *		    "FW AP diagnosis fail. fail_cnt(%d). check_num(%d)\n",
+	 *		    total_fail_number, *total_check_number - num_tmp);
+	 * }
+	 *
+	 * cnt += total_fail_number;
+	 */
+#endif
+
+#endif
+	return cnt;
+}
+
+u32 mac_err_flag_check(struct mac_ax_adapter *adapter,
+		       char *output, u32 out_len, u32 *used,
+		       u32 diag_level, u32 *total_check_number)
+{
+	u32 cnt = 0;
+#if MAC_SELF_DIAG_INFO && MAC_AX_FEATURE_ERR_FLAG
+	u32 ret = MACSUCCESS;
+	struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
+	struct mac_ax_err_flag_sts status = {0x0};
+
+	*total_check_number = 0;
+	status.dbg_lvl = MAC_AX_ERR_FLAG_DBG_LVL_FULL;
+	// error flag checker
+	ret = p_ops->err_flag_chk(adapter,
+				  output, out_len, used,
+				  &status);
+	if (ret)
+		PLTFM_MSG_ERR("[ERR] Check Error flag err\n");
+
+	*total_check_number += status.total_cnt;
+	cnt += status.fail_cnt;
+
+#endif
+	return cnt;
+}
+
+u32 mac_ser_st_check(struct mac_ax_adapter *adapter, u32 diag_level, u32 *total_check_number)
+{
+	u32 cnt = 0;
+#if MAC_SELF_DIAG_INFO
+	struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
+
+	*total_check_number = 0;
+	cnt += p_ops->get_ser_freq(adapter, total_check_number);
+#endif
+	return cnt;
+}
+
+u32 mac_ser_l2_st_check(struct mac_ax_adapter *adapter, u32 diag_level, u32 *total_check_number)
+{
+	u32 cnt = 0;
+#if MAC_SELF_DIAG_INFO
+	*total_check_number = 0;
+	/*
+	 * u32 check_number = 0;
+
+	 * cnt += diagnosis_ser_l2_fw(adapter, &check_number);
+	 * *total_check_number += check_number;
+
+	 * cnt += diagnosis_ser_l2_hci(adapter, &check_number);
+	 * *total_check_number += check_number;
+
+	 * cnt += diagnosis_ser_l2_top(adapter, &check_number);
+	 * *total_check_number += check_number;
+	 */
+
+#endif
+	return cnt;
+}
+
+u32 mac_pcie_status_dump(struct mac_ax_adapter *adapter)
+{
+	u32 ret = MACSUCCESS;
+#if MAC_AX_PCIE_SUPPORT
+	struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
+	u32 cfg_reg = 0;
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_CMD_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_CMD_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] Bus Master: %d\n",
+			 GET_FIEL2(cfg_reg, PCIE_BUS_MASTER_SH, PCIE_BUS_MASTER_BITS_MSK));
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_BAR_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_BAR_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] BAR: 0x%x\n", cfg_reg);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_D_STATE_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_D_STATE_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] D-state: %d\n",
+			 GET_FIEL2(cfg_reg, PCIE_D_STATE_SH, PCIE_D_STATE_BITS_MSK));
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_LINK_CTRL_STS_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_LINK_CTRL_STS_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] ASPM Control: %d\n",
+			 cfg_reg & (PCIE_BIT_STS_L0S | PCIE_BIT_STS_L1));
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_L1SS_STS, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_L1SS_STS);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] L1ss Enable: 0x%1x\n", cfg_reg & PCIE_L1SS_MASK);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_UNCORR_ERR_STS_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_UNCORR_ERR_STS_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] AER UNCORR_ERR_STS: 0x%x\n", cfg_reg);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_UNCORR_ERR_MASK_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_UNCORR_ERR_MASK_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] AER UNCORR_ERR_MASK: 0x%x\n", cfg_reg);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_UNCORR_ERR_SEV_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_UNCORR_ERR_SEV_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] AER UNCORR_ERR_SEVERITY: 0x%x\n", cfg_reg);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_CORR_ERR_STS_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_CORR_ERR_STS_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] AER CORR_ERR_STS: 0x%x\n", cfg_reg);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_CORR_ERR_MASK_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_CORR_ERR_MASK_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] AER CORR_ERR_MASK: 0x%x\n", cfg_reg);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_ADV_ERR_CAP_CTRL_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_ADV_ERR_CAP_CTRL_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] AER ADVANCED_ERR_CAP_CTR: 0x%x\n", cfg_reg);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_HDR_LOG_1_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_HDR_LOG_1_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] AER HEADER_LOG_1: 0x%x\n", cfg_reg);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_HDR_LOG_2_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_HDR_LOG_2_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] AER HEADER_LOG_2: 0x%x\n", cfg_reg);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_HDR_LOG_3_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_HDR_LOG_3_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] AER HEADER_LOG_3: 0x%x\n", cfg_reg);
+
+	ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_HDR_LOG_4_OFFSET, &cfg_reg);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("PCIE cfg r32 fail address: 0x%x\n", PCIE_HDR_LOG_4_OFFSET);
+		return ret;
+	}
+	PLTFM_MSG_ALWAYS("[PCIE] AER HEADER_LOG_4: 0x%x\n", cfg_reg);
+#endif
+
+	return ret;
+}
+
+#if MAC_AX_PLDR_DIAGNOSE_EN
+u32 mac_dbgcmd_init(struct mac_ax_adapter *adapter)
+{
+	adapter->fw_dbgcmd.buf = (char *)PLTFM_MALLOC(PHL_DBG_LIMIT_SIZE);
+	if (!adapter->fw_dbgcmd.buf) {
+		PLTFM_MSG_ERR("[ERR] %s: alloc buff fail\n", __func__);
+		adapter->fw_dbgcmd.buf = NULL;
+		return MACBUFALLOC;
+	}
+	adapter->fw_dbgcmd.buf[0] = (char)0;
+	adapter->fw_dbgcmd.out_len = PHL_DBG_LIMIT_SIZE;
+	adapter->fw_dbgcmd.used = 0;
+	if (!adapter->fw_dbgcmd.dbg_bg_log_en)
+		PLTFM_MSG_WARN("[WARN] LOG/WARN disabled due to mac cmd\n");
+	adapter->fw_dbgcmd.dbg_console_log_on = 1;
+	adapter->fw_dbgcmd.dbg_bg_log_on = 0;
+	return MACSUCCESS;
+}
+
+u32 mac_dbgcmd_flush(struct mac_ax_adapter *adapter)
+{
+	u32 output_size;
+
+	if (adapter->fw_dbgcmd.used > 0) {
+		if (adapter->fw_dbgcmd.used > PHL_DBG_LIMIT_SIZE)
+			output_size = PHL_DBG_LIMIT_SIZE;
+		else
+			output_size = adapter->fw_dbgcmd.used;
+		PLTFM_DIAG_EVENT(adapter->drv_adapter, MAC_AX_DIAG_EVT_SER,
+				 MAC_AX_DIAG_EVT_LVL_FATAL, MAC_AX_DIAG_SER_L2_VER,
+				 (u8 *)adapter->fw_dbgcmd.buf, output_size);
+	}
+	return MACSUCCESS;
+}
+
+u32 mac_dbgcmd_deinit(struct mac_ax_adapter *adapter)
+{
+	adapter->fw_dbgcmd.dbg_console_log_on = 0;
+	adapter->fw_dbgcmd.dbg_bg_log_on = 1;
+	PLTFM_FREE(adapter->fw_dbgcmd.buf, PHL_DBG_LIMIT_SIZE);
+	adapter->fw_dbgcmd.buf = NULL;
+	adapter->fw_dbgcmd.out_len = 0;
+	adapter->fw_dbgcmd.used = 0;
+	return MACSUCCESS;
+}
+
+u32 mac_pldr_diagnose_dump(struct mac_ax_adapter *adapter)
+{
+	/* dump with PLTFM_MSG_BUFFER */
+	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
+	u32 i, val32;
+#if MAC_AX_PCIE_SUPPORT
+	struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
+	u32 cfg_ret = MACSUCCESS;
+#endif
+
+	/*SER L1 promote to L2 Info*/
+	PLTFM_MSG_BUFFER("SER_DBG_INFO=0x%08x\n", MAC_REG_R32(R_AX_SER_DBG_INFO));
+	PLTFM_MSG_BUFFER("CMAC_ERR_ISR=0x%08x ", MAC_REG_R32(R_AX_CMAC_ERR_ISR));
+	PLTFM_MSG_BUFFER("DMAC_ERR_ISR=0x%08x\n", MAC_REG_R32(R_AX_DMAC_ERR_ISR));
+	PLTFM_MSG_BUFFER("HALT_C2H=0x%x", MAC_REG_R32(R_AX_HALT_C2H));
+	PLTFM_MSG_BUFFER("FW_MISC=0x%x\n", MAC_REG_R32(R_AX_UDM3));
+	PLTFM_MSG_BUFFER("BADDR=%x\n", MAC_REG_R32(R_AX_UDM1));
+	PLTFM_MSG_BUFFER("EPC=%x\n", MAC_REG_R32(R_AX_UDM2));
+	PLTFM_MSG_BUFFER("SYS_CFG1=0x%x\n", MAC_REG_R8(R_AX_SYS_CFG1));
+	/* Dump FW program counter */
+	MAC_REG_W32(R_AX_DBG_CTRL, DBG_SEL_FW_PROG_CNTR);
+
+	val32 = MAC_REG_R32(R_AX_SYS_STATUS1);
+	val32 = SET_CLR_WORD(val32, MAC_DBG_SEL, B_AX_SEL_0XC0);
+	MAC_REG_W32(R_AX_SYS_STATUS1, val32);
+
+	for (i = 0; i < 6; i++) {
+		PLTFM_MSG_BUFFER("PC=%x\n",
+			       MAC_REG_R32(R_AX_DBG_PORT_SEL));
+		PLTFM_DELAY_US(FW_PROG_CNTR_DMP_DLY_US);
+	}
+
+#if MAC_AX_PCIE_SUPPORT
+	cfg_ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_CMD_OFFSET, &val32);
+	if (cfg_ret != MACSUCCESS)
+		PLTFM_MSG_BUFFER("cfg Bus Master fail\n");
+	PLTFM_MSG_BUFFER("Bus Master:%d\n",
+			 GET_FIEL2(val32, PCIE_BUS_MASTER_SH, PCIE_BUS_MASTER_BITS_MSK));
+
+	cfg_ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_BAR_OFFSET, &val32);
+	if (cfg_ret != MACSUCCESS)
+		PLTFM_MSG_BUFFER("cfg BAR fail\n");
+	PLTFM_MSG_BUFFER("BAR:0x%x\n", val32);
+
+	cfg_ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_D_STATE_OFFSET, &val32);
+	if (cfg_ret != MACSUCCESS)
+		PLTFM_MSG_BUFFER("cfg D state fail\n");
+	PLTFM_MSG_BUFFER("D-state:%d\n",
+			 GET_FIEL2(val32, PCIE_D_STATE_SH, PCIE_D_STATE_BITS_MSK));
+
+	cfg_ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_L1_STS, &val32);
+	if (cfg_ret != MACSUCCESS)
+		PLTFM_MSG_BUFFER("cfg ASPM fail\n");
+	PLTFM_MSG_BUFFER("ASPM:0x%x\n", val32);
+
+	cfg_ret = p_ops->read_pcie_cfg_spc(adapter, PCIE_L1SS_STS, &val32);
+	if (cfg_ret != MACSUCCESS)
+		PLTFM_MSG_BUFFER("cfg L1ss fail\n");
+	PLTFM_MSG_BUFFER("L1ss:0x%1x\n", val32 & PCIE_L1SS_MASK);
+#endif
+	return MACSUCCESS;
+}
+#endif /* CONFIG_PHL_DIAGNOSE */
+
+u32 mac_h2c_path_check(struct mac_ax_adapter *adapter)
+{
+	u32 ret;
+	u32 poll_cnt;
+	u32 timeout;
+	if (adapter->env_info.intf == MAC_AX_INTF_USB)
+		timeout = H2C_USB_PATHCHECK_TIMEOUT_MS;
+	else if (adapter->env_info.intf == MAC_AX_INTF_SDIO)
+		timeout = H2C_SDIO_PATHCHECK_TIMEOUT_MS;
+	else
+		timeout = H2C_PATHCHECK_TIMEOUT_MS;
+
+	adapter->sm.h2c_lb_st = MAC_AX_H2C_LB_PROC;
+	ret = mac_fwcmd_lb(adapter, 0x20, 1);
+	if (ret) {
+		PLTFM_MSG_ERR("[ERR] %s: mac_fwcmd_lb fail = %d\n", __func__, ret);
+		return ret;
+	}
+
+	for (poll_cnt = timeout; poll_cnt > 0; poll_cnt--) {
+		if (adapter->sm.h2c_lb_st == MAC_AX_H2C_LB_IDLE)
+			break;
+		PLTFM_DELAY_MS(1);
+	}
+	if (!poll_cnt)
+		return MACPOLLTO;
+
+	return MACSUCCESS;
+}
+
+#if MAC_AX_SDIO_SUPPORT
+u32 mac_sdio_reg_dump(struct mac_ax_adapter *adapter)
+{
+	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
+	struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
+	u32 j, val32_1, val32_2, val32_3, val32_4;
+	u8 val8;
+	u32 ret;
+
+	PLTFM_MSG_ALWAYS("dispatcher Registers:\n");
+	j=0x8804;
+	val32_1 = MAC_REG_R32(j);
+	val32_2 = MAC_REG_R32(j + 4);
+	val32_3 = MAC_REG_R32(j + 8);
+	PLTFM_MSG_ALWAYS("%08x : %08x %08x %08x\n",
+			 j, val32_1, val32_2, val32_3);
+
+	j=0x8880;
+	val32_1 = MAC_REG_R32(j);
+	val32_2 = MAC_REG_R32(j + 4);
+	val32_3 = MAC_REG_R32(j + 8);
+	val32_4 = MAC_REG_R32(j + 0xc);
+	PLTFM_MSG_ALWAYS("%08x : %08x %08x %08x %08x\n",
+			 j, val32_1, val32_2, val32_3, val32_4);
+
+	j=0x8890;
+	val32_1 = MAC_REG_R32(j);
+	val32_2 = MAC_REG_R32(j + 4);
+	val32_3 = MAC_REG_R32(j + 8);
+	val32_4 = MAC_REG_R32(j + 0xc);
+	PLTFM_MSG_ALWAYS("%08x : %08x %08x %08x %08x\n",
+			 j, val32_1, val32_2, val32_3, val32_4);
+
+	j=0x88a0;
+	val32_1 = MAC_REG_R32(j);
+	val32_2 = MAC_REG_R32(j + 4);
+	val32_3 = MAC_REG_R32(j + 8);
+	val32_4 = MAC_REG_R32(j + 0xc);
+	PLTFM_MSG_ALWAYS("%08x : %08x %08x %08x %08x\n",
+			 j, val32_1, val32_2, val32_3, val32_4);
+
+	j=0x88b0;
+	val32_1 = MAC_REG_R32(j);
+	val32_2 = MAC_REG_R32(j + 4);
+	val32_3 = MAC_REG_R32(j + 8);
+	PLTFM_MSG_ALWAYS("%08x : %08x %08x %08x\n",
+			 j, val32_1, val32_2, val32_3);
+
+	PLTFM_MSG_ALWAYS("0x8a08(0x%04X) = 0x%08X\n", 0x8a08,
+			 MAC_REG_R32(0x8a08));
+	PLTFM_MSG_ALWAYS("0x8a0c(0x%04X) = 0x%08X\n", 0x8a0c,
+			 MAC_REG_R32(0x8a0c));
+	PLTFM_MSG_ALWAYS("0x8a50(0x%04X) = 0x%08X\n", 0x8a50,
+			 MAC_REG_R32(0x8a50));
+
+	if (adapter->env_info.intf == MAC_AX_INTF_SDIO) {
+		PLTFM_MSG_ALWAYS("sdio Registers:\n");
+
+		j=0x1110;
+		val32_1 = MAC_REG_R32(j);
+		val32_2 = MAC_REG_R32(j + 4);
+		val32_3 = MAC_REG_R32(j + 8);
+		val32_4 = MAC_REG_R32(j + 0xc);
+		PLTFM_MSG_ALWAYS("%08x : %08x %08x %08x %08x\n",
+				 j, val32_1, val32_2, val32_3, val32_4);
+
+		j=0x1120;
+		val32_1 = MAC_REG_R32(j);
+		val32_2 = MAC_REG_R32(j + 4);
+		val32_3 = MAC_REG_R32(j + 8);
+		PLTFM_MSG_ALWAYS("%08x : %08x %08x %08x\n",
+				 j, val32_1, val32_2, val32_3);
+
+		PLTFM_MSG_ALWAYS("R_AX_SDIO_HIMR(0x%04X) = 0x%08X\n", R_AX_SDIO_HIMR,
+				 MAC_REG_R32(R_AX_SDIO_HIMR));
+		PLTFM_MSG_ALWAYS("R_AX_SDIO_HISR(0x%04X) = 0x%08X\n", R_AX_SDIO_HISR,
+				 MAC_REG_R32(R_AX_SDIO_HISR));
+
+		PLTFM_MSG_ALWAYS("R_AX_SDIO_RX_REQ_LEN(0x%04X) = 0x%08X\n", R_AX_SDIO_RX_REQ_LEN,
+				 MAC_REG_R32(R_AX_SDIO_RX_REQ_LEN));
+
+		PLTFM_MSG_ALWAYS("R_AX_SDIO_DIOERR_RPT(0x%04X) = 0x%08X\n", R_AX_SDIO_DIOERR_RPT,
+				 MAC_REG_R32(R_AX_SDIO_DIOERR_RPT));
+		PLTFM_MSG_ALWAYS("R_AX_SDIO_CMD_ERR_CONTENT_L(0x%04X) = 0x%08X\n", R_AX_SDIO_CMD_ERR_CONTENT_L,
+				 MAC_REG_R32(R_AX_SDIO_CMD_ERR_CONTENT_L));
+
+		PLTFM_MSG_ALWAYS("R_AX_SDIO_CMD_ERR_CONTENT(0x%04X) = 0x%08X\n", R_AX_SDIO_CMD_ERR_CONTENT,
+				 MAC_REG_R32(R_AX_SDIO_CMD_ERR_CONTENT));
+		PLTFM_MSG_ALWAYS("R_AX_SDIO_TRANS_FIFO_STATUS(0x%04X) = 0x%08X\n", R_AX_SDIO_TRANS_FIFO_STATUS,
+				 MAC_REG_R32(R_AX_SDIO_TRANS_FIFO_STATUS));
+
+		val8 = PLTFM_SDIO_CMD52_CIA_R8(0x4);
+		PLTFM_MSG_ALWAYS("cccr 0x4 = 0x%02X\n", val8);
+
+		val8 = PLTFM_SDIO_CMD52_CIA_R8(0x5);
+		PLTFM_MSG_ALWAYS("cccr 0x5 = 0x%02X\n", val8);
+	}
+
+	return MACSUCCESS;
+}
+#endif
+#endif /* MAC_AX_FEATURE_DBGPKG */

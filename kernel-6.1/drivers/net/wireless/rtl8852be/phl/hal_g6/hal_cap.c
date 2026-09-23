@@ -87,6 +87,11 @@ static void _hal_bus_cap_pre_decision(struct rtw_phl_com_t *phl_com,
 		(bus_sw->ltr_sw_ctrl ? true : false) : false;
 	bus_cap->ltr_hw_ctrl = bus_hw->ltr_hw_ctrl ?
 		(bus_sw->ltr_hw_ctrl ? true : false) : false;
+
+#ifdef RTW_WKARD_DYNAMIC_PCIE_GEN
+	bus_cap->pcie_gen_dm_en = bus_sw->pcie_gen_dm_en;
+#endif
+
 #elif defined (CONFIG_USB_HCI)
 	bus_cap->tx_buf_size = bus_sw->tx_buf_size ?
 		bus_sw->tx_buf_size : bus_hw->tx_buf_size;
@@ -192,6 +197,10 @@ static void _hal_bus_final_cap_decision(struct rtw_phl_com_t *phl_com,
 		(bus_sw->ltr_sw_ctrl ? true : false) : false;
 	bus_cap->ltr_hw_ctrl = bus_hw->ltr_hw_ctrl ?
 		(bus_sw->ltr_hw_ctrl ? true : false) : false;
+
+#ifdef RTW_WKARD_DYNAMIC_PCIE_GEN
+	bus_cap->pcie_gen_dm_en = bus_sw->pcie_gen_dm_en;
+#endif
 }
 #endif
 
@@ -226,8 +235,10 @@ static void _hal_ps_final_cap_decision(struct rtw_phl_com_t *phl_com,
 	ps_cap->lps_wow_listen_bcn_mode = ps_sw_cap->lps_wow_listen_bcn_mode;
 	ps_cap->lps_wow_smart_ps_mode = ps_sw_cap->lps_wow_smart_ps_mode;
 	ps_cap->lps_wow_bcnnohit_en = ps_sw_cap->lps_wow_bcnnohit_en;
+	ps_cap->lps_intensive_trx_lvl = ps_sw_cap->lps_intensive_trx_lvl;
+	ps_cap->lps_intensive_chk = ps_sw_cap->lps_intensive_chk;
 	/* hw */
-	ps_cap->lps_pause_tx = ps_hw_cap->lps_pause_tx;
+	ps_cap->ps_pause_tx = ps_hw_cap->ps_pause_tx;
 	/* sw & hw */
 	ps_cap->ips_cap = (ps_sw_cap->ips_cap & ps_hw_cap->ips_cap);
 	ps_cap->ips_wow_cap = (ps_sw_cap->ips_wow_cap & ps_hw_cap->ips_wow_cap);
@@ -237,6 +248,16 @@ static void _hal_ps_final_cap_decision(struct rtw_phl_com_t *phl_com,
 	/* fw */
 	rtw_hal_ps_fw_cap_decision(phl_com, false);
 }
+
+#ifdef CONFIG_BTCOEX
+static void _hal_btc_final_cap_decision(struct rtw_phl_com_t *phl_com)
+{
+	struct btc_cap_info *btc_sw_cap = &GET_DEV_SW_BTC_CAP(phl_com);
+	struct btc_cap_info *btc_dev_cap = &GET_DEV_BTC_CAP(phl_com);
+
+	btc_dev_cap->btc_deg_wifi_cap = btc_sw_cap->btc_deg_wifi_cap;
+}
+#endif /* CONFIG_BTCOEX */
 
 static void _hal_edcca_final_cap_decision(struct rtw_phl_com_t *phl_com,
 			struct rtw_hal_com_t *hal_com)
@@ -259,17 +280,6 @@ static void _hal_edcca_final_cap_decision(struct rtw_phl_com_t *phl_com,
 	edcca_cap->edcca_cbp_th_6g = (edcca_sw_cap->edcca_cbp_th_6g)?
 					(edcca_sw_cap->edcca_cbp_th_6g):
 					(edcca_hw_cap->edcca_cbp_th_6g);
-}
-
-static void _hal_fw_log_final_cap_config(struct rtw_phl_com_t *phl_com)
-{
-	struct dev_cap_t *dev_cap = &phl_com->dev_cap;
-	struct dev_cap_t *dev_sw_cap = &phl_com->dev_sw_cap;
-
-	dev_cap->fw_log_info.level = dev_sw_cap->fw_log_info.level;
-	dev_cap->fw_log_info.output = dev_sw_cap->fw_log_info.output;
-	dev_cap->fw_log_info.comp = dev_sw_cap->fw_log_info.comp;
-	dev_cap->fw_log_info.comp_ext= dev_sw_cap->fw_log_info.comp_ext;
 }
 
 void rtw_hal_ps_fw_cap_decision(struct rtw_phl_com_t *phl_com, bool is_wow)
@@ -348,8 +358,8 @@ void rtw_hal_final_cap_decision(struct rtw_phl_com_t *phl_com, void *hal)
 
 	mac_ofld_cap = &dev_cap->wcpu_cap.mac_ofld_cap;
 #ifdef RTW_WKARD_PHY_CAP
-	phy_cap[0].proto_sup = phy_sw[0].proto_sup;
-	phy_cap[1].proto_sup = phy_sw[1].proto_sup;
+	phy_cap[0].proto_sup = phy_sw[0].proto_sup & phy_hw[0].proto_sup;
+	phy_cap[1].proto_sup = phy_sw[1].proto_sup & phy_hw[1].proto_sup;
 
 	phy_cap[0].txss = (phy_sw[0].txss)?((phy_sw[0].txss > phy_hw[0].tx_num)?
 						phy_hw[0].tx_num:phy_sw[0].txss):phy_hw[0].tx_num;
@@ -458,7 +468,15 @@ void rtw_hal_final_cap_decision(struct rtw_phl_com_t *phl_com, void *hal)
 
 	dev_cap->xcap = dev_hw_cap->xcap;
 	dev_cap->domain = dev_hw_cap->domain;
+	dev_cap->domain_6g = dev_hw_cap->domain_6g;
+
+	/* btc related */
 	dev_cap->btc_mode = dev_sw_cap->btc_mode;
+	dev_cap->btc_esoc_type = dev_sw_cap->btc_esoc_type;
+	dev_cap->btc_ant_iso_db = dev_sw_cap->btc_ant_iso_db;
+#ifdef CONFIG_BTCOEX
+	_hal_btc_final_cap_decision(phl_com);
+#endif /* CONFIG_BTCOEX */
 
 #ifdef CONFIG_PCI_HCI
 	_hal_bus_final_cap_decision(phl_com, hal_com);
@@ -524,7 +542,8 @@ void rtw_hal_final_cap_decision(struct rtw_phl_com_t *phl_com, void *hal)
 
 	dev_cap->rpq_agg_num = dev_sw_cap->rpq_agg_num ?
 		dev_sw_cap->rpq_agg_num : dev_hw_cap->rpq_agg_num;
-
+	dev_cap->rpq_tmr = dev_sw_cap->rpq_tmr ?
+		dev_sw_cap->rpq_tmr : dev_hw_cap->rpq_tmr;
 	/* MAC_AX_QTA_SCC_TURBO, decide by sw, need to be refined after we have hw cap */
 	dev_cap->quota_turbo = dev_sw_cap->quota_turbo;
 
@@ -616,9 +635,23 @@ void rtw_hal_final_cap_decision(struct rtw_phl_com_t *phl_com, void *hal)
 		dev_cap->antdiv_sup = dev_sw_cap->antdiv_sup;
 	else
 		dev_cap->antdiv_sup = false;
-	_hal_fw_log_final_cap_config(phl_com);
 
 	dev_cap->disable_dyn_txpwr = dev_sw_cap->disable_dyn_txpwr;
+
+#ifdef CONFIG_PHL_RFK_FCS_SUPPPORT
+	if (dev_sw_cap->rfk_fcs_sup && dev_hw_cap->rfk_fcs_sup) {
+		dev_cap->rfk_fcs_sup = true;
+	}
+	if (dev_sw_cap->rfk_fcs_num != 0) {
+		dev_cap->rfk_fcs_num = (dev_sw_cap->rfk_fcs_num < dev_hw_cap->rfk_fcs_num) ?
+		                       dev_sw_cap->rfk_fcs_num :
+		                       dev_hw_cap->rfk_fcs_num;
+	} else {
+		dev_cap->rfk_fcs_num = dev_hw_cap->rfk_fcs_num;
+	}
+#endif
+
+	dev_cap->tx_ring_tid_rr = dev_sw_cap->tx_ring_tid_rr;
 }
 
 /**

@@ -78,5 +78,23 @@ void disable_efuse_sw_pwr_cut_8852b(struct mac_ax_adapter *adapter,
  * @}
  */
 
+/**
+ * @addtogroup Efuse
+ * @{
+ */
+
+/**
+ * @brief efuse_info_init_8852b
+ *
+ * @param *adapter
+ * @return Please Place Description here.
+ * @retval void
+ */
+
+u32 efuse_info_init_8852b(struct mac_ax_adapter *adapter);
+/**
+ * @}
+ */
+
 #endif /* MAC_AX_8852B_SUPPORT */
 #endif

@@ -15,6 +15,10 @@
  *
  *****************************************************************************/
 #include "phl_headers.h"
+
+#define CONFIG_MSG_HUB_THREAD
+/*#define CONFIG_MSG_HUB_WORKQUEUE*/
+
 #define MODL_MASK_LEN (PHL_BK_MDL_END / 8)
 #define MAX_MSG_NUM	(16)
 
@@ -40,6 +44,7 @@ struct phl_msg_ex {
 	struct phl_msg ctx;
 	struct msg_completion_routine completion;
 };
+
 /**
  * phl_msg_hub - responsible for phl msg forwarding,
  * @status: contain mgnt status flags, refer to enum msg_hub_status
@@ -48,14 +53,20 @@ struct phl_msg_ex {
  * @recver: msg receiver, refer to enum phl_msg_recver_layer
  */
 struct phl_msg_hub {
+	struct phl_info_t *phl;
 	u32 status;
-		struct phl_msg_ex msg_pool[MAX_MSG_NUM];
-		struct phl_queue  idle_msg_q;
-		struct phl_queue  wait_msg_q;
-		_os_sema msg_q_sema;
-		_os_thread msg_notify_thread;
-		/* for core & phl layer respectively */
-		struct phl_msg_receiver_ex recver[MSG_RECV_MAX];
+	struct phl_msg_ex msg_pool[MAX_MSG_NUM];
+	struct phl_queue  idle_msg_q;
+	struct phl_queue  wait_msg_q;
+	#ifdef CONFIG_MSG_HUB_THREAD
+	_os_sema msg_q_sema;
+	_os_thread msg_notify_thread;
+	#endif
+	#ifdef CONFIG_MSG_HUB_WORKQUEUE
+	_os_workitem msg_notify_work;
+	#endif
+	/* for core & phl layer respectively */
+	struct phl_msg_receiver_ex recver[MSG_RECV_MAX];
 };
 
 inline static u8 _is_bitmap_empty(void* d, u8* bitmap){
@@ -111,7 +122,12 @@ static void push_back_wait_msg(struct phl_info_t* phl, struct phl_msg_ex* ex)
 	void *d = phl_to_drvpriv(phl);
 	struct phl_msg_hub* hub = (struct phl_msg_hub*)phl->msg_hub;
 	pq_push(d, &hub->wait_msg_q, &ex->list, _tail, _bh);
+	#ifdef CONFIG_MSG_HUB_THREAD
 	_os_sema_up(d, &(hub->msg_q_sema));
+	#endif
+	#ifdef CONFIG_MSG_HUB_WORKQUEUE
+	_os_workitem_schedule(d, &hub->msg_notify_work);
+	#endif
 }
 
 void msg_forward(struct phl_info_t* phl, struct phl_msg_ex* ex)
@@ -145,6 +161,7 @@ void msg_forward(struct phl_info_t* phl, struct phl_msg_ex* ex)
 
 }
 
+#ifdef CONFIG_MSG_HUB_THREAD
 static int msg_hub_thread_hdl(void* param)
 {
 	struct phl_info_t* phl = (struct phl_info_t *)param;
@@ -173,11 +190,28 @@ static int msg_hub_thread_hdl(void* param)
 	PHL_INFO("%s down\n",__FUNCTION__);
 	return 0;
 }
+#endif
+#ifdef CONFIG_MSG_HUB_WORKQUEUE
+static void msg_hub_work_hdl(void *work)
+{
+	void *d;
+	struct phl_info_t* phl;
+	struct phl_msg_hub *hub;
+	struct phl_msg_ex* ex = NULL;
 
+	hub = (struct phl_msg_hub *)phl_container_of(work, struct phl_msg_hub, msg_notify_work);
+	phl = hub->phl;
+	d = phl_to_drvpriv(phl);
 
+	while (pop_front_wait_msg(phl, &ex)) {
+		msg_forward(phl, ex);
+		push_back_idle_msg(phl, ex);
+	}
+}
+#endif
 enum rtw_phl_status phl_msg_hub_init(struct phl_info_t* phl)
 {
-	struct phl_msg_hub* hub = NULL;
+	struct phl_msg_hub *hub = NULL;
 	void *d = phl_to_drvpriv(phl);
 
 
@@ -191,7 +225,11 @@ enum rtw_phl_status phl_msg_hub_init(struct phl_info_t* phl)
 		return RTW_PHL_STATUS_RESOURCE;
 	}
 	phl->msg_hub = hub;
+	hub->phl = phl;
+	#ifdef CONFIG_MSG_HUB_THREAD
 	_os_sema_init(d, &(hub->msg_q_sema), 0);
+	#endif
+
 	pq_init(d, &(hub->idle_msg_q));
 	pq_init(d, &(hub->wait_msg_q));
 	SET_STATUS_FLAG(hub->status, MSG_HUB_INIT);
@@ -210,7 +248,9 @@ enum rtw_phl_status phl_msg_hub_deinit(struct phl_info_t* phl)
 	phl_msg_hub_stop(phl);
 	pq_deinit(d, &(hub->idle_msg_q));
 	pq_deinit(d, &(hub->wait_msg_q));
+	#ifdef CONFIG_MSG_HUB_THREAD
 	_os_sema_free(d, &(hub->msg_q_sema));
+	#endif
 	_os_mem_free(d, hub, sizeof(struct phl_msg_hub));
 	PHL_INFO("%s\n",__FUNCTION__);
 	return RTW_PHL_STATUS_SUCCESS;
@@ -233,12 +273,20 @@ enum rtw_phl_status phl_msg_hub_start(struct phl_info_t* phl)
 	for(i = 0; i < MAX_MSG_NUM; i++) {
 		pq_push(d, &hub->idle_msg_q, &hub->msg_pool[i].list, _tail, _bh);
 	}
+	#ifdef CONFIG_MSG_HUB_THREAD
 	if (RTW_PHL_STATUS_SUCCESS != _os_thread_init(d, &(hub->msg_notify_thread), msg_hub_thread_hdl, phl,
 						"msg_notify_thread")) {
 		PHL_ERR("thread init msg_notify_thread fail.\n");
 		return RTW_PHL_STATUS_FAILURE;
 	}
+
 	_os_thread_schedule(d, &(hub->msg_notify_thread));
+	#endif
+
+	#ifdef CONFIG_MSG_HUB_WORKQUEUE
+	_os_workitem_init(d, &(hub->msg_notify_work), msg_hub_work_hdl, NULL);
+	#endif
+
 	SET_STATUS_FLAG(hub->status, MSG_HUB_STARTED);
 	PHL_INFO("%s\n",__FUNCTION__);
 	return RTW_PHL_STATUS_SUCCESS;
@@ -253,9 +301,14 @@ enum rtw_phl_status phl_msg_hub_stop(struct phl_info_t* phl)
 		return RTW_PHL_STATUS_FAILURE;
 
 	CLEAR_STATUS_FLAG(hub->status, MSG_HUB_STARTED);
+	#ifdef CONFIG_MSG_HUB_THREAD
 	_os_thread_stop(d, &(hub->msg_notify_thread));
 	_os_sema_up(d, &(hub->msg_q_sema));
 	_os_thread_deinit(d, &(hub->msg_notify_thread));
+	#endif
+	#ifdef CONFIG_MSG_HUB_WORKQUEUE
+	_os_workitem_deinit(d, &(hub->msg_notify_work));
+	#endif
 	pq_reset(d, &(hub->idle_msg_q), _bh);
 	pq_reset(d, &(hub->wait_msg_q), _bh);
 

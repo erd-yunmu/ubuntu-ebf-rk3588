@@ -281,30 +281,41 @@ void halrf_fast_chl_sw_reload(struct rf_info *rf, u8 chl_index, u8 t_index)
 void  halrf_quick_check_rf(void *rf_void)
 {
 	struct rf_info *rf = (struct rf_info *)rf_void;
-	struct rtw_hal_com_t *hal_com = rf->hal_com;
 
 #ifdef RF_8852A_SUPPORT
-	if (hal_com->chip_id == CHIP_WIFI6_8852A)
+	if (rf->ic_type == RF_RTL8852A)
 		halrf_quick_check_rfrx_8852a(rf);
 #endif
 #ifdef RF_8852B_SUPPORT
-	if (hal_com->chip_id == CHIP_WIFI6_8852B)
+	if (rf->ic_type == RF_RTL8852B)
 		halrf_quick_checkrf_8852b(rf);
 #endif
 #ifdef RF_8852BT_SUPPORT
-	if (hal_com->chip_id == CHIP_WIFI6_8852BT)
+	if (rf->ic_type == RF_RTL8852BT)
 		halrf_quick_checkrf_8852bt(rf);
 #endif
+#ifdef RF_8852BPT_SUPPORT
+	if (rf->ic_type == RF_RTL8852BPT)
+		halrf_quick_checkrf_8852bpt(rf);
+#endif
 #ifdef RF_8852C_SUPPORT
-	if (hal_com->chip_id == CHIP_WIFI6_8852C)
+	if (rf->ic_type == RF_RTL8852C)
 		halrf_quick_checkrf_8852c(rf);
 #endif
+#ifdef RF_8842A_SUPPORT
+	if (rf->ic_type == RF_RTL8842A)
+		halrf_quick_checkrf_8842a(rf);
+#endif
 #ifdef RF_8852D_SUPPORT
-	if (hal_com->chip_id == CHIP_WIFI6_8852D)
+	if (rf->ic_type == RF_RTL8852D)
 		halrf_quick_checkrf_8852d(rf);
 #endif
+#ifdef RF_8832D_SUPPORT
+	if (rf->ic_type == RF_RTL8832D)
+		halrf_quick_checkrf_8832d(rf);
+#endif
 #ifdef RF_8851B_SUPPORT
-	if (hal_com->chip_id == CHIP_WIFI6_8851B)
+	if (rf->ic_type == RF_RTL8851B)
 		halrf_quick_checkrf_8851b(rf);
 #endif
 }
@@ -370,10 +381,19 @@ void halrf_wifi_event_notify(void *rf_void,
 			halrf_config_power_limit_6g(rf, HW_PHY_0);
 			halrf_config_power_limit_ru_6g(rf, HW_PHY_0);
 			if (rf->hal_com->dbcc_en)
-				halrf_set_power(rf, HW_PHY_1, (PWR_LIMIT & PWR_LIMIT_RU));
-			halrf_set_power(rf, HW_PHY_0, (PWR_LIMIT & PWR_LIMIT_RU));
+				halrf_set_power(rf, HW_PHY_1, (PWR_LIMIT | PWR_LIMIT_RU));
+			halrf_set_power(rf, HW_PHY_0, (PWR_LIMIT | PWR_LIMIT_RU));
 		break;
 #endif
+		case MSG_EVT_DISCONNECT_END:
+			halrf_set_power(rf, HW_PHY_0, (PWR_LIMIT | PWR_LIMIT_RU));
+		break;
+		case MSG_EVT_CONNECT_END:
+			halrf_set_power(rf, HW_PHY_0, (PWR_LIMIT | PWR_LIMIT_RU));
+		break;
+		case MSG_EVT_TPE_INFO_UPDATE:
+			halrf_set_tpe_control(rf);
+		break;
 		default:
 		break;
 	}
@@ -480,8 +500,9 @@ void halrf_ctrl_bw_ch(void *rf_void, enum phl_phy_idx phy, u8 central_ch,
 	halrf_ctl_bw(rf, phy, bw);
 	halrf_ctl_band_ch_bw(rf, phy, band, central_ch, bw);
 	halrf_rxbb_bw(rf, phy, bw);
+#ifdef  HALRF_DZ_LOG
 	halrf_rpt_rt_rfk_info(rf, phy, 1);
-
+#endif
 	if (lock)
 		halrf_mutex_unlock(rf, &rf->rf_lock);
 
@@ -542,6 +563,15 @@ u32 halrf_test_event_trigger(void *rf_void,
 				halrf_dack_trigger(rf, true);
 		break;
 
+		case RF_EVENT_RXDCK:
+			if (func == RF_EVENT_OFF)
+				halrf_rx_dck_onoff(rf, false);
+			else if (func == RF_EVENT_ON)
+				halrf_rx_dck_onoff(rf, true);
+			else if (func == RF_EVENT_TRIGGER)
+				halrf_rx_dck_trigger(rf, phy, false);
+		break;
+
 		default:
 		break;
 	}
@@ -600,6 +630,10 @@ void halrf_mcc_get_ch_info(void *rf_void, enum phl_phy_idx phy)
 	if (hal_i->chip_id == CHIP_WIFI6_8852C)
 		mcc_info->band[idx] = rf->hal_com->band[phy].cur_chandef.band;
 #endif	
+#ifdef RF_8842A_SUPPORT
+	if (hal_i->chip_id == CHIP_WIFI6_8842A)
+		mcc_info->band[idx] = rf->hal_com->band[phy].cur_chandef.band;
+#endif
 }
 
 void halrf_chlk_backup_dbcc(struct rf_info *rf, enum phl_phy_idx phy) 
@@ -650,89 +684,6 @@ void halrf_chlk_reload_dbcc(struct rf_info *rf, enum phl_phy_idx phy, u8 idx)
 	}
 }
 
-
-bool halrf_chlk_reload_check_dbcc(struct rf_info *rf, enum phl_phy_idx phy) 
-{
-	struct halrf_dbcc_info *dbcc_info = &rf->dbcc_info;
-	struct halrf_mcc_info *mcc_info = &rf->mcc_info;
-	u8 path, i, j, idx, kpath, kch, kband;
-	bool reload = false;
-
-	RF_DBG(rf, DBG_RF_RFK, "[DBCC]======> %s \n", __func__);
-	kpath = halrf_kpath(rf, phy);
-	kch = rf->hal_com->band[phy].cur_chandef.center_ch;
-	kband = rf->hal_com->band[phy].cur_chandef.band;
-	idx = dbcc_info->table_idx;
-	RF_DBG(rf, DBG_RF_RFK, "[DBCC]dbcc_en=%d  prek_is_dbcc=%d\n", rf->hal_com->dbcc_en, dbcc_info->prek_is_dbcc);
-	if (rf->hal_com->dbcc_en || dbcc_info->prek_is_dbcc) {
-		//try reload
-		for(i = 0; i < 2; i++) {
-			if (kpath == RF_AB) {
-				if (kch == dbcc_info->ch[i][1] && kband == dbcc_info->band[i][1] &&
-					kch == dbcc_info->ch[i][0] && kband == dbcc_info->band[i][0]) {
-					idx = i;
-					reload = true;
-				}
-			} else {
-				if (kpath == RF_A)
-					path = 0;
-				else
-					path = 1;
-				if (kch == dbcc_info->ch[i][path] && kband == dbcc_info->band[i][path]) {
-					idx = i;
-					reload = true;
-				}
-			}
-		}
-		if (reload) {
-			halrf_chlk_reload_dbcc(rf, phy, idx);
-			rf->chlk_map = 0xffffffff & (~HAL_RF_IQK) & (~HAL_RF_DPK);
-			RF_DBG(rf, DBG_RF_RFK, "[DBCC]reload kpath=%d, index=%d\n", kpath, idx);
-			RF_DBG(rf, DBG_RF_RFK, "[DBCC]table0 S0 ch=%5d S1 ch=%5d\n", dbcc_info->ch[0][0], dbcc_info->ch[0][1]);
-			RF_DBG(rf, DBG_RF_RFK, "[DBCC]table1 S0 ch=%5d S1 ch=%5d\n", dbcc_info->ch[1][0], dbcc_info->ch[1][1]);
-			RF_DBG(rf, DBG_RF_RFK, "[DBCC]table0 S0 band =%5d S1 band =%5d\n", dbcc_info->band[0][0], dbcc_info->band[0][1]);
-			RF_DBG(rf, DBG_RF_RFK, "[DBCC]table1 S0 band =%5d S1 band =%5d\n", dbcc_info->band[1][0], dbcc_info->band[1][1]);
-			return reload;
-		}
-	}
-	//force K
-	for  (i = 0;  i < 2; i++)
-		if (dbcc_info->ch[i][0] == 0 && dbcc_info->ch[i][1] == 0)
-			break;
-	if (i < 2) {
-		idx = i;
-	} else {
-		for  (j = 0;  j < 2; j++)
-			if (dbcc_info->ch[j][0] != dbcc_info->ch[j][1] ||
-				dbcc_info->band[j][0] != dbcc_info->band[j][1])
-				break;
-		if (j == 2) {
-			idx++;
-			if (idx > 1)
-				idx = 0;
-		} else {
-			idx = j;
-		}
-	}
-	rf->chlk_map = 0xffffffff;
-	dbcc_info->prek_is_dbcc = rf->hal_com->dbcc_en;
-	dbcc_info->table_idx = idx;
-	mcc_info->table_idx = idx;
-	for (path = 0; path < 2; path++) {
-		if (kpath & BIT(path)) {
-			dbcc_info->ch[idx][path] = kch;
-			dbcc_info->band[idx][path] = kband;
-		}
-	}
-	RF_DBG(rf, DBG_RF_RFK, "[DBCC]foreK kpath=%d, index=%d\n", kpath, idx);
-	RF_DBG(rf, DBG_RF_RFK, "[DBCC]ch00=%d ch01=%d ch10=%d ch11=%d\n",
-		dbcc_info->ch[0][0], dbcc_info->ch[0][1], dbcc_info->ch[1][0], dbcc_info->ch[1][1]);
-	RF_DBG(rf, DBG_RF_RFK, "[DBCC]band00=%d band01=%d band10=%d band10=%d\n",
-		dbcc_info->band[0][0], dbcc_info->band[0][1], dbcc_info->band[1][0], dbcc_info->band[1][1]);
-
-	return reload;
-}
-
 void halrf_reset_io_count(struct rf_info *rf)
 {
 	rf->w_count = 0;
@@ -777,10 +728,13 @@ bool halrf_is_under_cac(struct rf_info *rf, enum phl_phy_idx phy)
 void halrf_ops_rx_dck(struct rf_info *rf, enum phl_phy_idx phy, bool is_afe)
 {	
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_rx_dck) 
-			rfk_ops->halrf_ops_rx_dck(rf, phy, is_afe);
+		if (rfk_ops->ops_rx_dck) {
+			rfk_ops->ops_rx_dck(rf, phy, is_afe);
+			do_ops->is_do_ops_rxdck = 1; 
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -793,10 +747,13 @@ void halrf_ops_rx_dck(struct rf_info *rf, enum phl_phy_idx phy, bool is_afe)
 void halrf_ops_do_txgapk(struct rf_info *rf, enum phl_phy_idx phy)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_do_txgapk) 
-			rfk_ops->halrf_ops_do_txgapk(rf, phy);
+		if (rfk_ops->ops_do_txgapk) {
+			rfk_ops->ops_do_txgapk(rf, phy);
+			do_ops->is_do_ops_txgapk = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -810,10 +767,13 @@ void halrf_ops_do_txgapk(struct rf_info *rf, enum phl_phy_idx phy)
 void halrf_ops_tssi_disable(struct rf_info *rf, enum phl_phy_idx phy)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_tssi_disable) 
-			rfk_ops->halrf_ops_tssi_disable(rf, phy);
+		if (rfk_ops->ops_tssi_disable) {
+			rfk_ops->ops_tssi_disable(rf, phy);
+			do_ops->is_do_ops_tssi_disable = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -826,10 +786,13 @@ void halrf_ops_tssi_disable(struct rf_info *rf, enum phl_phy_idx phy)
 void halrf_ops_do_tssi(struct rf_info *rf, enum phl_phy_idx phy, bool hwtx_en)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_do_tssi) 
-			rfk_ops->halrf_ops_do_tssi(rf, phy, hwtx_en);
+		if (rfk_ops->ops_do_tssi) {
+			rfk_ops->ops_do_tssi(rf, phy, hwtx_en);
+			do_ops->is_do_ops_tssi = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -842,10 +805,13 @@ void halrf_ops_do_tssi(struct rf_info *rf, enum phl_phy_idx phy, bool hwtx_en)
 void halrf_ops_dpk(struct rf_info *rf, enum phl_phy_idx phy, bool force)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_dpk) 
-			rfk_ops->halrf_ops_dpk(rf, phy, force);
+		if (rfk_ops->ops_dpk) {
+			rfk_ops->ops_dpk(rf, phy, force);
+			do_ops->is_do_ops_dpk = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -858,10 +824,13 @@ void halrf_ops_dpk(struct rf_info *rf, enum phl_phy_idx phy, bool force)
 void halrf_ops_dack(struct rf_info *rf, bool force)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_dack) 
-			rfk_ops->halrf_ops_dack(rf, force);
+		if (rfk_ops->ops_dack) {
+			rfk_ops->ops_dack(rf, force);
+			do_ops->is_do_ops_dack = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -874,10 +843,13 @@ void halrf_ops_dack(struct rf_info *rf, bool force)
 void halrf_ops_lck(struct rf_info *rf)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_lck) 
-			rfk_ops->halrf_ops_lck(rf);
+		if (rfk_ops->ops_lck) {
+			rfk_ops->ops_lck(rf);
+			do_ops->is_do_ops_lck = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -890,10 +862,13 @@ void halrf_ops_lck(struct rf_info *rf)
 void halrf_ops_lck_tracking(struct rf_info *rf)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_lck_tracking) 
-			rfk_ops->halrf_ops_lck_tracking(rf);
+		if (rfk_ops->ops_lck_tracking) {
+			rfk_ops->ops_lck_tracking(rf);
+			do_ops->is_do_ops_lck_trk = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -906,10 +881,13 @@ void halrf_ops_lck_tracking(struct rf_info *rf)
 void halrf_ops_lo_test(struct rf_info *rf, bool is_on, enum rf_path path)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_lo_test) 
-			rfk_ops->halrf_ops_lo_test(rf, is_on, path);
+		if (rfk_ops->ops_lo_test) {
+			rfk_ops->ops_lo_test(rf, is_on, path);
+			do_ops->is_do_ops_lo_test = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -922,10 +900,13 @@ void halrf_ops_lo_test(struct rf_info *rf, bool is_on, enum rf_path path)
 void halrf_ops_config_radio_to_fw(struct rf_info *rf)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_config_radio_to_fw) 
-			rfk_ops->halrf_config_radio_to_fw(rf);
+		if (rfk_ops->ops_config_radio_to_fw) {
+			rfk_ops->ops_config_radio_to_fw(rf);
+			do_ops->is_do_ops_radio_to_fw = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -938,10 +919,13 @@ void halrf_ops_config_radio_to_fw(struct rf_info *rf)
 void halrf_ops_txgapk_w_table_default(struct rf_info *rf, enum phl_phy_idx phy)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 	
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_txgapk_w_table_default) 
-			rfk_ops->halrf_ops_txgapk_w_table_default(rf, phy);
+		if (rfk_ops->ops_txgapk_w_table_default) {
+			rfk_ops->ops_txgapk_w_table_default(rf, phy);
+			do_ops->is_do_ops_txgapk_default = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -954,10 +938,13 @@ void halrf_ops_txgapk_w_table_default(struct rf_info *rf, enum phl_phy_idx phy)
 void halrf_ops_txgapk_enable(struct rf_info *rf, enum phl_phy_idx phy)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 	
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_txgapk_enable) 
-			rfk_ops->halrf_ops_txgapk_enable(rf, phy);
+		if (rfk_ops->ops_txgapk_enable) {
+			rfk_ops->ops_txgapk_enable(rf, phy);
+			do_ops->is_do_ops_txgapk_en = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -970,10 +957,13 @@ void halrf_ops_txgapk_enable(struct rf_info *rf, enum phl_phy_idx phy)
 void halrf_ops_txgapk_init(struct rf_info *rf)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 	
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_txgapk_init) 
-			rfk_ops->halrf_ops_txgapk_init(rf);
+		if (rfk_ops->ops_txgapk_init) {
+			rfk_ops->ops_txgapk_init(rf);
+			do_ops->is_do_ops_txgapk_init = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -988,10 +978,13 @@ void halrf_ops_txgapk_init(struct rf_info *rf)
 void halrf_ops_adie_pow_ctrl(struct rf_info *rf, bool rf_off, bool others_off)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 	
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_adie_pow_ctrl) 
-			rfk_ops->halrf_ops_adie_pow_ctrl(rf, rf_off, others_off);
+		if (rfk_ops->ops_adie_pow_ctrl) {
+			rfk_ops->ops_adie_pow_ctrl(rf, rf_off, others_off);
+			do_ops->is_do_ops_adie_pow_ctrl = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -1006,10 +999,13 @@ void halrf_ops_adie_pow_ctrl(struct rf_info *rf, bool rf_off, bool others_off)
 void halrf_ops_afe_pow_ctrl(struct rf_info *rf, bool adda_off, bool pll_off)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 	
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_afe_pow_ctrl) 
-			rfk_ops->halrf_ops_afe_pow_ctrl(rf, adda_off, pll_off);
+		if (rfk_ops->ops_afe_pow_ctrl) {
+			rfk_ops->ops_afe_pow_ctrl(rf, adda_off, pll_off);
+			do_ops->is_do_ops_afe_pow_ctrl = 1;
+		}
 		else 
 			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -1024,10 +1020,13 @@ void halrf_ops_afe_pow_ctrl(struct rf_info *rf, bool adda_off, bool pll_off)
 void halrf_ops_set_gpio_by_ch(struct rf_info *rf, enum phl_phy_idx phy, enum band_type band)
 {
 	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
 
 	if (rf->rf_rfk_ops) {
-		if (rfk_ops->halrf_ops_set_gpio_by_ch) 
-			rfk_ops->halrf_ops_set_gpio_by_ch(rf, phy, band);
+		if (rfk_ops->ops_set_gpio_by_ch) {
+			rfk_ops->ops_set_gpio_by_ch(rf, phy, band);
+			do_ops->is_do_ops_set_gpio_by_ch = 1;
+		}
 //		else 
 //			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
 	}
@@ -1036,6 +1035,41 @@ void halrf_ops_set_gpio_by_ch(struct rf_info *rf, enum phl_phy_idx phy, enum ban
 
 	return;
 }
+
+bool halrf_ops_chlk_reload_check(struct rf_info *rf, enum phl_phy_idx phy)
+{
+	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	bool reload = false;
+	struct halrf_do_ops_info *do_ops = &rf->ops_info;
+
+	if (rf->rf_rfk_ops) {
+		if (rfk_ops->ops_chlk_reload_check) {
+			reload = rfk_ops->ops_chlk_reload_check(rf, phy);
+			do_ops->is_do_ops_chlk_reload_chk = 1;
+		}
+//		else 
+//			RF_WARNING("%s,function pointer is NULL, please check halrf_ops_rtlxxx.c .h\n", __func__);
+	}
+	else 
+		RF_WARNING("%s,rf->rf_rfk_ops is NULL, please check rf_set_ops_xxx in halrf_init.c  \n", __func__);
+
+	return reload;
+}
+
+void halrf_ops_long_pkt_comp(struct rf_info *rf, enum phl_phy_idx phy)
+{
+	struct halrf_rfk_ops *rfk_ops = rf->rf_rfk_ops;
+	bool reload = false;
+
+	if (rf->rf_rfk_ops) {
+		if (rfk_ops->ops_long_pkt_comp) 
+			rfk_ops->ops_long_pkt_comp(rf, phy);
+	}
+	else {
+		RF_WARNING("%s,rf->rf_rfk_ops is NULL, please check rf_set_ops_xxx in halrf_init.c  \n", __func__);
+	}
+}
+
 
 u32 halrf_c2h_rfk_parsing(struct rf_info *rf, u8 cmdid, u16 len, u8 *c2h)
 {
@@ -1079,11 +1113,13 @@ u32 halrf_c2h_parsing(struct rf_info *rf, u8 classid, u8 cmdid, u16 len, u8 *c2h
 	return val;
 }
 
+#ifdef  HALRF_DZ_LOG
 void halrf_rpt_rt_rfk_info(struct rf_info *rf, enum phl_phy_idx phy, u32 type)
 {
 	struct halrf_rt_rpt *rpt = &rf->rf_rt_rpt;
 	u8 i;	
 
+	rf->rfk_is_processing = true;
 	if (type == 1) {
 		for (i = 0; i < 9; i++) {
 			rpt->ch_info[9 - i][0][0] = rpt->ch_info[8 - i][0][0];
@@ -1104,7 +1140,9 @@ void halrf_rpt_rt_rfk_info(struct rf_info *rf, enum phl_phy_idx phy, u32 type)
 		rpt->tssi_code[0][0] = (u8)halrf_rreg(rf, 0x1c60, 0xff000000);
 		rpt->tssi_code[0][1]= (u8)halrf_rreg(rf, 0x3c60, 0xff000000);
 	}
+	rf->rfk_is_processing = false;
 }
+#endif
 
 void halrf_ex_dack_info(struct rf_info *rf)
 {
@@ -1199,6 +1237,11 @@ void halrf_ex_iqk_info(struct rf_info *rf)
 #ifdef RF_8852BT_SUPPORT
 	case CHIP_WIFI6_8852BT:
 		ic_name = "8852BT";
+		break;
+#endif
+#ifdef RF_8852BPT_SUPPORT
+	case CHIP_WIFI6_8852BPT:
+		ic_name = "8852BPT";
 		break;
 #endif
 #ifdef RF_8852C_SUPPORT
@@ -1303,6 +1346,12 @@ void halrf_ex_dpk_info(struct rf_info *rf)
 	case CHIP_WIFI6_8852BT:
 		ic_name = "8852BT";
 		dpk_ver = DPK_VER_8852BT;
+		break;
+#endif
+#ifdef RF_8852BPT_SUPPORT
+	case CHIP_WIFI6_8852BPT:
+		ic_name = "8852BPT";
+		dpk_ver = DPK_VER_8852BPT;
 		break;
 #endif
 #ifdef RF_8852C_SUPPORT
@@ -1456,6 +1505,12 @@ void halrf_ex_rx_dck_info(struct rf_info *rf)
 		rxdck_ver = RXDCK_VER_8852BT;
 		break;
 #endif
+#ifdef RF_8852BPT_SUPPORT
+	case CHIP_WIFI6_8852BPT:
+		ic_name = "8852BPT";
+		rxdck_ver = RXDCK_VER_8852BPT;
+		break;
+#endif
 #ifdef RF_8852C_SUPPORT
 	case CHIP_WIFI6_8852C:
 		ic_name = "8852C";
@@ -1597,10 +1652,28 @@ void halrf_ex_gapk_info(struct rf_info *rf)
 		break;
 #endif
 
+#ifdef RF_8852BPT_SUPPORT
+	case CHIP_WIFI6_8852BPT:
+		ic_name = "8852BPT";
+		txgapk_ver = TXGAPK_VER_8852BPT;
+		rf_para = halrf_get_radio_reg_ver(rf);
+		rfk_init_ver = halrf_get_nctl_reg_ver(rf);
+		break;
+#endif
+
 #ifdef RF_8852C_SUPPORT
 	case CHIP_WIFI6_8852C:
 		ic_name = "8852C";
 		txgapk_ver = TXGAPK_VER_8852C;
+		rf_para = halrf_get_radio_reg_ver(rf);
+		rfk_init_ver = halrf_get_nctl_reg_ver(rf);
+		break;
+#endif
+
+#ifdef RF_8842A_SUPPORT
+	case CHIP_WIFI6_8842A:
+		ic_name = "8842A";
+		txgapk_ver = TXGAPK_VER_8842A;
 		rf_para = halrf_get_radio_reg_ver(rf);
 		rfk_init_ver = halrf_get_nctl_reg_ver(rf);
 		break;
@@ -1697,8 +1770,8 @@ void halrf_ex_gapk_info(struct rf_info *rf)
 	RF_TRACE(" %-25s = %s\n",
 		 "TXGapK OK(last)", (txgapk_info->is_txgapk_ok) ? "TRUE" : "FALSE");
 
-	#if defined(RF_8852B_SUPPORT) || defined(RF_8852BT_SUPPORT) || defined(RF_8852BP_SUPPORT)
-	if ((hal_i->chip_id == CHIP_WIFI6_8852B) || (hal_i->chip_id == CHIP_WIFI6_8852BT) || (hal_i->chip_id == CHIP_WIFI6_8852BP)) {
+	#if defined(RF_8852B_SUPPORT) || defined(RF_8852BT_SUPPORT) || defined(RF_8852BP_SUPPORT) || defined(RF_8852BPT_SUPPORT)
+	if ((hal_i->chip_id == CHIP_WIFI6_8852B) || (hal_i->chip_id == CHIP_WIFI6_8852BT) || (hal_i->chip_id == CHIP_WIFI6_8852BP) || (hal_i->chip_id == CHIP_WIFI6_8852BPT)) {
 		RF_TRACE(" %-25s = %s\n",
 			"TXGapK d boundary check", (txgapk_info->d_bnd_ok) ? "PASS" : "FAILE");
 	}
@@ -1758,6 +1831,7 @@ void halrf_ex_gapk_info(struct rf_info *rf)
 	}
 }
 
+#ifdef  HALRF_DZ_LOG
 void halrf_ex_rt_rfk_info(struct rf_info *rf)
 {
 	struct halrf_rt_rpt *rpt = &rf->rf_rt_rpt;
@@ -1794,6 +1868,7 @@ void halrf_ex_rt_rfk_info(struct rf_info *rf)
 		rpt->tssi_code[8][1], rpt->tssi_code[9][1]
 		);
 }
+#endif
 
 void halrf_ex_rfk_info(struct rf_info *rf)
 {
@@ -1822,8 +1897,8 @@ bool halrf_get_dpk_by_rate(void *rf_void,
 	enum phl_phy_idx phy, enum packet_format_t vector_index, u32 rate_index)
 {
 	struct rf_info *rf = (struct rf_info *)rf_void;
-	u32 rate_addr, rate_mask, vector_value;
-	u32 dpd_off_over, dpd_off_below, dpd_off_over_mask, dpd_off_below_mask;
+	u32 rate_addr = 0xd22c, rate_mask = 0x001c0000, vector_value;
+	u32 dpd_off_over, dpd_off_below, dpd_off_over_mask = BIT(21), dpd_off_below_mask = BIT(22);
 
 	RF_DBG(rf, DBG_RF_POWER, " ======>%s vector_index=%d rate_index=%d, phy=%d\n",
 		__func__, vector_index, rate_index, phy);
@@ -1873,6 +1948,9 @@ bool halrf_get_dpk_by_rate(void *rf_void,
 
 	RF_DBG(rf, DBG_RF_POWER, " ======>%s DPK Rate TH 0x%x[0x%x] = 0x%x   dpd_off_below=%d   dpd_off_below=%d\n",
 		__func__, rate_addr, rate_mask, vector_value, dpd_off_over, dpd_off_below);
+		
+	if (vector_index == LEGACY_FMT)
+		rate_index = rate_index + 4;
 
 	if(rate_index < vector_value) {
 		RF_DBG(rf, DBG_RF_POWER, " ======>%s Rate_index < TH  dpd_off_below=%d\n",
@@ -1903,3 +1981,191 @@ void halrf_set_dpk_by_rate(void *rf_void,
 		__func__, halrf_rreg(rf, 0x45b8, BIT(16)));
 }
 
+void halrf_bb_reset(struct rf_info *rf, enum phl_phy_idx phy_idx)
+{
+	halrf_bb_bb_reset_cmn(rf, true, phy_idx);
+	halrf_delay_us(rf, 1);
+	halrf_bb_bb_reset_cmn(rf, false, phy_idx);
+
+	RF_DBG(rf, DBG_RF_RFK, "[RFK] PHY%d BB reset!!\n", phy_idx);
+}
+
+bool halrf_chlk_reload_check(struct rf_info *rf, enum phl_phy_idx phy) 
+{
+	bool reload = false;
+	bool lock = false;
+
+	if (phl_is_mp_mode(rf->phl_com)) {
+		halrf_mutex_lock(rf, &rf->rf_lock);
+		lock = true;
+	}
+	reload = halrf_ops_chlk_reload_check(rf, phy);
+
+	if (lock)
+		halrf_mutex_unlock(rf, &rf->rf_lock);
+	return reload;
+}
+
+#ifdef  HALRF_DZ_LOG
+#define MEMBER_SZ(type, member) (sizeof(((type *)0)->member))
+#define CP_MEMBER(rf, dest, src, type, member) \
+	halrf_mem_cpy(rf, dest->member, src->member, MEMBER_SZ(type, member))
+
+struct halrf_ex_dz_info halrf_ex_rfdz_info(struct rf_info *rf)
+{
+	struct halrf_ex_dz_info *dz_info = &rf->ex_dz_info;
+
+	halrf_mem_cpy(rf, &dz_info->rf_rt_rpt, &rf->rf_rt_rpt, sizeof(struct halrf_rt_rpt));
+	halrf_mem_cpy(rf, &dz_info->rfk_dz_rpt, &rf->rfk_dz_rpt, sizeof(struct halrf_rfk_dz_rpt));
+	return *dz_info;
+}
+
+enum rtw_hal_status halrf_query_rfdz_err_code(void *rf_void, u32 *err_code)
+{
+	struct rf_info *rf = (struct rf_info *)rf_void;
+
+	if (!err_code)
+		return RTW_HAL_STATUS_FAILURE;
+
+	*err_code = 0;
+	if (rf->rfk_dz_rpt.iqk_dz_code)
+		*err_code |= HALRF_RFK_ERR_IQK;
+	if (rf->rfk_dz_rpt.dpk_dz_code)
+		*err_code |= HALRF_RFK_ERR_DPK;
+	if (rf->rfk_dz_rpt.dack_dz_code)
+		*err_code |= HALRF_RFK_ERR_DACK;
+	if (rf->rfk_dz_rpt.rxdck_dz_code)
+		*err_code |= HALRF_RFK_ERR_RXDCK;
+	if (rf->rfk_dz_rpt.txgapk_dz_code)
+		*err_code |= HALRF_RFK_ERR_TXGAPK;
+	if (rf->rfk_dz_rpt.tssi_dz_code)
+		*err_code |= HALRF_RFK_ERR_TSSI;
+
+	return RTW_HAL_STATUS_SUCCESS;
+}
+
+enum rtw_hal_status halrf_query_rf_diag_buf_len(u32 *len)
+{
+	if (!len)
+		return RTW_HAL_STATUS_FAILURE;
+
+	*len = sizeof(struct halrf_outsrc_rpt_v1);
+	return RTW_HAL_STATUS_SUCCESS;
+}
+
+enum rtw_hal_status halrf_query_rf_diag_buf(void *rf_void, u8 *ver, u8 *buf, u32 buf_len)
+{
+	struct rf_info *rf = (struct rf_info *)rf_void;
+	struct halrf_outsrc_rpt_v1 *ex_rpt = NULL;
+	struct halrf_ex_iqk_rpt_v1 *ex_iqk_rpt = NULL;
+	struct halrf_ex_dpk_rpt_v1 *ex_dpk_rpt = NULL;
+	struct halrf_ex_rt_rpt_v1 *ex_rt_rpt = NULL;
+	struct halrf_rfk_dz_rpt *rfk_rpt = NULL;
+	struct halrf_rt_rpt *rt_rpt = NULL;
+	struct halrf_ex_txgapk_rpt_v1 *ex_txgapk_rpt = NULL;
+
+	if (buf_len < sizeof(struct halrf_outsrc_rpt_v1))
+		return RTW_HAL_STATUS_FAILURE;
+	if (!buf || !ver)
+		return RTW_HAL_STATUS_FAILURE;
+	if (rf->rfk_is_processing == true)
+		return RTW_HAL_STATUS_FAILURE;
+
+	/* assign framework version */
+	*ver = HALRF_OUTSRC_FRAMEWORK_VER;
+
+	/* assign pointer */
+	ex_rpt = (struct halrf_outsrc_rpt_v1 *)buf;
+	ex_iqk_rpt = &ex_rpt->iqk_rpt;
+	ex_dpk_rpt = &ex_rpt->dpk_rpt;
+	ex_rt_rpt = &ex_rpt->rt_rpt;
+	rfk_rpt = &rf->rfk_dz_rpt;
+	rt_rpt = &rf->rf_rt_rpt;
+	ex_txgapk_rpt = &ex_rpt->txgapk_rpt;
+	/* err section */
+	ex_rpt->err.iqk = rfk_rpt->iqk_dz_code;
+	ex_rpt->err.dpk = rfk_rpt->dpk_dz_code;
+	ex_rpt->err.dack = rfk_rpt->dack_dz_code;
+	ex_rpt->err.rxdck = rfk_rpt->rxdck_dz_code;
+	ex_rpt->err.txgapk = rfk_rpt->txgapk_dz_code;
+	ex_rpt->err.tssi = rfk_rpt->tssi_dz_code;
+	ex_rpt->err.txgapk = rfk_rpt->txgapk_dz_code;
+	/* iqk section */
+	ex_rpt->iqk_rpt_ver = HALRF_OUTSRC_IQK_RPT_VER;
+	CP_MEMBER(rf, ex_iqk_rpt, rfk_rpt, struct halrf_ex_iqk_rpt_v1, iqk_dz_lok);
+	CP_MEMBER(rf, ex_iqk_rpt, rfk_rpt, struct halrf_ex_iqk_rpt_v1, iqk_dz_tx_xym);
+	CP_MEMBER(rf, ex_iqk_rpt, rfk_rpt, struct halrf_ex_iqk_rpt_v1, iqk_dz_rx_xym);
+	CP_MEMBER(rf, ex_iqk_rpt, rfk_rpt, struct halrf_ex_iqk_rpt_v1, iqk_dz_rx_rxbb);
+	CP_MEMBER(rf, ex_iqk_rpt, rfk_rpt, struct halrf_ex_iqk_rpt_v1, iqk_dz_s0_rxsram);
+	CP_MEMBER(rf, ex_iqk_rpt, rfk_rpt, struct halrf_ex_iqk_rpt_v1, iqk_dz_s1_rxsram);
+	/* dpk section */
+	ex_rpt->dpk_rpt_ver = HALRF_OUTSRC_DPK_RPT_VER;
+	CP_MEMBER(rf, ex_dpk_rpt, rfk_rpt, struct halrf_ex_dpk_rpt_v1, dpk_rxsram);
+	CP_MEMBER(rf, ex_dpk_rpt, rfk_rpt, struct halrf_ex_dpk_rpt_v1, dpk_pas);
+	/* rt section */
+	ex_rpt->rt_rpt_ver = HALRF_OUTSRC_RT_RPT_VER;
+	CP_MEMBER(rf, ex_rt_rpt, rt_rpt, struct halrf_ex_rt_rpt_v1, ch_info);
+	CP_MEMBER(rf, ex_rt_rpt, rt_rpt, struct halrf_ex_rt_rpt_v1, tssi_code);
+	ex_rt_rpt->drv_lck_fail_count = rt_rpt->drv_lck_fail_count;
+	ex_rt_rpt->fw_lck_fail_count = rt_rpt->fw_lck_fail_count;
+	/* txgapk section */
+	ex_rpt->txgapk_rpt_ver = HALRF_OUTSRC_TXGAPK_RPT_VER;
+	ex_txgapk_rpt->txgapk_dz_max_nctl_cnt = rfk_rpt->txgapk_dz_max_nctl_cnt;
+	CP_MEMBER(rf, ex_txgapk_rpt, rfk_rpt, struct halrf_ex_txgapk_rpt_v1, txgapk_dz_track_d);
+	CP_MEMBER(rf, ex_txgapk_rpt, rfk_rpt, struct halrf_ex_txgapk_rpt_v1, txgapk_dz_power_d);
+	
+
+	return RTW_HAL_STATUS_SUCCESS;
+}
+
+enum rtw_hal_status halrf_query_rfdz_info(void *rf_void, u8 *rt_rpt_buf, u32 rt_buf_len, u8 *rfk_rpt_buf, u32 rfk_buf_len)
+{
+	struct rf_info *rf = (struct rf_info *)rf_void;
+	struct halrf_ex_dz_info *dz_info = &rf->ex_dz_info;
+
+	if (rt_buf_len < (4 + sizeof(struct halrf_rt_rpt)))
+		return RTW_HAL_STATUS_FAILURE;
+	if (rfk_buf_len < (4 + sizeof(struct halrf_rfk_dz_rpt)))
+		return RTW_HAL_STATUS_FAILURE;
+	if (!rt_rpt_buf || !rfk_rpt_buf)
+		return RTW_HAL_STATUS_FAILURE;
+	if (rf->rfk_is_processing == true)
+		return RTW_HAL_STATUS_FAILURE;
+
+	rt_rpt_buf[0] = sizeof(struct halrf_rt_rpt) & 0xff;
+	rt_rpt_buf[1] = (sizeof(struct halrf_rt_rpt) & 0xff00) >> 8;
+	rt_rpt_buf[2] = (sizeof(struct halrf_rt_rpt) & 0xff0000) >> 16;
+	rt_rpt_buf[3] = (sizeof(struct halrf_rt_rpt) & 0xff000000) >> 24;
+	halrf_mem_cpy(rf, &rt_rpt_buf[4], &rf->rf_rt_rpt, sizeof(struct halrf_rt_rpt));
+	rfk_rpt_buf[0] = sizeof(struct halrf_rfk_dz_rpt) & 0xff;
+	rfk_rpt_buf[1] = (sizeof(struct halrf_rfk_dz_rpt) & 0xff00) >> 8;
+	rfk_rpt_buf[2] = (sizeof(struct halrf_rfk_dz_rpt) & 0xff0000) >> 16;
+	rfk_rpt_buf[3] = (sizeof(struct halrf_rfk_dz_rpt) & 0xff000000) >> 24;
+	halrf_mem_cpy(rf, &rfk_rpt_buf[4], &rf->rfk_dz_rpt, sizeof(struct halrf_rfk_dz_rpt));
+
+	return RTW_HAL_STATUS_SUCCESS;
+}
+
+void halrf_dz_event_notify(struct rf_info *rf, u8 notify_type,
+		u8 level, u8 version, u32 err_type)
+{
+	u8 p[4] = {0};
+
+	p[0] = (u8)(err_type & 0xff);
+	p[1] = (u8)((err_type & 0xff00) >> 8);
+	p[2] = (u8)((err_type & 0xff0000) >> 16);
+	p[3] = (u8)((err_type & 0xff000000) >> 24);
+	halrf_dz_event(rf, notify_type, level, version, p, 4);
+}
+
+void halrf_rfk_dz_err_notify(struct rf_info *rf, u32 err_code, u32 err_type)
+{
+	if (err_code != 0)
+		halrf_dz_event_notify(rf, HALRF_NOTIFY_RFK_ERR, HALRF_DIAG_EVT_LVL_CRITICAL, 1, err_type);
+}
+#endif
+
+void halrf_long_pkt_comp(struct rf_info *rf, enum phl_phy_idx phy_idx)
+{
+	halrf_ops_long_pkt_comp(rf, phy_idx);
+}

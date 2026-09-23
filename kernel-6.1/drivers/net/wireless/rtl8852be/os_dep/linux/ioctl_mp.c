@@ -686,7 +686,6 @@ int rtw_mp_bandwidth(struct net_device *dev,
 	return 0;
 }
 
-
 int rtw_mp_txpower_index(struct net_device *dev,
 			 struct iw_request_info *info,
 			 struct iw_point *wrqu, char *extra)
@@ -714,12 +713,8 @@ int rtw_mp_txpower_index(struct net_device *dev,
 
 	if (wrqu->length == 2) {
 		if (input[0] != '\0' ) {
-		rfpath = rtw_atoi(input);
-#ifndef CONFIG_80211AX_HE
-			txpower_inx = mpt_ProQueryCalTxPower(padapter, rfpath);
-			pextra += sprintf(pextra, " %d\n\t\t", txpower_inx);
-#else
-		tarpowerdbm = mpt_get_tx_power_finalabs_val(padapter, tx_nss);
+			rfpath = rtw_atoi(input);
+			tarpowerdbm = mpt_get_tx_power_finalabs_val(padapter, tx_nss);
 			if (tarpowerdbm > 0) {
 				pextra += sprintf(pextra, "dBm:%d.%d",
 				(tarpowerdbm / TX_POWER_BASE), rtw_mpt_raw2dec_dbm(tarpowerdbm));
@@ -727,7 +722,6 @@ int rtw_mp_txpower_index(struct net_device *dev,
 				rtw_mp_txpower_dbm(padapter, rfpath);
 			}
 		}
-#endif
 	} else {
 		u8 rfpath_i = 0;
 		u8 tx_nss = get_phy_tx_nss(padapter, adapter_link);
@@ -754,9 +748,7 @@ int rtw_mp_txpower_index(struct net_device *dev,
 		for (rfpath_i = 0 ; rfpath_i < tx_nss; rfpath_i ++)
 			rtw_mp_txpower_dbm(padapter, rfpath_i);
 	}
-
 	wrqu->length = strlen(extra);
-
 	return 0;
 }
 
@@ -767,10 +759,10 @@ int rtw_mp_txpower(struct net_device *dev,
 {
 	u32 idx_a = 0, idx_b = 0, idx_c = 0, idx_d = 0;
 	int MsetPower = 1;
-	char pout_str_buf[7];
+	char pout_str_buf[8];
 	u8		input[RTW_IWD_MAX_LEN];
 	u8 rfpath_i = 0;
-	u16 agc_cw_val = 0;
+	s16 agc_cw_val = 0;
 	_adapter *padapter = rtw_netdev_priv(dev);
 	struct _ADAPTER_LINK *padapter_link = GET_PRIMARY_LINK(padapter);
 	struct mp_priv *pmppriv = &padapter ->mppriv;
@@ -831,13 +823,15 @@ int rtw_mp_txpower(struct net_device *dev,
 				goto invalid_param_format;
 			}
 
-			pset = int_num * TX_POWER_BASE + ((dec_num * TX_POWER_BASE) / 100);
-			RTW_INFO("%s: pset=%d\n", __func__, pset);
-			pset = ((pset < 0 || signed_flag == 1) ? -pset : pset);
-
-
 			pextra += sprintf(pextra, "Set power dbm :%d.%d\n", int_num, dec_num);
+			dec_num = ((dec_num * TX_POWER_BASE) / 100);
+
+			if (signed_flag == 1 && dec_num > 0)
+				dec_num = -dec_num;
+
+			pset = int_num * TX_POWER_BASE + dec_num;
 			pmppriv->txpowerdbm = pset;
+			RTW_INFO("%s: pmppriv->txpowerdbm=%d\n", __func__, pmppriv->txpowerdbm);
 			pmppriv->bSetTxPower = 1;
 		} else {
 			pextra += sprintf(pextra, "Invalid format on line %s\n", input);
@@ -911,7 +905,6 @@ int rtw_mp_ant_tx(struct net_device *dev,
 			(pwr_dbm / TX_POWER_BASE), rtw_mpt_raw2dec_dbm(pwr_dbm));
 		}
 	}
-
 	wrqu->length = strlen(extra);
 	return 0;
 }
@@ -1265,6 +1258,7 @@ int rtw_mp_arx(struct net_device *dev,
 
 		pmppriv->rx_cal_stop = 0;
 		rtw_mp_reset_phy_count(padapter);
+		rtw_mp_rx_phl_cal_timer(padapter);
 
 		sprintf(extra, "start");
 
@@ -1751,12 +1745,10 @@ int rtw_mp_SetRFPath(struct net_device *dev,
 	_adapter *padapter = rtw_netdev_priv(dev);
 	char	input[RTW_IWD_MAX_LEN];
 	int		bMain = 1, bTurnoff = 1;
-#ifdef CONFIG_ANTENNA_DIVERSITY
-	u8 ret = _TRUE;
-#endif
+	struct mp_priv *pmp_priv = &padapter->mppriv;
 
-	RTW_INFO("%s:iwpriv in=%s\n", __func__, input);
-#if 0
+	if (rtw_do_mp_iwdata_len_chk(__func__, (wrqu->length + 1)))
+		return -EFAULT;
 
 	if (copy_from_user(input, wrqu->pointer, wrqu->length))
 		return -EFAULT;
@@ -1765,30 +1757,18 @@ int rtw_mp_SetRFPath(struct net_device *dev,
 	bTurnoff = strncmp(input, "0", 3); /* strncmp TRUE is 0*/
 
 	_rtw_memset(extra, 0, wrqu->length);
-#ifdef CONFIG_ANTENNA_DIVERSITY
-	if (bMain == 0)
-		ret = rtw_mp_set_antdiv(padapter, _TRUE);
-	else
-		ret = rtw_mp_set_antdiv(padapter, _FALSE);
-	if (ret == _FALSE)
-		RTW_INFO("%s:ANTENNA_DIVERSITY FAIL\n", __func__);
-#endif
 
 	if (bMain == 0) {
-		MP_PHY_SetRFPathSwitch(padapter, _TRUE);
-		RTW_INFO("%s:PHY_SetRFPathSwitch=TRUE\n", __func__);
+		pmp_priv->ant_sw = true;
+		RTW_INFO("%s:rtw_mp_set_rfpath_switch=true\n", __func__);
 		sprintf(extra, "mp_setrfpath Main\n");
-
 	} else if (bTurnoff == 0) {
-		MP_PHY_SetRFPathSwitch(padapter, _FALSE);
-		RTW_INFO("%s:PHY_SetRFPathSwitch=FALSE\n", __func__);
+		pmp_priv->ant_sw = false;
+		RTW_INFO("%s:rtw_mp_set_rfpath_switch=false\n", __func__);
 		sprintf(extra, "mp_setrfpath Aux\n");
-	} else {
-		bMain = MP_PHY_QueryRFPathSwitch(padapter);
-		RTW_INFO("%s:Query RF Path = %s\n", __func__, (bMain ? "Main":"Aux"));
-		sprintf(extra, "RF Path %s\n" , (bMain ? "1":"0"));
 	}
-#endif
+	rtw_mp_set_rfpath_switch(padapter);
+
 	wrqu->length = strlen(extra);
 
 	return 0;
@@ -1998,8 +1978,8 @@ int rtw_mp_get_tsside(struct net_device *dev,
 	char input[RTW_IWD_MAX_LEN];
 	u8 rfpath = 0xff;
 	s8 tssi_de = 0;
-	char pout_str_buf[7];
-	char tgr_str_buf[7];
+	char pout_str_buf[8];
+	char tgr_str_buf[8];
 	u8 pout_signed_flag = 0 , tgrpwr_signed_flag = 0;
 	int int_num = 0;
 	u32 dec_num = 0;
@@ -2202,7 +2182,7 @@ int rtw_mp_set_tsside(struct net_device *dev,
 			rtw_mp_set_tsside2verify(padapter, (u32)tsside_val, rf_path);
 			pmp_priv->bspecif_tssi_de = true;
 			pmp_priv->specif_tsside_val = tsside_val;
-			if (pmp_priv->tssi_mode == RTW_MP_TSSI_ON && bk_txpwr > 17 * TX_POWER_BASE) {
+			if (pmp_priv->tssi_mode >= RTW_MP_TSSI_ON && bk_txpwr > 17 * TX_POWER_BASE) {
                			 pmp_priv->txpowerdbm = 16 * TX_POWER_BASE ;
                 		for (rfpath_i = 0 ; rfpath_i < tx_nss; rfpath_i ++)
                         		rtw_mp_txpower_dbm(padapter, rfpath_i);
@@ -2289,7 +2269,7 @@ int rtw_mp_mon(struct net_device *dev,
 		/*rtw_disassoc_cmd(padapter, 0, 0);*/
 		if (check_fwstate(pmlmepriv, WIFI_ASOC_STATE) == _TRUE) {
 			rtw_disassoc_cmd(padapter, 500, 0);
-			rtw_indicate_disconnect(padapter, 0, _FALSE);
+			rtw_indicate_disconnect(padapter, 0, _TRUE);
 			/*rtw_free_assoc_resources_cmd(padapter, _TRUE, 0);*/
 		}
 		sprintf(extra, "monitor mode Stop\n");
@@ -3942,9 +3922,11 @@ int rtw_mp_mac_loopbk(struct net_device *dev,
 			i++;
 		}
 		RTW_INFO("Rx cnt=%d!\n", pmp_priv->rx_pktcount);
+#if 0
 #ifdef CONFIG_PCI_HCI
 		if (rtw_mp_get_tx_req_recycle(padapter) == 0)
 			sprintf(extra , "MAC Loopback [Tx Report] Fail\n");
+#endif
 #endif
 	} else {
 		sprintf(extra , "Error Format ! ,\

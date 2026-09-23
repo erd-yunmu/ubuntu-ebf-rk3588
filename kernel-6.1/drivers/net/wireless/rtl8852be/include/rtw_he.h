@@ -949,6 +949,14 @@
 #define HE_CAP_SUPPORT_MCS_OFFSET 17
 */
 
+#define HE_PHY_CAP_CHANNEL_WIDTH_40_IN_2G       (BIT(0))
+#define HE_PHY_CAP_CHANNEL_WIDTH_40_80_IN_5G_6G (BIT(1))
+#define HE_PHY_CAP_CHANNEL_WIDTH_160_IN_5G_6G   (BIT(1) | BIT(2))
+#define HE_PHY_CAP_CHANNEL_WIDTH_80_80_IN_5G_6G (BIT(1) | BIT(2) | BIT(3))
+
+#define HE_PHY_CAP_TX_MCS_MAP_LEN (2)
+#define HE_PHY_CAP_RX_MCS_MAP_LEN (2)
+
 /*
  * HE_Ope_Para (3)
  * BSS_Color (1)
@@ -1076,7 +1084,7 @@ void HE_caps_handler(_adapter *padapter, struct _ADAPTER_LINK *padapter_link,
 			PNDIS_802_11_VARIABLE_IEs pIE);
 struct rtw_phl_stainfo_t;
 void HE_mac_caps_handler(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta, u8 *ele_start);
-void HE_phy_caps_handler(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta, u8 *ele_start, u8 *supp_mcs_len);
+void HE_phy_caps_handler(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta, u8 *ele_start, u8 *supp_mcs_len, enum channel_width omn_chan_width);
 void HE_supp_mcs_handler(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta, u8 *ele_start, u8 supp_mcs_len);
 void HE_ppe_thre_handler(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta, u8 *ele_start);
 void rtw_he_set_asoc_cap_supp_mcs(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta, u8 *ele_start, u8 supp_mcs_len);

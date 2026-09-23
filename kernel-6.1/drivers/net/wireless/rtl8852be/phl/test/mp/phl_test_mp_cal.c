@@ -307,9 +307,9 @@ static enum rtw_phl_status phl_mp_trigger_watchdog_cal(
 
 	/* Transfer to report */
 	mp->rpt = NULL;
-	mp->rpt_len = sizeof(struct mp_cal_arg);
-	mp->buf = NULL;
-	mp->buf_len = 0;
+	mp->rpt_len = 0;
+	mp->buf = arg;
+	mp->buf_len = sizeof(struct mp_cal_arg);;
 
 	return RTW_PHL_STATUS_SUCCESS;
 }

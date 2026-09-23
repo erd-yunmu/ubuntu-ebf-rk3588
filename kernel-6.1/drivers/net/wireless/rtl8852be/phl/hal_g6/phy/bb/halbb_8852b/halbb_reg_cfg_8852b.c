@@ -129,8 +129,23 @@ void halbb_cfg_bb_gain_8852b(struct bb_info *bb, u32 addr, u32 data)
 			for (i = 0; i < 2; i++)
 				gain->tia_gain[band_idx][path][i] = (data >> (8 * i)) & 0xff;
 		}
+
+		if ((band_idx >= 4) && (band_idx <= 7)) { /*Avoid phy_reg_gain does not support band_idx 8~11*/
+			if (type == 0) {
+				for (i = 0; i < 4; i++)
+					gain->lna_gain[band_idx + 4][path][i] = (data >> (8 * i)) & 0xff;
+			} else if (type == 1) {
+				for (i = 0; i < 3; i++)
+					gain->lna_gain[band_idx + 4][path][4 + i] = (data >> (8 * i)) & 0xff;
+			} else if (type == 2) {
+				for (i = 0; i < 2; i++)
+					gain->tia_gain[band_idx + 4][path][i] = (data >> (8 * i)) & 0xff;
+			}
+		}
 	} else if (cfg_type == 1) { /*RPL Offset*/
 		halbb_cfg_bb_rpl_ofst(bb, band_idx, path, addr, data);
+		if ((band_idx >= 4) && (band_idx <= 7)) /*Avoid phy_reg_gain does not support band_idx 8~11*/
+			halbb_cfg_bb_rpl_ofst(bb, band_idx + 4, path, addr, data);
 	} else {
 		BB_WARNING("cfg_type=%d\n", cfg_type);
 	}

@@ -27,6 +27,7 @@
 #include "halbb_hwimg_raw_data_8852b.h"
 #include "halbb_hwimg_raw_data_8852bp.h"
 #include "halbb_hwimg_raw_data_8852bt.h"
+#include "halbb_hwimg_raw_data_8852bpt.h"
 #include "halbb_hwimg_raw_data_8852b_gain.h"
 
 #ifdef BB_8852B_SUPPORT
@@ -167,6 +168,9 @@ bool halbb_cfg_bbcr_ax_8852b(struct bb_info *bb, bool is_form_folder,
 	} else if (bb->ic_sub_type == BB_IC_SUB_TYPE_8852B_8852BT) {
 		array_len = sizeof(array_mp_8852bt_phy_reg) / sizeof(u32);
 		array = (u32 *)array_mp_8852bt_phy_reg;
+	} else if (bb->ic_sub_type == BB_IC_SUB_TYPE_8852B_8852BPT) {
+		array_len = sizeof(array_mp_8852bpt_phy_reg) / sizeof(u32);
+		array = (u32 *)array_mp_8852bpt_phy_reg;
 	} else {
 		array_len = sizeof(array_mp_8852b_phy_reg) / sizeof(u32);
 		array = (u32 *)array_mp_8852b_phy_reg;
@@ -277,6 +281,9 @@ bool halbb_cfg_bb_gain_ax_8852b(struct bb_info *bb, bool is_form_folder,
 	} else if (bb->ic_sub_type == BB_IC_SUB_TYPE_8852B_8852BT) {
 		array_len = sizeof(array_mp_8852bt_phy_reg_gain) / sizeof(u32);
 		array = (u32 *)array_mp_8852bt_phy_reg_gain;
+	} else if (bb->ic_sub_type == BB_IC_SUB_TYPE_8852B_8852BPT) {
+		array_len = sizeof(array_mp_8852bpt_phy_reg_gain) / sizeof(u32);
+		array = (u32 *)array_mp_8852bpt_phy_reg_gain;
 	} else {
 		array_len = sizeof(array_mp_8852b_phy_reg_gain) / sizeof(u32);
 		array = (u32 *)array_mp_8852b_phy_reg_gain;

@@ -48,8 +48,22 @@ struct phl_dbg_cmd_info {
 	u8 id;
 };
 
-enum rtw_phl_status
-rtw_phl_dbg_core_cmd(struct phl_info_t *phl_info, struct rtw_proc_cmd *incmd, char *output, u32 out_len);
+enum rtw_phl_status phl_dbg_core_cmd(struct phl_info_t *phl_info,
+				     struct rtw_proc_cmd *incmd, char *output,
+				     u32 out_len);
+
+enum rtw_phl_status phl_dbg_hal_cmd(struct phl_info_t *phl_info, char proc_cmd,
+				    struct rtw_proc_cmd *incmd, char *output,
+				    u32 out_len);
+enum rtw_phl_status phl_cmd_hal_proc_cmd_hdl(struct phl_info_t *phl_info,
+					     u8 *param);
+void phl_cmd_read_rfreg_hdl(struct phl_info_t *phl_info, u8 *param);
+
+void convert_tx_rate(enum rtw_rate_mode mode,
+                     u8 mcs_ss_idx,
+                     char *str,
+                     u32 str_len);
+void convert_rx_rate(u32 rx_rate, char *str, u32 str_len);
 
 #ifdef CONFIG_PHL_TEST_SUITE
 
@@ -90,11 +104,15 @@ enum PHL_DBG_CMD_ID {
 	PHL_DBG_CHAN_INFO,
 #endif
 	PHL_DBG_SET_LEVEL,
+	PHL_DBG_SET_DUMP_CFG,
 #ifdef CONFIG_PHL_SNIFFER_SUPPORT
 	PHL_DBG_SNIFFER,
 #endif
 #ifdef CONFIG_USB_HCI
 	PHL_DBG_USB_SPEED,
+#endif
+#ifdef DBG_MONITOR_TIME
+	PHL_DBG_FUNC_LATENCY,
 #endif
 	PHL_DBG_MAX
 };
@@ -136,11 +154,16 @@ static const struct phl_dbg_cmd_info phl_dbg_cmd_i[] = {
 	{"set_chan_info", PHL_DBG_CHAN_INFO},
 #endif
 	{"dbglevel", PHL_DBG_SET_LEVEL},
+	{"dump_cfg", PHL_DBG_SET_DUMP_CFG},
 #ifdef CONFIG_PHL_SNIFFER_SUPPORT
 	{"sniffer", PHL_DBG_SNIFFER},
 #endif
 #ifdef CONFIG_USB_HCI
 	{"usb_speed", PHL_DBG_USB_SPEED},
+#endif
+
+#ifdef DBG_MONITOR_TIME
+	{"fun_latency", PHL_DBG_FUNC_LATENCY}
 #endif
 
 };
@@ -156,6 +179,9 @@ static const struct phl_dbg_cmd_info phl_dbg_sniffer_cmd_i[] = {
 };
 #endif
 
+enum rtw_hal_status phl_dbg_proc_cmd(struct phl_info_t *phl_info,
+				     struct rtw_proc_cmd *incmd, char *output,
+				     u32 out_len);
 #ifdef CONFIG_USB_HCI
 enum PHL_DBG_USB_SPEED_CMD_ID {
 	PHL_DBG_USB_SPEED_HELP,
@@ -169,16 +195,10 @@ static const struct phl_dbg_cmd_info phl_dbg_usb_speed_cmd_i[] = {
 };
 #endif
 
-enum rtw_hal_status
-rtw_phl_dbg_proc_cmd(struct phl_info_t *phl_info,
-		     struct rtw_proc_cmd *incmd,
-		     char *output,
-		     u32 out_len);
 bool
 _get_hex_from_string(char *szstr, u32 *val);
 #else
-
-#define rtw_phl_dbg_proc_cmd(_phl_info, _incmd, _output, _out_len) RTW_HAL_STATUS_SUCCESS
-
-#endif
+#define phl_dbg_proc_cmd(_phl_info, _incmd, _output, _out_len)                 \
+	RTW_HAL_STATUS_SUCCESS
+#endif /* CONFIG_PHL_TEST_SUITE */
 #endif

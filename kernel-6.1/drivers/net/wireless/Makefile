@@ -44,3 +44,4 @@ obj-$(CONFIG_RTL8822BU) += rtl88x2bu/
 obj-$(CONFIG_RTL8822CE) += rtl8822ce/
 obj-$(CONFIG_RTL8723DS) += rtl8723ds/
 obj-$(CONFIG_RTL8852BE) += rtl8852be/
+obj-$(CONFIG_RTL8851BE) += rtl8851be/

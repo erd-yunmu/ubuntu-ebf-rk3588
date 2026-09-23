@@ -29,12 +29,12 @@
 #include "hal_g6/mac/mac_exp_def.h"
 #include "phl_def.h"
 #include "phl_debug.h"
+#include "phl_version.h"
 /*
  * PHL Feature headers start
  */
 #include "phl_ie.h"
 #include "phl_regulation_def.h"
-#include "phl_scan_instance.h"
 #include "phl_regulation.h"
 #include "phl_trx_def.h"
 #include "phl_wow_def.h"
@@ -66,7 +66,6 @@
 #include "phl_tx.h"
 #include "phl_rx_agg.h"
 #include "phl_rx.h"
-
 #include "phl_ser_def.h"
 #include "phl_sound_cmd.h"
 #include "phl_sound.h"
@@ -106,6 +105,7 @@
 #include "phl_txpwr.h"
 #include "phl_ext_tx_pwr_lmt_def.h"
 #include "phl_dfs.h"
+#include "phl_qos_mg.h"
 
 #ifdef CONFIG_PHL_CHANNEL_INFO
 #include "phl_chan_info_def.h"
@@ -150,5 +150,6 @@
 
 #ifdef CONFIG_WIFI_7
 #endif
+#include "phl_int.h"
 
 #endif /*_PHL_HEADERS_H_*/

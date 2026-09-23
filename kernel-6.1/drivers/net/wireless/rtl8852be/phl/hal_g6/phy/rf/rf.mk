@@ -24,6 +24,7 @@ halrf-y += $(path_halrf_d1)/halrf.o \
 			$(path_halrf_d1)/halrf_ex.o \
 			$(path_halrf_d1)/halrf_hw_cfg.o \
 			$(path_halrf_d1)/halrf_init.o \
+			$(path_halrf_d1)/halrf_init_ex.o \
 			$(path_halrf_d1)/halrf_interface.o \
 			$(path_halrf_d1)/halrf_pwr_table.o \
 			$(path_halrf_d1)/halrf_iqk.o \
@@ -94,6 +95,28 @@ halrf-y += $(path_halrf_8852bt)/halrf_8852bt.o\
 			$(path_halrf_8852bt)/halrf_ops_rtl8852bt.o
 endif
 
+ifeq ($(CONFIG_RTL8852BPT), y)
+rf_ic := 8852bpt
+
+# Level 2 directory
+path_halrf_8852bpt := $(path_halrf_d1)/halrf_$(rf_ic)
+
+halrf-y += $(path_halrf_8852bpt)/halrf_8852bpt.o\
+			$(path_halrf_8852bpt)/halrf_8852bpt_api.o \
+			$(path_halrf_8852bpt)/halrf_hwimg_8852bpt.o\
+			$(path_halrf_8852bpt)/halrf_txgapk_8852bpt.o\
+			$(path_halrf_8852bpt)/halrf_iqk_8852bpt.o\
+			$(path_halrf_8852bpt)/halrf_reg_cfg_8852bpt.o\
+			$(path_halrf_8852bpt)/halrf_dack_8852bpt.o \
+			$(path_halrf_8852bpt)/halrf_dpk_8852bpt.o \
+			$(path_halrf_8852bpt)/halrf_set_pwr_table_8852bpt.o\
+			$(path_halrf_8852bpt)/halrf_efuse_8852bpt.o\
+			$(path_halrf_8852bpt)/halrf_tssi_8852bpt.o\
+			$(path_halrf_8852bpt)/halrf_kfree_8852bpt.o\
+			$(path_halrf_8852bpt)/halrf_psd_8852bpt.o\
+			$(path_halrf_8852bpt)/halrf_ops_rtl8852bpt.o
+endif
+
 ifeq ($(CONFIG_RTL8852C), y)
 rf_ic := 8852c
 
@@ -116,11 +139,52 @@ halrf-y += $(path_halrf_8852c)/halrf_8852c.o \
 			$(path_halrf_8852c)/halrf_ops_rtl8852c.o
 endif
 
+ifeq ($(CONFIG_RTL8842A), y)
+rf_ic := 8842a
+rf_ic2 := 8852c
+
+# Level 2 directory
+path_halrf_8842a := $(path_halrf_d1)/halrf_$(rf_ic)
+path_halrf_8852c := $(path_halrf_d1)/halrf_$(rf_ic2)
+
+halrf-y += $(path_halrf_8842a)/halrf_8842a.o \
+			$(path_halrf_8842a)/halrf_8842a_api.o \
+			$(path_halrf_8842a)/halrf_hwimg_8842a.o\
+			$(path_halrf_8842a)/halrf_txgapk_8842a.o\
+			$(path_halrf_8842a)/halrf_iqk_8842a.o\
+			$(path_halrf_8842a)/halrf_reg_cfg_8842a.o \
+			$(path_halrf_8842a)/halrf_set_pwr_table_8842a.o\
+			$(path_halrf_8842a)/halrf_dack_8842a.o \
+			$(path_halrf_8842a)/halrf_dpk_8842a.o \
+			$(path_halrf_8842a)/halrf_efuse_8842a.o\
+			$(path_halrf_8842a)/halrf_tssi_8842a.o\
+			$(path_halrf_8842a)/halrf_kfree_8842a.o\
+			$(path_halrf_8842a)/halrf_psd_8842a.o\
+			$(path_halrf_8842a)/halrf_ops_rtl8842a.o
+			
+halrf-y += $(path_halrf_8852c)/halrf_8852c.o \
+			$(path_halrf_8852c)/halrf_8852c_api.o \
+			$(path_halrf_8852c)/halrf_hwimg_8852c.o\
+			$(path_halrf_8852c)/halrf_txgapk_8852c.o\
+			$(path_halrf_8852c)/halrf_iqk_8852c.o\
+			$(path_halrf_8852c)/halrf_reg_cfg_8852c.o \
+			$(path_halrf_8852c)/halrf_set_pwr_table_8852c.o\
+			$(path_halrf_8852c)/halrf_dack_8852c.o \
+			$(path_halrf_8852c)/halrf_dpk_8852c.o \
+			$(path_halrf_8852c)/halrf_efuse_8852c.o\
+			$(path_halrf_8852c)/halrf_tssi_8852c.o\
+			$(path_halrf_8852c)/halrf_kfree_8852c.o\
+			$(path_halrf_8852c)/halrf_psd_8852c.o\
+			$(path_halrf_8852c)/halrf_ops_rtl8852c.o
+endif
+
 ifeq ($(CONFIG_RTL8852D), y)
 rf_ic := 8852d
+rf_ic2 := 8832d
 
 # Level 2 directory
 path_halrf_8852d := $(path_halrf_d1)/halrf_$(rf_ic)
+path_halrf_8832d := $(path_halrf_d1)/halrf_$(rf_ic2)
 
 halrf-y += $(path_halrf_8852d)/halrf_8852d.o \
 			$(path_halrf_8852d)/halrf_8852d_api.o \
@@ -136,6 +200,21 @@ halrf-y += $(path_halrf_8852d)/halrf_8852d.o \
 			$(path_halrf_8852d)/halrf_kfree_8852d.o\
 			$(path_halrf_8852d)/halrf_psd_8852d.o\
 			$(path_halrf_8852d)/halrf_ops_rtl8852d.o
+
+halrf-y += $(path_halrf_8832d)/halrf_8832d.o \
+			$(path_halrf_8832d)/halrf_8832d_api.o \
+			$(path_halrf_8832d)/halrf_hwimg_8832d.o\
+			$(path_halrf_8832d)/halrf_txgapk_8832d.o\
+			$(path_halrf_8832d)/halrf_iqk_8832d.o\
+			$(path_halrf_8832d)/halrf_reg_cfg_8832d.o \
+			$(path_halrf_8832d)/halrf_set_pwr_table_8832d.o\
+			$(path_halrf_8832d)/halrf_dack_8832d.o \
+			$(path_halrf_8832d)/halrf_dpk_8832d.o \
+			$(path_halrf_8832d)/halrf_efuse_8832d.o\
+			$(path_halrf_8832d)/halrf_tssi_8832d.o\
+			$(path_halrf_8832d)/halrf_kfree_8832d.o\
+			$(path_halrf_8832d)/halrf_psd_8832d.o\
+			$(path_halrf_8832d)/halrf_ops_rtl8832d.o
 endif
 
 ifeq ($(CONFIG_RTL8832BR), y)

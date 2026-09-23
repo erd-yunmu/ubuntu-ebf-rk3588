@@ -354,8 +354,9 @@ void _halrf_txgapk_one_shot_nctl_done_check_io_ofld_8852b
 	(struct rf_info *rf, enum txgapk_id id, enum rf_path path)
 {
 	struct halrf_gapk_info *txgapk_info = &rf->gapk;
+#ifdef  HALRF_DZ_LOG
 	struct halrf_rfk_dz_rpt *rfk_dz = &rf->rfk_dz_rpt;
-
+#endif
 	/* for check status */
 	u32 r_bff8 = 0;
 	u32 r_80fc = 0;
@@ -370,7 +371,9 @@ void _halrf_txgapk_one_shot_nctl_done_check_io_ofld_8852b
 	/* for 0xbff8 check NCTL DONE */
 	if (!halrf_polling_bb(rf, 0xbff8, MASKBYTE0, 0x55, 2000)) {
 		RF_DBG(rf, DBG_RF_TXGAPK, "[TXGAPK] 0xbff8[7:0] == 0x55 timeout!!!\n");
+#ifdef  HALRF_DZ_LOG
 		rfk_dz->txgapk_dz_code |= BIT(8 * path);
+#endif
 		is_ready = false;
 	} else
 		is_ready = true;
@@ -399,8 +402,9 @@ void _halrf_txgapk_one_shot_nctl_done_check_default_8852b
 	(struct rf_info *rf, enum txgapk_id id, enum rf_path path)
 {
 	struct halrf_gapk_info *txgapk_info = &rf->gapk;
+#ifdef  HALRF_DZ_LOG
 	struct halrf_rfk_dz_rpt *rfk_dz = &rf->rfk_dz_rpt;
-	
+#endif
 	/* for check status */
 	u32 r_bff8 = 0;
 	u32 r_80fc = 0;
@@ -423,8 +427,10 @@ void _halrf_txgapk_one_shot_nctl_done_check_default_8852b
 		/* r_bff8 = 0; */
 		halrf_delay_us(rf, 10);
 		count++;
+#ifdef  HALRF_DZ_LOG
 		if (count == 2000)
 			rfk_dz->txgapk_dz_code |= BIT(8 * path);
+#endif
 	}
 
 	halrf_delay_us(rf, 1);
@@ -448,8 +454,10 @@ void _halrf_txgapk_one_shot_nctl_done_check_default_8852b
 		/* r_80fc = 0; */
 		halrf_delay_us(rf, 1);
 		count++;
+#ifdef  HALRF_DZ_LOG
 		if (count == 2000)
 			rfk_dz->txgapk_dz_code |= BIT(8 * path);
+#endif
 	}
 
 	halrf_delay_us(rf, 1);
@@ -2790,25 +2798,27 @@ void _halrf_txgapk_get_ch_info_8852b(struct rf_info *rf, enum phl_phy_idx phy)
 	u8 get_empty_table = false;
 
 	RF_DBG(rf, DBG_RF_TXGAPK, "[TXGAPK]======> %s \n", __func__);
-
-	for  (idx = 0;  idx < 2; idx++) {
-		if (txgapk_info->txgapk_mcc_ch[idx] == 0) {
-			get_empty_table = true;
-			break;
+	if(!phl_is_mp_mode(rf->phl_com))  {
+		for  (idx = 0;  idx < 2; idx++) {
+			if (txgapk_info->txgapk_mcc_ch[idx] == 0) {
+				get_empty_table = true;
+				break;
+			}
 		}
+		//RF_DBG(rf, DBG_RF_TXGAPK, "[TXGAPK] (1)  idx = %x\n", idx);
+
+		if (false == get_empty_table) {
+			idx = txgapk_info->txgapk_table_idx + 1;
+			if (idx > 1) {
+				idx = 0;
+			}		
+			//RF_DBG(rf, DBG_RF_IQK, "[IQK]we will replace iqk table index(%d), !!!!! \n", idx);
+		}	
+		//RF_DBG(rf, DBG_RF_TXGAPK, "[TXGAPK] (2)  idx = %x\n", idx);
+	} else {
+		idx = 0;		
+		RF_DBG(rf, DBG_RF_TXGAPK, "[TXGAPK] (2)  idx = %x\n", idx);
 	}
-	//RF_DBG(rf, DBG_RF_TXGAPK, "[TXGAPK] (1)  idx = %x\n", idx);
-
-	if (false == get_empty_table) {
-		idx = txgapk_info->txgapk_table_idx + 1;
-		if (idx > 1) {
-			idx = 0;
-		}		
-		//RF_DBG(rf, DBG_RF_IQK, "[IQK]we will replace iqk table index(%d), !!!!! \n", idx);
-	}	
-	//RF_DBG(rf, DBG_RF_TXGAPK, "[TXGAPK] (2)  idx = %x\n", idx);
-
-
 	txgapk_info->txgapk_table_idx =  idx;
 	txgapk_info->txgapk_mcc_ch[idx] = rf->hal_com->band[phy].cur_chandef.center_ch;
 	txgapk_info->ch[0] = rf->hal_com->band[phy].cur_chandef.center_ch;	

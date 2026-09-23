@@ -15,32 +15,6 @@
 #include "hal_headers.h"
 
 /**
- * _dump_csi_buf_status
- * 	Dump all of the csi buffer status;
- * @csi_obj: (struct hal_csi_obj *)
- **/
-void _dump_csi_buf_status(struct hal_csi_obj *csi_obj)
-{
-	struct hal_csi_buf *csi_buf = NULL;
-	u8 i = 0;
-	PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "===> DUMP HAL CSI Buffer Status\n");
-	for (i = 0; i < csi_obj->max_csi_buf_nr; i++) {
-		csi_buf = &csi_obj->csi_buf[i];
-		PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "[CSI BUF][%d] status 0x%x \n",
-				csi_buf->idx, csi_buf->sub_idx);
-		PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "[CSI BUF] 20UU (%d) \n",
-				IS_SUB20_BUSY(csi_buf, 3));
-		PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "[CSI BUF] 20UL (%d) \n",
-				IS_SUB20_BUSY(csi_buf, 2));
-		PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "[CSI BUF] 20LU (%d) \n",
-				IS_SUB20_BUSY(csi_buf, 1));
-		PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "[CSI BUF] 20LL (%d) \n",
-				IS_SUB20_BUSY(csi_buf, 0));
-	}
-	PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "<=== DUMP HAL CSI Buffer Status\n");
-}
-
-/**
  * __query_avl_buf_idx_20
  * 	Get available sub 20MHz csi buffer
  * input :
@@ -404,19 +378,17 @@ void hal_csi_deinit(struct hal_info_t *hal_info)
 	struct rtw_hal_com_t *hal_com = hal_info->hal_com;
 	struct hal_csi_obj *csi_obj = (struct hal_csi_obj *)hal_com->csi_obj;
 	void *drv_priv = hal_to_drvpriv(hal_info);
-	struct hal_csi_buf *csi_buf = csi_obj->csi_buf;
 
 	if (csi_obj != NULL) {
-		if (csi_buf != NULL) {
-			_os_mem_free(hal_to_drvpriv(hal_info), csi_buf,
-			sizeof(struct hal_csi_buf) * csi_obj->max_csi_buf_nr);
+		if (csi_obj->csi_buf != NULL) {
+			_os_mem_free(drv_priv, csi_obj->csi_buf,
+			             sizeof(struct hal_csi_buf) * csi_obj->max_csi_buf_nr);
 			csi_obj->csi_buf = NULL;
 		}
 
 		_os_spinlock_free(drv_priv, &csi_obj->csi_lock);
 		/* bf obj need free as last */
-		_os_mem_free(hal_to_drvpriv(hal_info), csi_obj,
-					sizeof(struct hal_csi_obj));
+		_os_mem_free(drv_priv, csi_obj, sizeof(struct hal_csi_obj));
 		hal_com->csi_obj = NULL;
 	}
 }
@@ -472,8 +444,6 @@ enum rtw_hal_status hal_csi_query_idle_csi_buf(
 		_os_spinunlock(drv_priv, &csi_obj->csi_lock, _ps, NULL);
 	}
 	break;
-	default:
-	break;
 	}
 	if (tmp_csi_buf == NULL || sub_idx == CSI_BUF_SUB_IDX_NON) {
 		status = RTW_HAL_STATUS_RESOURCE;
@@ -515,10 +485,10 @@ enum rtw_hal_status hal_csi_release_csi_buf(
 		return status;
 	}
 
+	_os_spinlock(drv_priv, &csi_obj->csi_lock, _ps, NULL);
 	if (csi_buf->idx < csi_obj->max_csi_buf_nr) {
 		tmp_csi_buf = &csi_obj->csi_buf[csi_buf->idx];
 
-		_os_spinlock(drv_priv, &csi_obj->csi_lock, _ps, NULL);
 
 		switch (csi_buf->sub_idx) {
 		case CSI_BUF_SUB_IDX_FULL_BW:
@@ -549,9 +519,9 @@ enum rtw_hal_status hal_csi_release_csi_buf(
 		}
 		csi_buf->idx = 0;
 		csi_buf->sub_idx = CSI_BUF_SUB_IDX_NON;
-		_os_spinunlock(drv_priv, &csi_obj->csi_lock, _ps, NULL);
 		status = RTW_HAL_STATUS_SUCCESS;
 	}
+	_os_spinunlock(drv_priv, &csi_obj->csi_lock, _ps, NULL);
 	return status;
 }
 

@@ -14,7 +14,6 @@
  *****************************************************************************/
 #define _RTL8852BE_OPS_C_
 #include "../rtl8852b_hal.h"
-#include "rtl8852be.h"
 
 void hal_set_ops_8852be(struct rtw_phl_com_t *phl_com,
 				struct hal_info_t *hal)
@@ -25,13 +24,13 @@ void hal_set_ops_8852be(struct rtw_phl_com_t *phl_com,
 
 	ops->init_hal_spec = init_hal_spec_8852be;
 	ops->hal_get_efuse = hal_get_efuse_8852be;
+	ops->hal_fast_start = hal_fast_start_8852be;
+	ops->hal_fast_stop = hal_fast_stop_8852be;
 	ops->hal_init = hal_init_8852be;
 	ops->hal_deinit = hal_deinit_8852be;
 	ops->hal_start = hal_start_8852be;
 	ops->hal_stop = hal_stop_8852be;
-#ifdef CONFIG_PCI_HCI
 	ops->hal_set_pcicfg = hal_set_pcicfg_8852be;
-#endif /* CONFIG_PCI_HCI */
 #ifdef CONFIG_WOWLAN
 	ops->hal_wow_init = hal_wow_init_8852be;
 	ops->hal_wow_deinit = hal_wow_deinit_8852be;

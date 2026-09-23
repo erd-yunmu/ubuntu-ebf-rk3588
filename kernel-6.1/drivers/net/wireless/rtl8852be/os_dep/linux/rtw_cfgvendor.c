@@ -214,40 +214,46 @@ static int rtw_cfgvendor_send_cmd_reply(struct wiphy *wiphy,
 }
 
 /* Feature enums */
-#define WIFI_FEATURE_INFRA              0x0001      // Basic infrastructure mode
-#define WIFI_FEATURE_INFRA_5G           0x0002      // Support for 5 GHz Band
-#define WIFI_FEATURE_HOTSPOT            0x0004      // Support for GAS/ANQP
-#define WIFI_FEATURE_P2P                0x0008      // Wifi-Direct
-#define WIFI_FEATURE_SOFT_AP            0x0010      // Soft AP
-#define WIFI_FEATURE_GSCAN              0x0020      // Google-Scan APIs
-#define WIFI_FEATURE_NAN                0x0040      // Neighbor Awareness Networking
-#define WIFI_FEATURE_D2D_RTT            0x0080      // Device-to-device RTT
-#define WIFI_FEATURE_D2AP_RTT           0x0100      // Device-to-AP RTT
-#define WIFI_FEATURE_BATCH_SCAN         0x0200      // Batched Scan (legacy)
-#define WIFI_FEATURE_PNO                0x0400      // Preferred network offload
-#define WIFI_FEATURE_ADDITIONAL_STA     0x0800      // Support for two STAs
-#define WIFI_FEATURE_TDLS               0x1000      // Tunnel directed link setup
-#define WIFI_FEATURE_TDLS_OFFCHANNEL    0x2000      // Support for TDLS off channel
-#define WIFI_FEATURE_EPR                0x4000      // Enhanced power reporting
-#define WIFI_FEATURE_AP_STA             0x8000      // Support for AP STA Concurrency
-#define WIFI_FEATURE_LINK_LAYER_STATS   0x10000     // Link layer stats collection
-#define WIFI_FEATURE_LOGGER             0x20000     // WiFi Logger
-#define WIFI_FEATURE_HAL_EPNO           0x40000     // WiFi PNO enhanced
-#define WIFI_FEATURE_RSSI_MONITOR       0x80000     // RSSI Monitor
-#define WIFI_FEATURE_MKEEP_ALIVE        0x100000    // WiFi mkeep_alive
-#define WIFI_FEATURE_CONFIG_NDO         0x200000    // ND offload configure
-#define WIFI_FEATURE_TX_TRANSMIT_POWER  0x400000    // Capture Tx transmit power levels
-#define WIFI_FEATURE_CONTROL_ROAMING    0x800000    // Enable/Disable firmware roaming
-#define WIFI_FEATURE_IE_WHITELIST       0x1000000   // Support Probe IE white listing
-#define WIFI_FEATURE_SCAN_RAND          0x2000000   // Support MAC & Probe Sequence Number randomization
+#define WIFI_FEATURE_INFRA              (u64)0x1      // Basic infrastructure mode
+#define WIFI_FEATURE_INFRA_5G           (u64)0x2      // Support for 5 GHz Band
+#define WIFI_FEATURE_HOTSPOT            (u64)0x4      // Support for GAS/ANQP
+#define WIFI_FEATURE_P2P                (u64)0x8      // Wifi-Direct
+#define WIFI_FEATURE_SOFT_AP            (u64)0x10      // Soft AP
+#define WIFI_FEATURE_GSCAN              (u64)0x20      // Google-Scan APIs
+#define WIFI_FEATURE_NAN                (u64)0x40      // Neighbor Awareness Networking
+#define WIFI_FEATURE_D2D_RTT            (u64)0x80      // Device-to-device RTT
+#define WIFI_FEATURE_D2AP_RTT           (u64)0x100      // Device-to-AP RTT
+#define WIFI_FEATURE_BATCH_SCAN         (u64)0x200      // Batched Scan (legacy)
+#define WIFI_FEATURE_PNO                (u64)0x400      // Preferred network offload
+#define WIFI_FEATURE_ADDITIONAL_STA     (u64)0x800      // Support for two STAs
+#define WIFI_FEATURE_TDLS               (u64)0x1000      // Tunnel directed link setup
+#define WIFI_FEATURE_TDLS_OFFCHANNEL    (u64)0x2000      // Support for TDLS off channel
+#define WIFI_FEATURE_EPR                (u64)0x4000      // Enhanced power reporting
+#define WIFI_FEATURE_AP_STA             (u64)0x8000      // Support for AP STA Concurrency
+#define WIFI_FEATURE_LINK_LAYER_STATS   (u64)0x10000     // Link layer stats collection
+#define WIFI_FEATURE_LOGGER             (u64)0x20000     // WiFi Logger
+#define WIFI_FEATURE_HAL_EPNO           (u64)0x40000     // WiFi PNO enhanced
+#define WIFI_FEATURE_RSSI_MONITOR       (u64)0x80000     // RSSI Monitor
+#define WIFI_FEATURE_MKEEP_ALIVE        (u64)0x100000    // WiFi mkeep_alive
+#define WIFI_FEATURE_CONFIG_NDO         (u64)0x200000    // ND offload configure
+#define WIFI_FEATURE_TX_TRANSMIT_POWER  (u64)0x400000    // Capture Tx transmit power levels
+#define WIFI_FEATURE_CONTROL_ROAMING    (u64)0x800000    // Enable/Disable firmware roaming
+#define WIFI_FEATURE_IE_WHITELIST       (u64)0x1000000   // Support Probe IE white listing
+#define WIFI_FEATURE_SCAN_RAND          (u64)0x2000000   // Support MAC & Probe Sequence Number randomization
+#define WIFI_FEATURE_SET_TX_POWER_LIMIT (u64)0x4000000   // Support Tx Power Limit setting
+#define WIFI_FEATURE_USE_BODY_HEAD_SAR  (u64)0x8000000   // Support Using Body/Head Proximity for SAR
+#define WIFI_FEATURE_DYNAMIC_SET_MAC    (u64)0x10000000  // Support changing MAC address without iface reset(down and up)
+#define WIFI_FEATURE_SET_LATENCY_MODE   (u64)0x40000000  // Support Latency mode setting
+#define WIFI_FEATURE_P2P_RAND_MAC       (u64)0x80000000  // Support P2P MAC randomization
+#define WIFI_FEATURE_INFRA_60G          (u64)0x100000000 // Support for 60GHz Band
 // Add more features here
 
 #define MAX_FEATURE_SET_CONCURRRENT_GROUPS  3
 
-int rtw_dev_get_feature_set(struct net_device *dev)
+u64 rtw_dev_get_feature_set(struct net_device *dev)
 {
 	_adapter *adapter = (_adapter *)rtw_netdev_priv(dev);
-	int feature_set = 0;
+	u64 feature_set = 0;
 
 	feature_set |= WIFI_FEATURE_INFRA;
 
@@ -275,6 +281,7 @@ int rtw_dev_get_feature_set(struct net_device *dev)
 #ifdef CONFIG_RTW_WIFI_HAL
 	feature_set |= WIFI_FEATURE_CONFIG_NDO;
 	feature_set |= WIFI_FEATURE_SCAN_RAND;
+ 	feature_set |= WIFI_FEATURE_DYNAMIC_SET_MAC;
 #endif
 
 	return feature_set;
@@ -335,11 +342,11 @@ static int rtw_cfgvendor_get_feature_set(struct wiphy *wiphy,
 		struct wireless_dev *wdev, const void  *data, int len)
 {
 	int err = 0;
-	int reply;
+	u64 reply;
 
 	reply = rtw_dev_get_feature_set(wdev_to_ndev(wdev));
 
-	err =  rtw_cfgvendor_send_cmd_reply(wiphy, wdev_to_ndev(wdev), &reply, sizeof(int));
+	err =  rtw_cfgvendor_send_cmd_reply(wiphy, wdev_to_ndev(wdev), &reply, sizeof(u64));
 
 	if (unlikely(err))
 		RTW_ERR(FUNC_NDEV_FMT" Vendor Command reply failed ret:%d\n"
@@ -1212,7 +1219,7 @@ static void LinkLayerStats(_adapter *padapter)
 }
 
 #define DUMMY_TIME_STATICS 99
-static int rtw_cfgvendor_lstats_get_info(struct wiphy *wiphy,	
+static int rtw_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
 {
 	int err = 0;
@@ -1233,8 +1240,8 @@ static int rtw_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	radio->radio = 1;
 
 	/* to get on_time, tx_time, rx_time */
-	LinkLayerStats(padapter); 
-	
+	LinkLayerStats(padapter);
+
 	radio->on_time = pwrpriv->on_time;
 	radio->tx_time = pwrpriv->tx_time;
 	radio->rx_time = pwrpriv->rx_time;
@@ -1253,9 +1260,9 @@ static int rtw_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	RTW_INFO("radio->tx_time :  %u ms\n", (radio->tx_time));
 	RTW_INFO("radio->rx_time :  %u ms\n", (radio->rx_time));
 	#endif /* CONFIG_RTW_WIFI_HAL_DEBUG */
-	
+
 	RTW_DBG(FUNC_NDEV_FMT" %s\n", FUNC_NDEV_ARG(wdev_to_ndev(wdev)), (char*)data);
-	err =  rtw_cfgvendor_send_cmd_reply(wiphy, wdev_to_ndev(wdev), 
+	err =  rtw_cfgvendor_send_cmd_reply(wiphy, wdev_to_ndev(wdev),
 		output, sizeof(wifi_iface_stat) + sizeof(wifi_radio_stat_internal));
 	if (unlikely(err))
 		RTW_ERR(FUNC_NDEV_FMT"Vendor Command reply failed ret:%d \n"
@@ -1263,14 +1270,14 @@ static int rtw_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	rtw_mfree(output, sizeof(wifi_iface_stat) + sizeof(wifi_radio_stat_internal));
 	return err;
 }
-static int rtw_cfgvendor_lstats_set_info(struct wiphy *wiphy,	
+static int rtw_cfgvendor_lstats_set_info(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
 {
 	int err = 0;
 	RTW_INFO("%s\n", __func__);
 	return err;
 }
-static int rtw_cfgvendor_lstats_clear_info(struct wiphy *wiphy,	
+static int rtw_cfgvendor_lstats_clear_info(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
 {
 	int err = 0;
@@ -1655,7 +1662,7 @@ static int rtw_cfgvendor_stop_mkeep_alive(struct wiphy *wiphy, struct wireless_d
 static int rtw_cfgvendor_set_nodfs_flag(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
-	int err = 0;	
+	int err = 0;
 	int type;
 	u32 nodfs = 0;
 	_adapter *padapter = GET_PRIMARY_ADAPTER(wiphy_to_adapter(wiphy));
@@ -1671,7 +1678,7 @@ static int rtw_cfgvendor_set_nodfs_flag(struct wiphy *wiphy,
 	}
 
 	RTW_INFO("%s nodfs=%d, err=%d\n", __func__, nodfs, err);
-	
+
 	return err;
 }
 
@@ -1701,7 +1708,7 @@ static int rtw_cfgvendor_set_country(struct wiphy *wiphy,
 
 	RTW_INFO("%s country_code:\"%c%c\" \n", __func__, country_code[0], country_code[1]);
 
-	rtw_set_country(padapter, country_code, RTW_REGD_SET_BY_USER);
+	rtw_set_country(padapter, country_code, RTW_ENV_NUM, RTW_REGD_SET_BY_USER);
 
 	return err;
 }
@@ -1709,7 +1716,7 @@ static int rtw_cfgvendor_set_country(struct wiphy *wiphy,
 static int rtw_cfgvendor_set_nd_offload(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
-	int err = 0;	
+	int err = 0;
 	int type;
 	u8 nd_en = 0;
 	_adapter *padapter = GET_PRIMARY_ADAPTER(wiphy_to_adapter(wiphy));
@@ -1725,9 +1732,143 @@ static int rtw_cfgvendor_set_nd_offload(struct wiphy *wiphy,
 	}
 
 	RTW_INFO("%s nd_en=%d, err=%d\n", __func__, nd_en, err);
-	
+
 	return err;
 }
+#ifdef CONFIG_APF
+static int rtw_cfgvendor_get_capabilities(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+		int ret = 0;
+		u32 version = CONFIG_APF_VERSION, maxlen = CONFIG_APF_RAM_SIZE;
+		struct sk_buff *skb;
+
+		RTW_INFO("%s()\n", __func__);
+
+		/* Alloc the SKB for vendor_event */
+		skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, 2 * sizeof(u32));
+		if (!skb) {
+			RTW_ERR("skb allocation is failed\n");
+			ret = FAIL;
+			goto exit;
+		}
+
+		nla_put_u32(skb, APF_ATTRIBUTE_VERSION, version);
+		nla_put_u32(skb, APF_ATTRIBUTE_MAX_LEN, maxlen);
+
+		ret = cfg80211_vendor_cmd_reply(skb);
+
+		if (ret) {
+			RTW_ERR("Vendor Command reply failed ret:%d \n", ret);
+		}
+	exit:
+		return ret;
+
+}
+
+static int rtw_cfgvendor_set_packet_filter(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct _ADAPTER *padapter = GET_PRIMARY_ADAPTER(wiphy_to_adapter(wiphy));
+	struct wow_priv *wowpriv = adapter_to_wowlan(padapter);
+	struct phl_apf_info *info = &wowpriv->apf_info;
+	int err = 0, rem, type;
+	u16 apf_prog_len, i;
+	u8 *apf_prog;
+	u8 index;
+	u8 empty_blk[16] = {0};
+	const struct nlattr *iter;
+
+	RTW_INFO("%s()\n", __func__);
+
+	nla_for_each_attr(iter, data, len, rem) {
+		type = nla_type(iter);
+		switch (type) {
+			case APF_ATTRIBUTE_PROGRAM_LEN:
+				apf_prog_len =  nla_get_u32(iter);
+				break;
+			case APF_ATTRIBUTE_PROGRAM:
+#ifdef CONFIG_APF_DBG
+				RTW_INFO("[APFDBG] %s() APF_ATTRIBUTE_PROGRAM, len(%u)\n", __func__, apf_prog_len);
+				//RTW_INFO_DUMP(NULL, nla_data(iter), nla_len(iter));
+#endif
+				apf_prog = rtw_zmalloc(apf_prog_len);
+				if (apf_prog != NULL) {
+					_rtw_memcpy(apf_prog, nla_data(iter), apf_prog_len);
+				} else {
+					RTW_ERR("Cannot alloc memory for apf prog\n");
+					err = -EINVAL;
+					goto exit;
+				}
+				break;
+			default:
+				RTW_ERR("Unknown type: %d\n", type);
+				err = -EINVAL;
+				goto exit;
+		}
+	}
+	/* process apf prog */
+	if (apf_prog_len > MAX_APF_RAM_SIZE) {
+		err = -EINVAL;
+		goto exit;
+	}
+
+	if (_rtw_memcmp(apf_prog, empty_blk, 16) == _TRUE && apf_prog_len == MAX_APF_RAM_SIZE) {
+		RTW_INFO("Clear apf ram\n");
+		rtw_apf_cmd_hdl(padapter, PHL_APF_CMD_CLEAR);
+	} else {
+
+		RTW_INFO("Set apf prog\n");
+		_rtw_memcpy(info->ram.buf, apf_prog, apf_prog_len);
+		info->ram.prog_len = apf_prog_len;
+#ifdef CONFIG_APF_DBG_DUMP
+		RTW_INFO("[APFDBG] prog_len(%u)\n", info->ram.prog_len);
+		RTW_INFO_DUMP("[APFDBG] rtw_cfgvendor_set_packet_filter\n", info->ram.buf, info->ram.prog_len);
+#endif
+		rtw_apf_cmd_hdl(padapter, PHL_APF_CMD_CHANGE);
+	}
+
+exit:
+	if (apf_prog)
+		rtw_mfree(apf_prog, apf_prog_len);
+	return err;
+}
+
+static int rtw_cfgvendor_get_packet_filter(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct _ADAPTER *padapter = GET_PRIMARY_ADAPTER(wiphy_to_adapter(wiphy));
+	struct wow_priv *wowpriv = adapter_to_wowlan(padapter);
+	struct phl_apf_info *info = &wowpriv->apf_info;
+	int ret = 0;
+	u32 skb_len = 0;
+	struct sk_buff *skb;
+
+	RTW_INFO("%s()\n", __func__);
+	rtw_apf_cmd_hdl(padapter, PHL_APF_CMD_REPORT);
+	/* Delay for get report */
+	rtw_msleep_os(50);
+	/* Alloc the SKB for vendor_event */
+	skb_len = MAX_APF_RAM_SIZE + sizeof(u32);
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, skb_len);
+	if (!skb) {
+		RTW_ERR("skb allocation is failed\n");
+		ret = FAIL;
+		goto exit;
+	}
+#ifdef CONFIG_APF_DBG_DUMP
+	RTW_INFO_DUMP("[APFDBG] rtw_cfgvendor_get_packet_filter\n", info->ram.buf, MAX_APF_RAM_SIZE);
+#endif
+	nla_put_u32(skb, APF_ATTRIBUTE_PROGRAM_LEN, MAX_APF_RAM_SIZE);
+	nla_put(skb, APF_ATTRIBUTE_PROGRAM, MAX_APF_RAM_SIZE, info->ram.buf);
+	ret = cfg80211_vendor_cmd_reply(skb);
+	if (ret)
+		RTW_ERR("Vendor Command reply failed ret:%d \n", ret);
+exit:
+	return ret;
+}
+
+#endif /* CONFIG_APF */
 #endif /* CONFIG_RTW_WIFI_HAL */
 
 static const struct wiphy_vendor_command rtw_vendor_cmds[] = {
@@ -2014,7 +2155,7 @@ static const struct wiphy_vendor_command rtw_vendor_cmds[] = {
 		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = VENDOR_CMD_RAW_DATA,
 		#endif
-	},	
+	},
 #endif /* CONFIG_RTW_CFGVENDOR_WIFI_LOGGER */
 #ifdef CONFIG_RTW_WIFI_HAL
 #ifdef CONFIG_RTW_CFGVENDOR_RANDOM_MAC_OUI
@@ -2087,6 +2228,41 @@ static const struct wiphy_vendor_command rtw_vendor_cmds[] = {
 		.policy = VENDOR_CMD_RAW_DATA,
 		#endif
 	},
+#ifdef CONFIG_APF
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = APF_SUBCMD_GET_CAPABILITIES
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = rtw_cfgvendor_get_capabilities,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+			.policy = VENDOR_CMD_RAW_DATA,
+#endif
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = APF_SUBCMD_SET_FILTER
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = rtw_cfgvendor_set_packet_filter,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = VENDOR_CMD_RAW_DATA,
+#endif
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = APF_SUBCMD_GET_FILTER
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = rtw_cfgvendor_get_packet_filter,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = VENDOR_CMD_RAW_DATA,
+#endif
+	},
+#endif /* CONFIG_APF */
 #endif /* CONFIG_RTW_WIFI_HAL */
 	{
 		{

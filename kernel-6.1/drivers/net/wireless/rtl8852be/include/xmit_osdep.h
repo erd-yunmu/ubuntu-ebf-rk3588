@@ -80,7 +80,9 @@ void rtw_os_xmit_resource_free(_adapter *padapter, struct xmit_buf *pxmitbuf, u3
 u8 rtw_os_xmit_resource_alloc(_adapter *padapter, struct xmit_frame *pxframe);
 void rtw_os_xmit_resource_free(_adapter *padapter, struct xmit_frame *pxframe);
 #endif
-extern void rtw_set_tx_chksum_offload(struct sk_buff *pkt, struct pkt_attrib *pattrib);
+#ifdef CONFIG_TCP_CSUM_OFFLOAD_TX
+void rtw_set_tx_chksum_offload(struct sk_buff *pkt, struct pkt_attrib *pattrib);
+#endif
 
 extern uint rtw_remainder_len(struct pkt_file *pfile);
 extern void _rtw_open_pktfile(struct sk_buff *pkt, struct pkt_file *pfile);

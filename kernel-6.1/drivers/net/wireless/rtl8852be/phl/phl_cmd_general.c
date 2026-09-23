@@ -195,8 +195,8 @@ _phl_cmd_general_pre_phase_msg_hdlr(struct phl_info_t *phl_info, void *dispr,
 
 static u8 _skip_normal_hw_watchdog(struct phl_info_t *phl_info)
 {
-	struct rtw_phl_com_t *phl_com = phl_info->phl_com;
 #ifdef CONFIG_PHL_CHSWOFLD
+	struct rtw_phl_com_t *phl_com = phl_info->phl_com;
 	struct chsw_ofld_info_t *chsw_ofld_info = &phl_com->chsw_ofld_info;
 
 	if (chsw_ofld_info->chsw_ofld_en && chsw_ofld_info->skip_normal_watchdog)
@@ -290,6 +290,18 @@ _phl_cmd_general_post_phase_msg_hdlr(struct phl_info_t *phl_info, void *dispr,
 	case MSG_EVT_GET_USB_SW_ABILITY:
 		psts = phl_get_usb_support_ability(phl_info, (u32*)(phl_cmd->buf));
 	break;
+#ifdef CONFIG_PHL_CUSTOM_FEATURE_USB
+	case MSG_EVT_SET_USB_SW_ABILITY:
+		psts = phl_cmd_set_usb_support_ability(phl_info, *(u32*)(phl_cmd->buf));
+	break;
+#endif
+	case MSG_EVT_GET_USB_MODE_STATUS:
+		psts = phl_cmd_get_usb_mode_status(phl_info, (u32*)(phl_cmd->buf));
+	break;
+	case MSG_EVT_GET_U3_PERF_MODE:
+		psts = phl_cmd_get_u3_perf_mode(phl_info, (u32*)(phl_cmd->buf));
+	break;
+
 #endif
 	case MSG_EVT_HWSEQ_GET_HW_SEQUENCE:
 		psts = phl_cmd_get_hwseq_hdl(phl_info, phl_cmd->buf);
@@ -302,6 +314,9 @@ _phl_cmd_general_post_phase_msg_hdlr(struct phl_info_t *phl_info, void *dispr,
 	break;
 	case MSG_EVT_UPDT_EXT_TXPWR_LMT:
 		psts = phl_cmd_updt_ext_txpwr_lmt(phl_info, phl_cmd->buf);
+	break;
+	case MSG_EVT_SET_TAS_EN:
+		psts = phl_cmd_set_tas_en(phl_info, phl_cmd->buf);
 	break;
 	case MSG_EVT_DFS_PAUSE_TX:
 		psts = phl_cmd_dfs_tx_pause_hdl(phl_info, phl_cmd->buf);
@@ -319,12 +334,11 @@ _phl_cmd_general_post_phase_msg_hdlr(struct phl_info_t *phl_info, void *dispr,
 	}
 	break;
 
-#if defined(CONFIG_PCI_HCI)
-	case MSG_EVT_HAL_SET_L2_LEAVE:
-		if (rtw_hal_set_l2_leave(phl_info->hal) == RTW_HAL_STATUS_SUCCESS)
-			psts = RTW_PHL_STATUS_SUCCESS;
+	#ifdef CONFIG_WOWLAN
+	case MSG_EVT_HAL_SET_WOWLAN:
+		psts = phl_cmd_set_wowlan_hdl(phl_info, phl_cmd->buf);
 	break;
-#endif
+	#endif
 
 	case MSG_EVT_GET_TX_PWR_DBM:
 	{
@@ -387,6 +401,15 @@ _phl_cmd_general_post_phase_msg_hdlr(struct phl_info_t *phl_info, void *dispr,
 	case MSG_EVT_TPE_INFO_UPDATE:
 		psts = phl_cmd_tpe_update_hdl(phl_info, phl_cmd->buf);
 	break;
+
+	case MSG_EVT_DBG_HAL_PROC_CMD:
+		psts = phl_cmd_hal_proc_cmd_hdl(phl_info, phl_cmd->buf);
+		break;
+
+	case MSG_EVT_DBG_READ_RFREG:
+		phl_cmd_read_rfreg_hdl(phl_info, phl_cmd->buf);
+		psts = RTW_PHL_STATUS_SUCCESS;
+		break;
 
 #ifdef CONFIG_PHL_TWT
 	case MSG_EVT_TWT_STA_ACCEPT:
@@ -482,6 +505,12 @@ _phl_cmd_general_post_phase_msg_hdlr(struct phl_info_t *phl_info, void *dispr,
 	case MSG_EVT_DISCONNECT_CMD_DBCC_EN:
 		psts = phl_cmd_dbcc_en_hdl(phl_info, phl_cmd->buf);
 	break;
+#endif
+
+#ifdef CONFIG_PHL_APF
+	case MSG_EVT_APF_CTRL:
+		psts = rtw_phl_manipulate_apf(phl_info, phl_cmd->buf);
+		break;
 #endif
 
 	default:

@@ -1069,13 +1069,18 @@ void phl_led_control(struct phl_info_t *phl_info, enum rtw_led_event led_event)
 #ifdef CONFIG_CMD_DISP
 	struct phl_msg msg = {0};
 	struct phl_msg_attribute attr = {0};
+	enum rtw_phl_status status = RTW_PHL_STATUS_SUCCESS;
 
 	PHL_TRACE(COMP_PHL_LED, _PHL_INFO_, "===> %s()\n", __func__);
 
 	SET_MSG_MDL_ID_FIELD(msg.msg_id, PHL_MDL_LED);
 	SET_MSG_EVT_ID_FIELD(msg.msg_id, led_event + MSG_EVT_LED_EVT_START);
 	msg.band_idx = HW_BAND_0;
-	phl_disp_eng_send_msg(phl_info, &msg, &attr, NULL);
+	status = phl_disp_eng_send_msg(phl_info, &msg, &attr, NULL);
+
+	if (status != RTW_PHL_STATUS_SUCCESS) {
+		PHL_ERR("[LED_CONTROL] send_msg_to_dispr failed! (%d)\n", status);
+	}
 #else
 	PHL_ERR("phl_fsm not support %s\n", __func__);
 #endif
@@ -1152,10 +1157,11 @@ void rtw_phl_led_manual_control(void *phl, enum rtw_led_id led_id,
 
 	_phl_led_manual_control_completion(attr.completion.priv, &msg);
 
-	if (status == RTW_PHL_STATUS_UNEXPECTED_ERROR)
+	if (status == RTW_PHL_STATUS_UNEXPECTED_ERROR) {
 		/* cmd dispatcher is not started */
-		_phl_led_ctrl_write_opt(phl_info->hal, led_id,
-					&(led_info->curr_opt), opt);
+		(void)_phl_led_ctrl_write_opt(phl_info->hal, led_id,
+					      &(led_info->curr_opt), opt);
+	}
 
 #else
 	PHL_ERR("phl_fsm not support %s\n", __func__);

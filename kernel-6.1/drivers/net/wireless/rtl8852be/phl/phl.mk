@@ -57,7 +57,9 @@ _PHL_FILES := $(phl_path)phl_init.o \
 			$(phl_path)phl_dfs.o \
 			$(phl_path)phl_scanofld.o \
 			$(phl_path)phl_ie.o \
-			$(phl_path)phl_diagnose.o
+			$(phl_path)phl_qos_mg.o \
+			$(phl_path)phl_diagnose.o \
+			$(phl_path)phl_version.o
 
 ifeq ($(CONFIG_POWER_SAVE), y)
 _PHL_FILES += $(phl_path)phl_ps.o \
@@ -95,6 +97,10 @@ endif
 
 ifeq ($(CONFIG_PHL_CUSTOM_FEATURE), y)
 _PHL_FILES += $(phl_path)custom/phl_custom.o
+endif
+
+ifeq ($(CONFIG_PHL_CUSTOM_FEATURE_USB), y)
+_PHL_FILES += $(phl_path)custom/phl_custom_usb.o
 endif
 
 ifeq ($(CONFIG_PHL_TEST_SUITE), y)

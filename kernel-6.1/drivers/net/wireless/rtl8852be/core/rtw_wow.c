@@ -44,6 +44,9 @@ void rtw_init_wow(_adapter *padapter)
 	u8 rsn_a_en = 0, rsn_a = 0, rsn_a_time_unit = 0, rsn_a_toggle_pulse = DEV2HST_TOGGLE;
 	u8 rsn_a_pulse_count = 0, rsn_a_pulse_period = 0, rsn_a_pulse_duration = 0;
 #endif
+#ifdef CONFIG_WOW_PERIODIC_WAKE
+	struct rtw_periodic_wake_info *wow_periodic_wake = &wowpriv->wow_periodic_wake;
+#endif
 
 #if defined(CONFIG_HAS_EARLYSUSPEND) || defined(CONFIG_ANDROID_POWER)
 	pwrctrlpriv->early_suspend.suspend = NULL;
@@ -55,6 +58,7 @@ void rtw_init_wow(_adapter *padapter)
 	pwrctrlpriv->wowlan_in_resume = _FALSE;
 
 	wowpriv->wow_wake_reason = 0;
+	wowpriv->wowlan_aoac_rpt.wow_pattern_idx = -1; /*avoid confusion with idx 0*/
 
 #ifdef CONFIG_GPIO_WAKEUP
 #ifdef PRIVATE_R
@@ -116,8 +120,19 @@ void rtw_init_wow(_adapter *padapter)
 	_rtw_mutex_init(&pwrctrlpriv->wowlan_pattern_cam_mutex);
 
 	pwrctrlpriv->wowlan_aoac_rpt_loc = 0;
+#ifdef CONFIG_MDNS_OFFLOAD
+	_rtw_memset(&wowpriv->mdns_ofld_info, 0,
+			sizeof(struct rtw_mdns_ofld_info));
+#endif
+#ifdef CONFIG_APF
+	rtw_init_apf(padapter);
+#endif /* CONFIG_APF */
 #endif /* CONFIG_WOWLAN */
 
+#ifdef CONFIG_WOW_PERIODIC_WAKE
+	wow_periodic_wake->wake_period = WOW_DEFAULT_WAKE_PERIOD;
+	wow_periodic_wake->wake_duration = WOW_DEFAULT_WAKE_DURATION;
+#endif
 }
 
 void rtw_free_wow(_adapter *adapter)
@@ -241,6 +256,110 @@ void rtw_wow_pattern_clean(_adapter *adapter, enum pattern_type clean_type)
 		}
 	}
 }
+
+#ifdef CONFIG_GOOGLE_CAST_WAKEUP
+#define rtw_user_wow_patten_elem(len, array, args...)	\
+	{.conts_len = len,  .pconts = (u8[len]){array, ##args}}
+
+void rtw_set_google_cast_mdns_wow_pattern(_adapter *adapter)
+{
+	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
+	struct mlme_ext_priv *pmlmeext = &adapter->mlmeextpriv;
+	struct mlme_ext_info *pmlmeinfo = &pmlmeext->mlmext_info;
+	struct rtw_wowcam_upd_info wowcam_info = {0};
+	u8 index = 0;
+	u8 eth_dest_mac[ETH_ALEN] = {0x01, 0x00, 0x5e, 0x00, 0x00, 0xfb};
+	u8 eth_protocol[2] = {0x08, 0x00};
+	u8 ip_ver = 0x45;
+	u8 ip_protocol = 0x11;
+	u8 dest_port[2] = {0x14, 0xe9};
+	u8 *ptr;
+	struct pattern_cont_t {
+		u8 conts_len;
+		u8 *pconts;
+	};
+	struct pattern_cont_t conts[] = {
+		rtw_user_wow_patten_elem(0x51, /*_%9E5E7C8F47989526C9BCD95D24084F6F0B27C5ED._sub._googlecast._tcp.local*/
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2A, 0x5F, 0x25, 0x39, 0x45, 0x35,
+				0x45, 0x37, 0x43, 0x38, 0x46, 0x34, 0x37, 0x39, 0x38, 0x39, 0x35, 0x32, 0x36, 0x43, 0x39, 0x42,
+				0x43, 0x44, 0x39, 0x35, 0x44, 0x32, 0x34, 0x30, 0x38, 0x34, 0x46, 0x36, 0x46, 0x30, 0x42, 0x32,
+				0x37, 0x43, 0x35, 0x45, 0x44, 0x04, 0x5F, 0x73, 0x75, 0x62, 0x0B, 0x5F, 0x67, 0x6F, 0x6F, 0x67,
+				0x6C, 0x65, 0x63, 0x61, 0x73, 0x74, 0x04, 0x5F, 0x74, 0x63, 0x70, 0x05, 0x6C, 0x6F, 0x63, 0x61,
+				0x6C),
+		rtw_user_wow_patten_elem(0x21, /*_googlecast._tcp.local*/
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0B, 0x5F, 0x67, 0x6F, 0x6F, 0x67,
+				0x6C, 0x65, 0x63, 0x61, 0x73, 0x74, 0x04, 0x5F, 0x74, 0x63, 0x70, 0x05, 0x6C, 0x6F, 0x63, 0x61,
+				0x6C),
+		rtw_user_wow_patten_elem(0x30, /*_233637DE._sub._googlecast._tcp.local*/
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x5F, 0x32, 0x33, 0x33, 0x36,
+				0x33, 0x37, 0x44, 0x45, 0x04, 0x5F, 0x73, 0x75, 0x62, 0x0B, 0x5F, 0x67, 0x6F, 0x6F, 0x67, 0x6C,
+				0x65, 0x63, 0x61, 0x73, 0x74, 0x04, 0x5F, 0x74, 0x63, 0x70, 0x05, 0x6C, 0x6F, 0x63, 0x61, 0x6C),
+	};
+	struct pattern_cont_t masks[] = {
+		rtw_user_wow_patten_elem(MAX_WKFM_SIZE,
+				0x3f, 0x70, 0x80, 0x00, 0x30, 0x30, 0xc0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1f),
+		rtw_user_wow_patten_elem(10,
+				0x3f, 0x70, 0x80, 0x00, 0x30, 0x30, 0xc0, 0xff, 0xff, 0x1f),
+		rtw_user_wow_patten_elem(12,
+				0x3f, 0x70, 0x80, 0x00, 0x30, 0x30, 0xc0, 0xff, 0xff, 0xff, 0xff, 0x0f),
+	};
+
+	u8 *target = NULL;
+
+	for (index = 0 ; index < GOOGLE_CAST_PATTERN_NUM ; index++){
+		_rtw_memset((void *)&wowcam_info, 0, sizeof(wowcam_info));
+
+		target = wowcam_info.ptrn;
+
+		_rtw_memcpy(target, eth_dest_mac, ETH_ALEN);
+		target += ETH_TYPE_OFFSET;
+		wowcam_info.ptrn_len += ETH_TYPE_OFFSET;
+
+		_rtw_memcpy(target, eth_protocol, 2);
+		target += 2;
+		wowcam_info.ptrn_len += 2;
+
+		*target = ip_ver;
+		target += 1;
+		wowcam_info.ptrn_len += 1;
+
+		/*padding*/
+		target += 8;
+		wowcam_info.ptrn_len += 8;
+
+		*target = ip_protocol;
+		target += 1;
+		wowcam_info.ptrn_len += 1;
+
+		/*padding*/
+		target += 2;
+		wowcam_info.ptrn_len += 2;
+
+		/*skip src & des ip*/
+		target += (RTW_IP_ADDR_LEN * 2);
+		wowcam_info.ptrn_len += (RTW_IP_ADDR_LEN * 2);
+
+		/*skip src port*/
+		target += 2;
+		wowcam_info.ptrn_len += 2;
+
+		_rtw_memcpy(target, dest_port, 2);
+		target += 2;
+		wowcam_info.ptrn_len += 2;
+
+		/*padding*/
+		target += 6;
+		wowcam_info.ptrn_len += 6;
+
+		_rtw_memcpy(target, conts[index].pconts, conts[index].conts_len);
+		wowcam_info.ptrn_len += conts[index].conts_len;
+
+		_rtw_memcpy(wowcam_info.mask, masks[index].pconts, masks[index].conts_len);
+
+		rtw_wow_pattern_set(adapter, &wowcam_info, RTW_DEFAULT_PATTERN);
+	}
+}
+#endif /*CONFIG_GOOGLE_CAST_WAKEUP*/
 
 void rtw_set_default_pattern(_adapter *adapter)
 {
@@ -497,6 +616,386 @@ void rtw_core_wow_handle_wake_up_rsn(void *drv_priv, u8 rsn)
 
 	wowpriv->wow_wake_reason = rsn;
 }
+
+void rtw_core_wow_handle_wake_up_pattern_idx(void *drv_priv, u8 pattern_idx)
+{
+	struct dvobj_priv *dvobj = (struct dvobj_priv *)drv_priv;
+	struct wow_priv *wowpriv = dvobj_to_wowlan(dvobj);
+
+	wowpriv->wowlan_aoac_rpt.wow_pattern_idx = pattern_idx;
+}
+
+#ifdef CONFIG_MDNS_OFFLOAD
+static struct rtw_mdns_resp_entry *
+_rtw_get_mdns_resp_entry(_adapter *padapter, u8 index)
+{
+	struct wow_priv *wowpriv = adapter_to_wowlan(padapter);
+	struct rtw_mdns_ofld_info *ofld_info = &wowpriv->mdns_ofld_info;
+	struct rtw_mdns_resp_entry *resp_entry = NULL;
+
+	if (index < MAX_MDNS_RESP_NUM)
+		resp_entry = &ofld_info->resp_entry[index];
+
+	return resp_entry;
+}
+
+int rtw_wow_add_mdns_resp(_adapter *padapter, u8 index, u8 *resp_content, u16 content_len)
+{
+	struct rtw_mdns_resp_entry *resp_entry = NULL;
+
+	resp_entry = _rtw_get_mdns_resp_entry(padapter, index);
+	if (resp_entry == NULL)
+		return _FAIL;
+
+	_rtw_memcpy(resp_entry->content, resp_content, content_len);
+	resp_entry->content_len = content_len;
+
+	return _SUCCESS;
+}
+
+int rtw_wow_del_mdns_resp(_adapter *padapter, u8 index)
+{
+	struct rtw_mdns_resp_entry *resp_entry = NULL;
+
+	resp_entry = _rtw_get_mdns_resp_entry(padapter, index);
+	if (resp_entry == NULL)
+		return _FAIL;
+
+	_rtw_memset(resp_entry, 0, sizeof(struct rtw_mdns_resp_entry));
+
+	return _SUCCESS;
+}
+
+int rtw_wow_get_mdns_resp_ent(_adapter *padapter, u8 index, struct rtw_mdns_resp_entry **resp_entry)
+{
+	*resp_entry = _rtw_get_mdns_resp_entry(padapter, index);
+	if (*resp_entry == NULL)
+		return _FAIL;
+
+	return _SUCCESS;
+}
+
+int rtw_wow_add_mdns_match_crit(_adapter *padapter, u8 index, u16 match_type, u16 name_offset, u16 name_len)
+{
+	struct rtw_mdns_resp_entry *resp_entry = NULL;
+	struct rtw_mdns_match_criteria *match_ct = NULL;
+
+	resp_entry = _rtw_get_mdns_resp_entry(padapter, index);
+	if (resp_entry == NULL)
+		return _FAIL;
+
+	if (resp_entry->match_ct_num == MAX_MDNS_MATCH_CRITERIA_NUM)
+		return _FAIL;
+
+	match_ct = &resp_entry->match_ct[resp_entry->match_ct_num];
+
+	match_ct->name_offset = name_offset;
+	match_ct->type = match_type;
+	match_ct->name_len = name_len;
+
+	resp_entry->match_ct_num += 1;
+
+	return _SUCCESS;
+}
+
+int rtw_wow_del_mdns_match_crit(_adapter *padapter, u8 index)
+{
+	struct rtw_mdns_resp_entry *resp_entry = NULL;
+	struct rtw_mdns_match_criteria *match_ct = NULL;
+
+	resp_entry = _rtw_get_mdns_resp_entry(padapter, index);
+	if (resp_entry == NULL)
+		return _FAIL;
+
+	resp_entry->match_ct_num = 0;
+	_rtw_memset(resp_entry->match_ct, 0, sizeof(resp_entry->match_ct));
+
+	return _SUCCESS;
+}
+
+int rtw_wow_add_mdns_passthru_name(_adapter *padapter, u8 *name, u8 name_len)
+{
+	struct wow_priv *wowpriv = adapter_to_wowlan(padapter);
+	struct rtw_mdns_ofld_info *ofld_info = &wowpriv->mdns_ofld_info;
+	struct rtw_mdns_passthru_list *passthru_list = &ofld_info->passthru_list;
+	struct rtw_mdns_passthru_name *passthru_name = NULL;
+
+	if (passthru_list->passthru_name_num == MAX_MDNS_PASSTHRU_NAME_NUM)
+		return _FAIL;
+
+	passthru_name = &passthru_list->passthru_name[passthru_list->passthru_name_num];
+	_rtw_memcpy(passthru_name->name, name, name_len);
+	passthru_name->name_len = name_len;
+
+	passthru_list->passthru_name_num += 1;
+
+	return _SUCCESS;
+}
+
+void rtw_wow_clr_mdns_passthru_name(_adapter *padapter)
+{
+	struct wow_priv *wowpriv = adapter_to_wowlan(padapter);
+	struct rtw_mdns_ofld_info *ofld_info = &wowpriv->mdns_ofld_info;
+	struct rtw_mdns_passthru_list *passthru_list = &ofld_info->passthru_list;
+
+	passthru_list->passthru_name_num = 0;
+	_rtw_memset(passthru_list->passthru_name, 0,
+		    sizeof(struct rtw_mdns_passthru_name) * MAX_MDNS_PASSTHRU_NAME_NUM);
+}
+
+void rtw_wow_get_mdns_passthru_list(_adapter *padapter, struct rtw_mdns_passthru_list **passthru_list)
+{
+	struct wow_priv *wowpriv = adapter_to_wowlan(padapter);
+	struct rtw_mdns_ofld_info *ofld_info = &wowpriv->mdns_ofld_info;
+
+	*passthru_list = &ofld_info->passthru_list;
+}
+#endif /* CONFIG_MDNS_OFFLOAD */
+
+#ifdef CONFIG_APF
+static inline bool _should_cmd_executed(enum rtw_screen_mode _mode, enum mlme_state _state,
+						enum phl_apf_cmd _cmd, struct phl_apf_info *_info)
+{
+	bool _is_cmd_executed = true;
+	if (_state == MLME_LINKED) {
+		if (_cmd == PHL_APF_CMD_DISABLE) {
+			_is_cmd_executed = false;
+		} else if (_cmd == PHL_APF_CMD_ENABLE &&
+			   (_info->ram.prog_len == 0 || _mode == SCREEN_ON)) {
+			_is_cmd_executed = false;
+		} else if (_cmd >= PHL_APF_CMD_DRV) {
+			_is_cmd_executed = false;
+		}
+	}
+
+#ifdef CONFIG_APF_DBG
+	if (_is_cmd_executed == false && PHL_APF_CMD_CHECK != _cmd)
+		RTW_INFO("[APFDBG] Should not execute apf cmd(%s) screen(%s) mstate(%u)\n",
+			  _apf_cmd_to_str(_cmd), _mode == SCREEN_OFF ? "OFF" : "ON", _state);
+#endif
+	return _is_cmd_executed;
+}
+
+static inline bool _should_change_ampdu(enum phl_apf_cmd _cmd, struct phl_apf_info *_info)
+{
+	bool _chg_ampdu = false;
+	if (_info->fw_mode == RTW_FW_NIC) {
+		if (PHL_APF_CMD_ENABLE == _cmd) {
+			if (PHL_APF_STANDBY == _info->apf_state || PHL_APF_DISABLE == _info->apf_state)
+				_chg_ampdu = true;
+		} else if (PHL_APF_CMD_STANDBY == _cmd) {
+			if (PHL_APF_ENABLE == _info->apf_state)
+				_chg_ampdu = true;
+		}
+	}
+	return _chg_ampdu;
+}
+void rtw_init_apf(struct _ADAPTER *padapter)
+{
+	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	void *phl = GET_PHL_INFO(dvobj);
+	struct rtw_phl_com_t *phl_com = dvobj->phl_com;
+	struct dev_cap_t *dev_cap = &phl_com->dev_cap;
+	struct wow_priv *wowpriv = adapter_to_wowlan(padapter);
+	struct phl_apf_info *info = &(wowpriv->apf_info);
+
+	/* init wowpriv apf related parameter & apf_info */
+	wowpriv->screen_mode = SCREEN_ON;
+	wowpriv->mstate = MLME_NO_LINK;
+	wowpriv->apf_active_tp_th = APF_ACTIVE_TP_TH;
+	wowpriv->dump_apf_ram = 0;
+
+	info->apf_cmd = PHL_APF_CMD_NONE;
+	info->apf_state = PHL_APF_DISABLE;
+	info->fw_mode = RTW_FW_NIC;
+	info->macid = 0;
+	info->apf_force_dis = PHL_APF_FORCE_IGNORE;
+
+	/* pkt ofld related */
+	info->ofld_idx = 0;
+	info->is_ram_ofld = 0;
+	info->ram_frag_num = 0;
+	info->mac_chg = 0;
+	_rtw_memset(info->apf_ram_frag_pktid, 0xFF, 8);
+	info->ram.prog_len = 0;
+	_rtw_memset(info->ram.buf, 0, MAX_APF_RAM_SIZE);
+
+	/* security info for mac hdr */
+	info->pairwise_sec_algo = _NO_PRIVACY_;
+	info->group_sec_algo = _NO_PRIVACY_;
+	info->hw_sec_iv = dev_cap->sec_cap.hw_sec_iv;
+#ifdef CONFIG_APF_DBG
+	info->apf_cmd_seq = 0;
+#endif
+	info->wait_start_time = 0;
+	info->wait_period = 0;
+	/* hook phl & halmac */
+	rtw_phl_init_apf(phl, info);
+}
+
+void rtw_apf_cmd_hdl(struct _ADAPTER *padapter, enum phl_apf_cmd cmd)
+{
+	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	void *phl = GET_PHL_INFO(dvobj);
+	struct _ADAPTER_LINK *alink = GET_PRIMARY_LINK(padapter);
+	struct rtw_phl_stainfo_t *phl_sta = NULL;
+	struct security_priv *securitypriv = &padapter->securitypriv;
+	enum mlme_state mstate;
+
+	struct wow_priv *wowpriv = adapter_to_wowlan(padapter);
+	struct phl_apf_info *info = &wowpriv->apf_info;
+	struct phl_apf_cmd_blob *cmd_blob = NULL;
+	u8 cmd_type = PHL_CMD_WAIT;
+	u32 screen_mode = (u32)wowpriv->screen_mode;
+	u32 apf_active_tp_th = wowpriv->apf_active_tp_th;
+	u32 cur_tx_tp = dvobj->traffic_stat.cur_tx_tp;
+	u32 cur_rx_tp = dvobj->traffic_stat.cur_rx_tp;
+	u8 enable_ampdu = 1;
+
+	if (!is_primary_adapter(padapter) || !MLME_IS_STA(padapter)) {
+		RTW_INFO("%s() APF is used for primary adapter & STA only\n", __func__);
+		return;
+	}
+
+	if (padapter->netif_up && dvobj->processing_dev_remove == _FALSE) {
+		phl_sta = rtw_phl_get_stainfo_self(phl, alink->wrlink);
+		if (!phl_sta) {
+			RTW_ERR("%s() netif_up but phl_sta is NULL\n", __func__);
+			return;
+		}
+		mstate = phl_sta->rlink->mstate;
+		if (mstate != MLME_LINKED && cmd != PHL_APF_CMD_MEDIA_STATUS_CHG) {
+			if (cmd != PHL_APF_CMD_CHECK)
+				RTW_INFO("[APFDBG]%s() !!NOT CONNECTED!! manipulate APF while connected!!\n", __func__);
+
+			return;
+		}
+	} else {
+		return;
+	}
+
+#ifdef CONFIG_APF_DBG
+	if (PHL_APF_CMD_CHECK != cmd)
+		RTW_INFO("[APFDBG] %s() apf_cmd(%s) new_cmd(%s)\n",
+			 __func__, _apf_cmd_to_str(info->apf_cmd), _apf_cmd_to_str(cmd));
+#endif
+	if (PHL_APF_CMD_CHECK == cmd && info->wait_period != 0) {
+		if (info->wait_start_time == 0) {
+			info->wait_start_time = rtw_get_current_time();
+			return;
+		} else {
+			if (rtw_get_passing_time_ms(info->wait_start_time) < info->wait_period) {
+				RTW_INFO("%s() Wait Period\n", __func__);
+				return;
+			} else {
+				info->wait_start_time = 0;
+				info->wait_period = 0;
+			}
+		}
+	}
+	if (info->apf_force_dis == PHL_APF_FORCE_DIS &&
+		(cmd == PHL_APF_CMD_ENABLE || cmd == PHL_APF_CMD_CHECK)) {
+		RTW_INFO("%s() FORCE DISABLE APF\n", __func__);
+		if (info->apf_state == PHL_APF_STANDBY)
+			return;
+		cmd = PHL_APF_CMD_STANDBY;
+	}
+
+
+	if (PHL_APF_CMD_MEDIA_STATUS_CHG == cmd) {
+		RTW_INFO("%s() Media Status Change\n", __func__);
+		wowpriv->mstate = mstate;
+		info->macid = phl_sta->macid;
+		info->mac_chg = 1;
+		cmd_type = PHL_CMD_DIRECTLY;
+		if (mstate == MLME_LINKED) {
+			cmd = PHL_APF_CMD_STANDBY;
+			info->pairwise_sec_algo = rtw_sec_algo_drv2phl(securitypriv->dot11PrivacyAlgrthm);
+			info->group_sec_algo = rtw_sec_algo_drv2phl(securitypriv->dot118021XGrpPrivacy);
+			info->protect_bit = (info->pairwise_sec_algo == RTW_ENC_NONE ? 0 : 1);
+			info->key_idx = (u8)securitypriv->dot11PrivacyKeyIndex;
+			_rtw_memcpy(info->a1, phl_sta->mac_addr, MAC_ADDRESS_LENGTH);
+			_rtw_memcpy(info->a2, phl_sta->wrole->mac_addr, MAC_ADDRESS_LENGTH);
+			_rtw_memcpy( info->a3, phl_sta->mac_addr, MAC_ADDRESS_LENGTH);
+		} else {
+			cmd = PHL_APF_CMD_DISABLE;
+			info->pairwise_sec_algo = rtw_sec_algo_drv2phl(_NO_PRIVACY_);
+			info->group_sec_algo = rtw_sec_algo_drv2phl(_NO_PRIVACY_);
+			info->protect_bit = 0;
+			info->key_idx = 0;
+			_rtw_memset(info->a1, 0xFF, MAC_ADDRESS_LENGTH);
+			_rtw_memset(info->a2, 0xFF, MAC_ADDRESS_LENGTH);
+			_rtw_memset(info->a3, 0xFF, MAC_ADDRESS_LENGTH);
+			info->ram.prog_len = 0;
+			_rtw_memset(info->ram.buf, 0, MAX_APF_RAM_SIZE);
+		}
+#ifdef CONFIG_APF_DBG
+		RTW_INFO("[APFDBG] %s() mstate(%u) pairwise_sec(%u) group_sec(%u) key_idx(%u)\n",
+			 __func__, wowpriv->mstate, info->pairwise_sec_algo,
+			 info->group_sec_algo, info->key_idx);
+#endif
+		goto manipulate_apf;
+	}
+
+	if (PHL_APF_CMD_CHECK == cmd && info->ram.prog_len != 0) {
+		cmd_type = PHL_CMD_DIRECTLY;
+		if (screen_mode == SCREEN_OFF) {
+			/* check TP and apf_state */
+			if (cur_rx_tp + cur_tx_tp > apf_active_tp_th) {
+				if (IS_STATE(info->apf_state, PHL_APF_ENABLE)) {
+					RTW_INFO("%s() Traffic is not idle, standby APF\n", __func__);
+					cmd = PHL_APF_CMD_STANDBY;
+				}
+
+			} else {
+				if (info->apf_state == PHL_APF_STANDBY && info->ram.prog_len != 0) {
+					RTW_INFO("%s() Traffic is idle, enable APF\n", __func__);
+					cmd = PHL_APF_CMD_ENABLE;
+				}
+			}
+		} else {
+			if (IS_STATE(info->apf_state, PHL_APF_ENABLE)) {
+				cmd = PHL_APF_CMD_STANDBY;
+			}
+
+		}
+		/* if no need to switch apf enable/standby */
+		if (PHL_APF_CMD_CHECK == cmd)
+			return;
+
+		goto manipulate_apf;
+	}
+
+	if (!_should_cmd_executed(screen_mode, mstate, cmd, info))
+		return;
+
+manipulate_apf:
+#ifdef CONFIG_APF_DBG
+	info->apf_cmd_seq++;
+	RTW_INFO("[APFDBG] %s() cmd seq apf_cmd(%s) seq(%llu)\n",
+		 __func__, _apf_cmd_to_str(cmd), info->apf_cmd_seq);
+#endif
+	cmd_blob = rtw_malloc(sizeof(struct phl_apf_cmd_blob));
+	if (!cmd_blob) {
+		RTW_ERR("%s() allocate memory for apf_cmd_blob fail\n", __func__);
+		return;
+	}
+
+	/* APF cannot handle amsdu pkt, disable ampdu before enable APF */
+	if (_should_change_ampdu(cmd, info)) {
+		RTW_INFO("%s() %s AMPDU\n", __func__,
+			 PHL_APF_CMD_ENABLE == cmd ? "Disable" : "Auto");
+		enable_ampdu = PHL_APF_CMD_ENABLE == cmd ? 0 : RX_AMPDU_ACCEPT_INVALID;
+		if (rtw_rx_ampdu_set_accept(padapter, enable_ampdu, RX_AMPDU_DRV_FIXED)) {
+			RTW_INFO("Change AMPDU \n");
+			rtw_rx_ampdu_apply(padapter);
+		}
+	}
+	cmd_blob->cmd = cmd;
+	rtw_phl_manipulate_apf_cmd(phl, cmd_blob, cmd_type);
+}
+
+#endif /* CONFIG_APF */
 
 #ifdef CONFIG_GTK_OL
 void _update_aoac_rpt_phase_0(_adapter *adapter, struct rtw_aoac_report *aoac_info)
@@ -759,6 +1258,84 @@ exit:
 #endif /* CONFIG_WOWLAN */
 
 #ifdef CONFIG_PNO_SUPPORT
+#ifdef CONFIG_PNO_SECURITY_OFFLOAD
+static void nlo_parse_cipher_list(struct rtw_nlo_info *wow_nlo, char *list_str)
+{
+	char *pch;
+	char *pnext;
+	char *pend;
+	u8 index = 0;
+
+	pch = list_str;
+	while (strlen(pch) != 0) {
+		pnext = strstr(pch, "key_mgmt=");
+		if (pnext == NULL)
+			break;
+
+		pch = pnext + strlen(CIPHER_IE);
+		pend = strstr(pch, "}");
+		if (strncmp(pch, CIPHER_NONE, strlen(CIPHER_NONE)) == 0) {
+			wow_nlo->chipertype[index] = NLO_CIPHER_OPEN;
+		} else if (strncmp(pch, CIPHER_WPA_PSK, strlen(CIPHER_WPA_PSK)) == 0) {
+			wow_nlo->chipertype[index] = NLO_CIPHER_WPA_TKIP |
+						     NLO_CIPHER_WPA_AES |
+						     NLO_CIPHER_WPA2_TKIP |
+						     NLO_CIPHER_WPA2_AES;
+		} else if (strncmp(pch, CIPHER_WPA_EAP, strlen(CIPHER_WPA_EAP)) == 0) {
+			wow_nlo->chipertype[index] = NLO_CIPHER_WEP;
+		}
+
+		index++;
+		pch = pend + 1;
+	}
+}
+
+static void nlo_security_init(struct rtw_nlo_info *wow_nlo)
+{
+	struct file *fp;
+	mm_segment_t fs;
+	loff_t pos = 0;
+	u8 *source = NULL;
+	long len = 0;
+
+	fp = filp_open("/data/misc/wifi/wpa_supplicant.conf", O_RDONLY,  0644);
+	if (IS_ERR(fp)) {
+		RTW_INFO("Error, wpa_supplicant.conf doesn't exist.\n");
+		RTW_INFO("Error, cipher array using default value.\n");
+		return;
+	} else {
+		RTW_INFO("Open wpa_supplicant.conf successfully.\n");
+	}
+
+	len = i_size_read(fp->f_path.dentry->d_inode);
+	if (len < 0 || len > 2048) {
+		RTW_INFO("Error, file size is bigger than 2048.\n");
+		RTW_INFO("Error, cipher array using default value.\n");
+		return;
+	}
+
+	fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	source = rtw_zmalloc(2048);
+
+	if (source != NULL) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
+		len = kernel_read(fp, source, len, &pos);
+#else
+		len = vfs_read(fp, source, len, &pos);
+#endif
+		nlo_parse_cipher_list(wow_nlo, source);
+		rtw_mfree(source, 2048);
+	}
+
+	wow_nlo->compare_cipher_type = _TRUE;
+
+	set_fs(fs);
+	filp_close(fp, NULL);
+}
+#endif
+
 static void nlo_scan_ch_init(struct rtw_nlo_info *wow_nlo,
 			     struct ieee80211_channel **channels,
 			     u32 n_channels)
@@ -815,6 +1392,9 @@ int rtw_nlo_enable(struct net_device *net, struct cfg80211_ssid *ssids,
 
 	nlo_scan_ch_init(wow_nlo, channels, n_channels);
 	nlo_ssid_init(wow_nlo, ssids, n_ssids);
+#ifdef CONFIG_PNO_SECURITY_OFFLOAD
+	nlo_security_init(wow_nlo);
+#endif
 
 	wow_nlo->delay = delay * 1000;
 	wow_nlo->period = interval * 1000;
@@ -847,10 +1427,12 @@ void rtw_nlo_debug(struct net_device *net)
 	int i;
 
 	RTW_INFO("********NLO_INFO********\n");
+	RTW_INFO("compare_cipher_type: %d\n", wow_nlo->compare_cipher_type);
 	RTW_INFO("ssid_num: %d\n", wow_nlo->num_of_networks);
 	for (i = 0; i < wow_nlo->num_of_networks; i++) {
-		RTW_INFO("%d SSID (%s) length (%d)\n",
-			 i, wow_nlo->ssid[i], wow_nlo->ssidlen[i]);
+		RTW_INFO("%d SSID (%s) length (%d) cipher (%#x)\n",
+			 i, wow_nlo->ssid[i], wow_nlo->ssidlen[i],
+			 wow_nlo->chipertype[i]);
 	}
 	RTW_INFO("delay: %d\n", wow_nlo->delay);
 	RTW_INFO("fast_scan_iterations: %d\n", wow_nlo->cycle);
