@@ -31,4 +31,10 @@ cp -r /usr/lib/linux-image-${version}/. /boot/firmware/dtbs/
 cp "/boot/initrd.img-${version}" /boot/firmware/initrd.img
 cp "/boot/vmlinuz-${version}" /boot/firmware/vmlinuz
 
+if [ -d /boot/firmware/dtbs/rockchip/overlay ]; then
+    rm -rf /boot/firmware/dtb/overlay
+    mkdir -p /boot/firmware/dtb
+    mv /boot/firmware/dtbs/rockchip/overlay /boot/firmware/dtb/overlay
+fi
+
 sync
