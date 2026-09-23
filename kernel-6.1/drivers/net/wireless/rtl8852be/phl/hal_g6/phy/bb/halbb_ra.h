@@ -14,21 +14,38 @@
  *****************************************************************************/
 #ifndef _HALBB_RA_H_
 #define _HALBB_RA_H_
+const static u8 bb_phy_rate_table_legacy[LEGACY_RATE_NUM] = {
+	/*Legacy U(8,0)*/
+	/*CCK*/
+	1, 2, 5, 11,
+	/*OFDM*/
+	6, 9, 12, 18, 24, 36, 48, 54,
+};
+
+const static u16 bb_phy_rate_table_ht_vht[SU_VHT_MCS_NUM] = {
+	/*HT/VT-1ss SGI U(16,2)*/
+	26, 52, 78, 104, 156, 208, 234, 260, 312, 360
+};
+
+const static u16 bb_phy_rate_table_he_eht[SU_EHT_MCS_NUM] = {
+	/*HE/EHT-1ss 0.8GI U(16,2)*/
+	34, 69, 103, 138, 206, 275, 310, 344, 413, 459, 516, 574, 619, 688
+};
 
 /*@--------------------------[extern] ---------------------------------------*/
 extern const u16 bb_phy_rate_table[LEGACY_RATE_NUM + HE_RATE_NUM_4SS];
 /*@--------------------------[Define] ---------------------------------------*/
-#define VHT_2_HE32_RATE(X) ((((X) << 3) + (X) + 4) >> 3) /*= Round(X * 1.125)*/
-#define HE32_2_HE16_RATE(X) ((((X) << 3) + (X) + 4) >> 3) /*= Round(X * 1.125)*/
-#define HE32_2_HE08_RATE(X) ((((X) << 4) + ((X) << 1) + (X) + 8) >> 4) /*= Round(X * 1.1875)*/
+#define HALBB_GET_LEGACY_PHY_RATE(mcs_idx) (bb_phy_rate_table_legacy[(mcs_idx)])
+#define HALBB_GET_HT_VHT_PHY_RATE(ss_idx, mcs_idx, bw) ((((ss_idx) * (bb_phy_rate_table_ht_vht[(mcs_idx)])) << (bw)) >> 2)
+#define HALBB_GET_HE_EHT_PHY_RATE(ss_idx, mcs_idx, bw) ((((ss_idx) * (bb_phy_rate_table_he_eht[(mcs_idx)])) << (bw)) >> 2)
 
 #define RAMASK_B	0x000000000000000f
 #define RAMASK_AG	0x0000000000000ff0
 #define RAMASK_BG	0x0000000000000ff5
-#define RAMASK_HT_2G	0x00000ffffffff015
-#define RAMASK_HT_5G	0x00000ffffffff010
-#define RAMASK_VHT_2G	0x000ffffffffff015
-#define RAMASK_VHT_5G	0x000ffffffffff010
+#define RAMASK_HT_2G	0x00ff0ff0ff0ff015
+#define RAMASK_HT_5G	0x00ff0ff0ff0ff010
+#define RAMASK_VHT_2G	0x03ff3ff3ff3ff015
+#define RAMASK_VHT_5G	0x03ff3ff3ff3ff010
 #define RAMASK_HE_2G	0x0ffffffffffff015
 #define RAMASK_HE_5G	0x0ffffffffffff010
 #define RAMASK_EHT_2G_L	0xfffffffffffff015
@@ -278,6 +295,12 @@ struct bb_ra_info {
 	bool is_low_latency;
 };
 
+struct bb_ra_dbg_info {
+    /* For RA tx histogram cmd option */
+    u16 macid; // Rpt for spacific macid (0xFFFF for all MAC id cnt)
+	u8 per_ppdu; // Tx cnt per ppdu or mpdu
+};
+
 union bb_h2c_ra_rssi_info {
     u32 val[2];
     struct bb_h2c_rssi_setting bb_h2c_ra_rssi;
@@ -314,6 +337,7 @@ void halbb_ra_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 			 char *output, u32 *_out_len);
 void halbb_rate_idx_parsor(struct bb_info *bb, u16 rate_idx, enum rtw_gi_ltf gi_ltf, struct bb_rate_info *ra_i);
 u32 halbb_get_fw_ra_rpt(struct bb_info *bb, u16 len, u8 *c2h);
+void halbb_get_fw_c2h_tx_hist(struct bb_info *bb, u16 len, u8 *c2h);
 u32 halbb_get_fw_ra_dbgrpt_wifi7(struct bb_info *bb, u16 len, u8 *c2h);
 u32 halbb_get_txsts_rpt(struct bb_info *bb, u16 len, u8 *c2h);
 void halbb_get_ra_dbgreg(struct bb_info *bb);

@@ -29,9 +29,6 @@
 #if MAC_AX_8851B_SUPPORT
 #include "mac_8851b/mac_priv_8851b.h"
 #endif
-#if MAC_AX_8851E_SUPPORT
-#include "mac_8851e/mac_priv_8851e.h"
-#endif
 #if MAC_AX_8852D_SUPPORT
 #include "mac_8852d/mac_priv_8852d.h"
 #endif
@@ -49,7 +46,7 @@ struct mac_ax_priv_ops *mac_ax_get_priv_ops(struct mac_ax_adapter *adapter,
 {
 	struct mac_ax_priv_ops *priv_ops = NULL;
 
-	switch (adapter->hw_info->chip_id) {
+	switch (adapter->drv_info->sw_chip_id) {
 #if MAC_AX_8852A_SUPPORT
 	case MAC_AX_CHIP_ID_8852A:
 		priv_ops = get_mac_8852a_priv_ops(intf);
@@ -73,11 +70,6 @@ struct mac_ax_priv_ops *mac_ax_get_priv_ops(struct mac_ax_adapter *adapter,
 #if MAC_AX_8851B_SUPPORT
 	case MAC_AX_CHIP_ID_8851B:
 		priv_ops = get_mac_8851b_priv_ops(intf);
-		break;
-#endif
-#if MAC_AX_8851E_SUPPORT
-	case MAC_AX_CHIP_ID_8851E:
-		priv_ops = get_mac_8851e_priv_ops(intf);
 		break;
 #endif
 #if MAC_AX_8852D_SUPPORT

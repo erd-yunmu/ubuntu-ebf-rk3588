@@ -19,6 +19,15 @@
 
 #ifdef CONFIG_PHL_TEST_SUITE
 
+#ifdef RTW_TEST_TX_PKT_USE_SHMEM_POOL
+#define ALIGNMENT_MEMORY_ROUND_UP(_buf_len, _alignment) \
+	(((_buf_len) + ((_alignment) - 1)) & (0xFFFFFFFF - ((_alignment) - 1)))
+#define ALIGNMENT_MEMORY_POOL_LENGTH(_buf_len, _num, _alignment) \
+	((_buf_len) + ((_alignment) - 1) + ALIGNMENT_MEMORY_ROUND_UP(_buf_len, _alignment) * ((_num) - 1))
+#define TX_PKT_POOL_SHMEM_POOL_VALID(_trx_test) \
+	(_trx_test->tx_pkt_shmem_pool.vir_addr)
+#endif
+
 void rtw_phl_test_rx_callback(void *context);
 enum rtw_phl_status phl_recycle_test_tx(void *phl, struct rtw_xmit_req *treq);
 
@@ -354,28 +363,45 @@ void _phl_free_tx_pkt_pool(void *phl)
 	_os_spinlock_free(drv_priv, &tx_pkt_pool->busy_lock);
 	INIT_LIST_HEAD(&tx_pkt_pool->idle_list);
 	INIT_LIST_HEAD(&tx_pkt_pool->busy_list);
-
-	tpkt = (struct rtw_payload *)tx_pkt_pool->buf;
-	for (i = 0; i <	tx_pkt_pool->total_cnt; i++) {
-		INIT_LIST_HEAD(&tpkt->list);
-		if (NULL != tpkt->pkt.vir_addr) {
-			#ifdef CONFIG_PCI_HCI
-			_os_shmem_free(drv_priv,
-						rtw_dma_pool,
-						tpkt->pkt.vir_addr,
-						&tpkt->pkt.phy_addr_l,
-						&tpkt->pkt.phy_addr_h,
-						MAX_TEST_PAYLOAD_SIZE,
-						tpkt->cache,
-						DMA_TO_DEVICE,
-						tpkt->os_rsvd[0]);
-			#else
-			_os_mem_free(drv_priv, tpkt->pkt.vir_addr,
-							MAX_TEST_PAYLOAD_SIZE);
-			#endif
+#ifdef RTW_TEST_TX_PKT_USE_SHMEM_POOL
+#ifdef CONFIG_PCI_HCI
+	if (TX_PKT_POOL_SHMEM_POOL_VALID(trx_test)) {
+		_os_shmem_free(phl_to_drvpriv(phl_info),
+			       phl_info->hci->wd_dma_pool,
+		               trx_test->tx_pkt_shmem_pool.vir_addr,
+		               &trx_test->tx_pkt_shmem_pool.phy_addr_l,
+		               &trx_test->tx_pkt_shmem_pool.phy_addr_h,
+		               trx_test->tx_pkt_shmem_pool.buf_len,
+		               CACHE_ADDR,
+		               DMA_FROM_DEVICE,
+		               trx_test->tx_pkt_shmem_pool.os_rsvd[0]);
+		trx_test->tx_pkt_shmem_pool.vir_addr = NULL;
+	} else
+#endif
+#endif
+	{
+		tpkt = (struct rtw_payload *)tx_pkt_pool->buf;
+		for (i = 0; i <	tx_pkt_pool->total_cnt; i++) {
+			INIT_LIST_HEAD(&tpkt->list);
+			if (NULL != tpkt->pkt.vir_addr) {
+				#ifdef CONFIG_PCI_HCI
+				_os_shmem_free(drv_priv,
+							rtw_dma_pool,
+							tpkt->pkt.vir_addr,
+							&tpkt->pkt.phy_addr_l,
+							&tpkt->pkt.phy_addr_h,
+							MAX_TEST_PAYLOAD_SIZE,
+							tpkt->cache,
+							DMA_TO_DEVICE,
+							tpkt->os_rsvd[0]);
+				#else
+				_os_mem_free(drv_priv, tpkt->pkt.vir_addr,
+								MAX_TEST_PAYLOAD_SIZE);
+				#endif
+			}
+			tpkt->pkt.length = 0;
+			tpkt++;
 		}
-		tpkt->pkt.length = 0;
-		tpkt++;
 	}
 
 	if (NULL != tx_pkt_pool->buf) {
@@ -389,6 +415,51 @@ void _phl_free_tx_pkt_pool(void *phl)
 
 }
 
+#ifdef RTW_TEST_TX_PKT_USE_SHMEM_POOL
+static void
+_phl_cut_shmem_to_tx_pkt(struct rtw_payload *tpkt,
+                          _os_list *list,
+                          struct rtw_txpkt_shmem_pool *original_shmem,
+                          u32 length,
+                          u32 count,
+                          u32 alignment)
+{
+	/* refer to MemoryCutAlignedSharedMemory */
+	u32 offset, i;
+	u32 original_phy_addr_h = original_shmem->phy_addr_h;
+	u32 original_phy_addr_l = original_shmem->phy_addr_l;
+	u8* original_vir_addr = original_shmem->vir_addr;
+	struct rtw_payload *cur;
+	struct rtw_payload *prev;
+
+	/* to make alignment, first memory needs phy_addr_l to know offset */
+	tpkt->pkt.length = (u16)length;
+	tpkt->pkt.phy_addr_l = ALIGNMENT_MEMORY_ROUND_UP(original_phy_addr_l, alignment);
+	tpkt->pkt.phy_addr_h = original_phy_addr_h;
+	offset = tpkt->pkt.phy_addr_l - original_phy_addr_l;
+	tpkt->pkt.vir_addr = original_vir_addr + offset;
+	tpkt->test_id = 0;
+	tpkt->os_rsvd[0] = original_shmem->os_rsvd[0];
+	INIT_LIST_HEAD(&tpkt->list);
+	list_add_tail(&tpkt->list, list);
+	prev = tpkt;
+
+	for(i = 1; i < count; i++) {
+		/* continue to cut and keep alignment */
+		/* ...|<-prev + length + R-UP |<-cur */
+		cur = (tpkt + i);
+		cur->test_id = i;
+		cur->pkt.length = (u16)length;
+		cur->pkt.phy_addr_l = prev->pkt.phy_addr_l + ALIGNMENT_MEMORY_ROUND_UP(length, alignment);
+		cur->pkt.phy_addr_h = prev->pkt.phy_addr_h;
+		cur->pkt.vir_addr = prev->pkt.vir_addr + ALIGNMENT_MEMORY_ROUND_UP(length, alignment);
+		cur->os_rsvd[0] = original_shmem->os_rsvd[0];
+		INIT_LIST_HEAD(&cur->list);
+		list_add_tail(&cur->list, list);
+		prev = cur;
+	}
+}
+#endif
 
 enum rtw_phl_status _phl_alloc_tx_pkt_pool(void *phl, u32 tx_pkt_num,
 					   u32 tx_pkt_size)
@@ -408,6 +479,12 @@ enum rtw_phl_status _phl_alloc_tx_pkt_pool(void *phl, u32 tx_pkt_num,
 	enum cache_addr_type cache = CACHE_ADDR;
 #endif
 	u32 buf_len = 0, i = 0;
+#ifdef RTW_TEST_TX_PKT_USE_SHMEM_POOL
+#ifdef CONFIG_PCI_HCI
+	u32 alignment = 0x10;
+	u32 tx_pkt_shared_mem_pool_len = 0;
+#endif
+#endif
 	FUNCIN_WSTS(status);
 
 	do {
@@ -426,33 +503,56 @@ enum rtw_phl_status _phl_alloc_tx_pkt_pool(void *phl, u32 tx_pkt_num,
 		_os_spinlock_init(drv_priv, &tx_pkt_pool->idle_lock);
 		_os_spinlock_init(drv_priv, &tx_pkt_pool->busy_lock);
 		tpkt = (struct rtw_payload *)tx_pkt_pool->buf;
-		for (i = 0; i < tx_pkt_num; i++) {
-			INIT_LIST_HEAD(&tpkt[i].list);
-			tpkt[i].cache = cache;
-			#ifdef CONFIG_PCI_HCI
-			tpkt[i].pkt.vir_addr = _os_shmem_alloc(drv_priv, rtw_dma_pool,
-						  &tpkt[i].pkt.phy_addr_l,
-						  &tpkt[i].pkt.phy_addr_h,
-						  tx_pkt_size,
-						  tpkt[i].cache,
-						  DMA_TO_DEVICE,
-						  &tpkt[i].os_rsvd[0]);
-			#else /*USB/SDIO*/
-			tpkt[i].pkt.vir_addr = _os_mem_alloc(drv_priv, tx_pkt_size);
-			#endif
-			if (NULL == tpkt[i].pkt.vir_addr) {
-				PHL_WARN("allocate tx pkt buf fail\n");
-				break;
+
+#ifdef RTW_TEST_TX_PKT_USE_SHMEM_POOL
+#ifdef CONFIG_PCI_HCI
+		tx_pkt_shared_mem_pool_len = ALIGNMENT_MEMORY_POOL_LENGTH(tx_pkt_size, tx_pkt_num, alignment); /* alignment size */
+		_os_mem_set(drv_priv, &trx_test->tx_pkt_shmem_pool, 0, sizeof(struct rtw_txpkt_shmem_pool));
+		trx_test->tx_pkt_shmem_pool.vir_addr = _os_shmem_alloc(
+		                                               drv_priv, rtw_dma_pool,
+		                                               &trx_test->tx_pkt_shmem_pool.phy_addr_l,
+		                                               &trx_test->tx_pkt_shmem_pool.phy_addr_h,
+		                                               tx_pkt_shared_mem_pool_len,
+		                                               CACHE_ADDR,
+		                                               DMA_TO_DEVICE,
+		                                               &trx_test->tx_pkt_shmem_pool.os_rsvd[0]);
+		if (TX_PKT_POOL_SHMEM_POOL_VALID(trx_test)) {
+			trx_test->tx_pkt_shmem_pool.buf_len = tx_pkt_shared_mem_pool_len;
+			_phl_cut_shmem_to_tx_pkt(tpkt, &tx_pkt_pool->idle_list,
+				&trx_test->tx_pkt_shmem_pool, tx_pkt_size, tx_pkt_num, alignment);
+			tx_pkt_pool->idle_cnt = tx_pkt_num;
+		} else
+#endif
+#endif
+		{
+			for (i = 0; i < tx_pkt_num; i++) {
+				INIT_LIST_HEAD(&tpkt[i].list);
+				tpkt[i].cache = cache;
+				#ifdef CONFIG_PCI_HCI
+				tpkt[i].pkt.vir_addr = _os_shmem_alloc(drv_priv, rtw_dma_pool,
+							  &tpkt[i].pkt.phy_addr_l,
+							  &tpkt[i].pkt.phy_addr_h,
+							  tx_pkt_size,
+							  tpkt[i].cache,
+							  DMA_TO_DEVICE,
+							  &tpkt[i].os_rsvd[0]);
+				#else /*USB/SDIO*/
+				tpkt[i].pkt.vir_addr = _os_mem_alloc(drv_priv, tx_pkt_size);
+				#endif
+				if (NULL == tpkt[i].pkt.vir_addr) {
+					PHL_WARN("allocate tx pkt buf fail\n");
+					break;
+				}
+
+				/* hana_todo */
+				/* tpkt[i].pkt.phy_addr_l = 0; */
+				/* tpkt[i].pkt.phy_addr_h = 0; */
+				tpkt[i].pkt.length = (u16)tx_pkt_size;
+				tpkt[i].test_id = i;
+
+				list_add_tail(&tpkt[i].list, &tx_pkt_pool->idle_list);
+				tx_pkt_pool->idle_cnt++;
 			}
-
-			/* hana_todo */
-			/* tpkt[i].pkt.phy_addr_l = 0; */
-			/* tpkt[i].pkt.phy_addr_h = 0; */
-			tpkt[i].pkt.length = (u16)tx_pkt_size;
-			tpkt[i].test_id = i;
-
-			list_add_tail(&tpkt[i].list, &tx_pkt_pool->idle_list);
-			tx_pkt_pool->idle_cnt++;
 		}
 
 		status = RTW_PHL_STATUS_SUCCESS;
@@ -601,10 +701,8 @@ _phl_test_add_role(void *phl, struct rtw_trx_test_param *test_param)
 
 		rlink->hw_port = (u8)txcap->macid;
 
-		sta_info = rtw_phl_get_stainfo_by_addr(phl_info,
-		                                       test_wrole,
-		                                       rlink,
-		                                       test_wrole->mac_addr);
+		sta_info = rtw_phl_get_stainfo_by_addr(
+		    phl_info, test_wrole, rlink, test_wrole->mac_addr, false);
 		if (NULL != sta_info) {
 			test_param->tx_cap.macid = sta_info->macid;
 			phl_status = phl_wifi_role_start(phl_info, test_wrole, sta_info);
@@ -1163,11 +1261,6 @@ enum rtw_phl_status phl_recycle_test_tx(void *phl, struct rtw_xmit_req *treq)
 	struct rtw_trx_test_param *test_param = &trx_test->test_param;
 
 	FUNCIN_WSTS(sts);
-	if (NULL == phl) {
-		PHL_ERR("treq is NULL!\n");
-		goto end;
-	}
-
 	if (NULL == treq) {
 		PHL_ERR("treq is NULL!\n");
 		goto end;
@@ -1223,7 +1316,7 @@ end:
 void rtw_phl_trx_default_param(void *phl, struct rtw_trx_test_param *test_param)
 {
 	struct phl_info_t *phl_info = (struct phl_info_t *)phl;
-	_os_mem_set(phl_to_drvpriv(phl_info), test_param, 0, sizeof(test_param));
+	_os_mem_set(phl_to_drvpriv(phl_info), test_param, 0, sizeof(struct rtw_trx_test_param));
 	test_param->mode = TEST_MODE_PHL_TX_RING_TEST;
 	test_param->ap_mode = 0;
 	test_param->pkt_type = TEST_PKT_TYPE_BC;
@@ -1405,7 +1498,7 @@ void phl_test_sw_tx_cb(void *context)
 	enum rtw_phl_status sts = RTW_PHL_STATUS_FAILURE;
 	struct rtw_xmit_req *treq = NULL;
 	struct rtw_payload *tpkt = NULL;
-	u16 tx_cnt = 0;
+	u32 tx_cnt = 0;
 	u16 tx_seq = test_param->sw_tx_seq;
 
 	for (tx_cnt = 0; tx_cnt < test_param->tx_req_num; tx_cnt++ ) {

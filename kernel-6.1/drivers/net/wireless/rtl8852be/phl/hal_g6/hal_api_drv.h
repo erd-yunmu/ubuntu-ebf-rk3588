@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2019 Realtek Corporation.
+ * Copyright(c) 2019 - 2024 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -15,6 +15,7 @@
 #ifndef _HAL_API_DRV_H_
 #define _HAL_API_DRV_H_
 
+#ifdef CONFIG_BTCOEX
 u32 rtw_hal_mac_coex_init(struct rtw_hal_com_t *hal_com, u8 pta_mode, u8 direction);
 u32 rtw_hal_mac_coex_reg_read(struct rtw_hal_com_t *hal_com, u32 offset, u32 *value);
 u32 rtw_hal_mac_coex_reg_write(struct rtw_hal_com_t *hal_com, u32 offset, u32 value);
@@ -24,6 +25,25 @@ u32 rtw_hal_mac_set_grant_act(struct rtw_hal_com_t *hal_com, u8 *value);
 u32 rtw_hal_mac_set_grant(struct rtw_hal_com_t *hal_com, u8 *value);
 u32 rtw_hal_mac_get_grant(struct rtw_hal_com_t *hal_com, u8 *value);
 u32 rtw_hal_mac_set_polluted(struct rtw_hal_com_t *hal_com, u8 band, u8 tx_val, u8 rx_val);
+u32 rtw_hal_mac_get_bt_polt_cnt(struct rtw_hal_com_t *hal_com, u8 band, u16 *cnt);
+u32 rtw_hal_mac_set_coex_ctrl(struct rtw_hal_com_t *hal_com, u32 val);
+u32 rtw_hal_mac_get_coex_ctrl(struct rtw_hal_com_t *hal_com, u32 *val);
+
+void rtw_hal_btc_power_on_ntfy(void *hinfo);
+void rtw_hal_btc_power_off_ntfy(void *hinfo);
+u8 rtw_hal_btc_wl_rfk_ntfy(struct rtw_hal_com_t *hal_com, u8 phy_idx, u8 rfk_type, u8 rfk_process);
+
+enum rtw_hal_status rtw_hal_btc_cfg_1ss(struct rtw_hal_com_t *hal_c,
+		struct rtw_phl_com_t *phl_c, enum band_type band,
+		bool tx_en, bool rx_en, bool tx_res, bool rx_res);
+
+enum rtw_hal_status rtw_hal_btc_cfg_trx_path(struct rtw_hal_com_t *hal_c,
+		enum rf_path tx, u8 tx_nss, enum rf_path rx, u8 rx_nss);
+
+#else /* CONFIG_BTCOEX */
+#define rtw_hal_btc_wl_rfk_ntfy(hal_com, phy_idx, rfk_type, rfk_process) 0
+#endif /* CONFIG_BTCOEX */
+
 u32 rtw_hal_mac_set_tx_time(struct rtw_hal_com_t *hal_com, u8 is_btc,
 			    u8 is_resume, u8 macid, u32 tx_time);
 u32 rtw_hal_mac_get_tx_time(struct rtw_hal_com_t *hal_com, u8 macid, u32 *tx_time);
@@ -33,10 +53,6 @@ u32 rtw_hal_mac_set_rsc_cfg(struct rtw_hal_com_t *hal_com, u8 rrsr_cfg, u8 band)
 u32 rtw_hal_mac_set_rrsr_ref_rate_sel(struct rtw_hal_com_t *hal_com, bool ref_rate_sel, u8 band);
 u32 rtw_hal_mac_get_tx_retry_limit(struct rtw_hal_com_t *hal_com, u8 macid,
 				   u8 *tx_retry);
-u32 rtw_hal_mac_get_bt_polt_cnt(struct rtw_hal_com_t *hal_com, u8 band,
-				u16 *cnt);
-u32 rtw_hal_mac_set_coex_ctrl(struct rtw_hal_com_t *hal_com, u32 val);
-u32 rtw_hal_mac_get_coex_ctrl(struct rtw_hal_com_t *hal_com, u32 *val);
 
 u32 rtw_hal_mac_send_h2c(struct rtw_hal_com_t *hal_com,
 	struct rtw_g6_h2c_hdr *hdr, u32 *pvalue);
@@ -67,6 +83,13 @@ u32 rtw_hal_mac_cfg_dfs_rpt(struct rtw_hal_com_t *hal_com, struct hal_mac_dfs_rp
 enum rtw_hal_status
 rtw_hal_bb_dfs_rpt_cfg(struct rtw_hal_com_t *hal_com, enum phl_phy_idx phy_idx, bool dfs_en);
 #endif
+
+bool rtw_hal_txpwr_by_rate_store_from_external(struct rtw_hal_com_t *hal_com
+	, struct rtw_para_info_t *para_info);
+bool rtw_hal_txpwr_lmt_store_from_external(struct rtw_hal_com_t *hal_com
+	, struct rtw_para_pwrlmt_info_t *para_info);
+bool rtw_hal_txpwr_lmt_ru_store_from_external(struct rtw_hal_com_t *hal_com
+	, struct rtw_para_pwrlmt_info_t *para_info);
 
 u32 rtw_hal_mac_write_msk_pwr_reg(
 	struct rtw_hal_com_t *hal_com, u8 band, u32 offset, u32 mask, u32 val);
@@ -196,14 +219,6 @@ enum rtw_hal_status rtw_hal_notify_switch_band(void *hinfo,
 enum rtw_hal_status rtw_hal_reset(struct rtw_hal_com_t *hal_com,
 			enum phl_phy_idx phy_idx, u8 band_idx, bool reset);
 
-#ifndef CONFIG_BTCOEX
-#define rtw_hal_btc_wl_rfk_ntfy(hal_com, phy_idx, rfk_type, rfk_process) 0
-#else
-u8 rtw_hal_btc_wl_rfk_ntfy(struct rtw_hal_com_t *hal_com, u8 phy_idx, u8 rfk_type, u8 rfk_process);
-#endif
-void rtw_hal_btc_power_on_ntfy(void *hinfo);
-void rtw_hal_btc_power_off_ntfy(void *hinfo);
-
 enum rtw_hal_status
 rtw_hal_pause_tx_fifo_sw(void *hal, u8 band_idx,
 			bool tx_pause, enum tx_pause_rson rson);
@@ -272,7 +287,7 @@ rtw_hal_bb_set_pmac_cont_tx(struct rtw_hal_com_t *hal_com, u8 enable, u8 is_cck,
 
 enum rtw_hal_status
 rtw_hal_bb_set_pmac_carrier_suppression_tx(struct rtw_hal_com_t *hal_com, u8 enable, u8 is_cck,
-							enum phl_phy_idx phy_idx);
+							u16 tx_cnt, u16 period, enum phl_phy_idx phy_idx);
 
 enum rtw_hal_status
 rtw_hal_bb_set_pmac_packet_tx(struct rtw_hal_com_t *hal_com, u8 enable,
@@ -310,6 +325,12 @@ enum rtw_hal_status
 rtw_hal_rf_chl_rfk_trigger(struct rtw_hal_com_t *hal_com,
                            u8 phy_idx,
                            enum rfk_tri_type rt_type);
+
+enum rtw_hal_status
+rtw_hal_rf_update_tas_def_setting(void *hal, u32 tas_config);
+
+enum rtw_hal_status
+rtw_hal_rf_tas_en(void *hal, u8 en);
 
 enum rtw_hal_status
 rtw_hal_bb_ctrl_btg(struct rtw_hal_com_t *hal_com, bool btg);
@@ -371,7 +392,7 @@ enum rtw_hal_status
 rtw_hal_mac_get_log_efuse_bt_size(struct rtw_hal_com_t *hal_com, u32 *val);
 
 enum rtw_hal_status
-rtw_hal_mac_read_log_efuse_bt_map(struct rtw_hal_com_t *hal_com, u8 *map);
+rtw_hal_mac_read_log_efuse_bt_map(struct rtw_hal_com_t *hal_com, u8 *map, u32 size);
 
 enum rtw_hal_status
 rtw_hal_mac_write_log_efuse_bt_map(struct rtw_hal_com_t *hal_com,
@@ -454,8 +475,9 @@ void rtw_hal_rf_diagnostic_event(struct rtw_hal_com_t *hal, u8 type,
 		u8 level, u8 version, u8 *buf, u32 len);
 #endif
 
+#ifdef CONFIG_PHL_IO_OFLD
 enum rtw_hal_status rtw_hal_mac_add_cmd_ofld(struct rtw_hal_com_t *hal_com, struct rtw_mac_cmd *cmd);
-enum rtw_hal_status rtw_hal_mac_cmd_ofld(struct rtw_hal_com_t *hal_com);
+#endif
 
 void rtw_hal_bb_env_rpt(struct rtw_hal_com_t *hal_com, struct rtw_env_report *env_rpt,
 		     enum phl_phy_idx phy_indx);
@@ -493,4 +515,8 @@ enum rtw_hal_status
 rtw_hal_mac_sr_update(struct rtw_hal_com_t *hal_com,
                       void *sr_info,
                       u8 hw_band);
+
+char *rtw_hal_get_ext_regd_name(struct rtw_para_pwrlmt_info_t *para_info, u8 idx);
+void rtw_hal_bb_bb_reset_cmn(struct rtw_hal_com_t *hal, bool en, enum phl_phy_idx phy_idx);
+
 #endif /*_HAL_API_DRV_H_*/

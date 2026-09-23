@@ -408,12 +408,6 @@ struct dvobj_priv;
 void dump_tx_rate_bmp(void *sel, struct dvobj_priv *dvobj);
 void dump_adapters_status(void *sel, struct dvobj_priv *dvobj);
 
-struct sec_cam_ent;
-void dump_sec_cam_ent(void *sel, struct sec_cam_ent *ent, int id);
-void dump_sec_cam_ent_title(void *sel, u8 has_id);
-void dump_sec_cam(void *sel, _adapter *adapter);
-void dump_sec_cam_cache(void *sel, _adapter *adapter);
-
 bool rtw_del_rx_ampdu_test_trigger_no_tx_fail(void);
 u32 rtw_get_wait_hiq_empty_ms(void);
 void rtw_sta_linking_test_set_start(void);
@@ -423,6 +417,8 @@ bool rtw_sta_linking_test_force_fail(void);
 u16 rtw_ap_linking_test_force_auth_fail(void);
 u16 rtw_ap_linking_test_force_asoc_fail(void);
 #endif
+
+const char *rtw_data_rate_str(u16 rate);
 
 #ifdef CONFIG_PROC_DEBUG
 ssize_t proc_set_write_reg(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
@@ -590,11 +586,6 @@ int proc_get_rssi_disp(struct seq_file *m, void *v);
 ssize_t proc_set_rssi_disp(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
 #endif
 
-#if defined(DBG_CONFIG_ERROR_DETECT)
-int proc_get_sreset(struct seq_file *m, void *v);
-ssize_t proc_set_sreset(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
-#endif /* DBG_CONFIG_ERROR_DETECT */
-
 #ifdef CONFIG_DBG_COUNTER
 int proc_get_rx_logs(struct seq_file *m, void *v);
 int proc_get_tx_logs(struct seq_file *m, void *v);
@@ -629,6 +620,7 @@ int proc_get_wakeup_event(struct seq_file *m, void *v);
 ssize_t proc_set_wakeup_event(struct file *file, const char __user *buffer,
 		size_t count, loff_t *pos, void *data);
 int proc_get_wakeup_reason(struct seq_file *m, void *v);
+int proc_get_wakeup_pattern_idx(struct seq_file *m, void *v);
 int proc_get_wake_indication(struct seq_file *m, void *v);
 #ifdef CONFIG_GPIO_WAKEUP
 int proc_get_wowlan_gpio_info(struct seq_file *m, void *v);
@@ -638,6 +630,35 @@ ssize_t proc_set_wow_gpio_duration(struct file *file, const char __user *buffer,
 		size_t count, loff_t *pos, void *data);
 int proc_get_wow_gpio_duration(struct seq_file *m, void *v);
 #endif /*CONFIG_GPIO_WAKEUP*/
+#ifdef CONFIG_MDNS_OFFLOAD
+ssize_t proc_set_wow_mdns_resp(struct file *file, const char __user *buffer,
+		size_t count, loff_t *pos, void *data);
+int proc_get_wow_mdns_resp(struct seq_file *m, void *v);
+ssize_t proc_set_wow_mdns_match_criteria(struct file *file,
+		const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_wow_mdns_match_criteria(struct seq_file *m, void *v);
+ssize_t proc_set_wow_mdns_passthru_list(struct file *file,
+		const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_wow_mdns_passthru_list(struct seq_file *m, void *v);
+ssize_t proc_set_wow_mdns_offload_state(struct file *file,
+		const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_wow_mdns_offload_state(struct seq_file *m, void *v);
+ssize_t proc_set_wow_mdns_passthru_behavior(struct file *file,
+		const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_wow_mdns_passthru_behavior(struct seq_file *m, void *v);
+#endif /* CONFIG_MDNS_OFFLOAD */
+#ifdef CONFIG_WOW_PERIODIC_WAKE
+int proc_get_wow_pw_info(struct seq_file *m, void *v);
+ssize_t proc_set_wow_pw_info(struct file *file, const char __user *buffer,
+			     size_t count, loff_t *pos, void *data);
+#endif
+
+#ifdef CONFIG_APF
+ssize_t proc_set_apf(struct file *file, const char __user *buffer,
+		     size_t count, loff_t *pos, void *data);
+int proc_get_apf(struct seq_file *m, void *v);
+#endif
+
 #endif /* CONFIG_WOWLAN */
 
 #ifdef CONFIG_P2P_WOWLAN
@@ -647,6 +668,10 @@ int proc_get_p2p_wowlan_info(struct seq_file *m, void *v);
 #ifdef CONFIG_POWER_SAVE
 int proc_get_ps_info(struct seq_file *m, void *v);
 ssize_t proc_set_ps_info(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+#if defined(CONFIG_RTW_LPS) || defined(CONFIG_RTW_LPS_WOW)
+ssize_t proc_set_ps_dtim(struct file *file, const char __user *buffer,
+			 size_t count, loff_t *pos, void *data);
+#endif /* defined(CONFIG_RTW_LPS) || defined(CONFIG_RTW_LPS_WOW) */
 #endif /* CONFIG_POWER_SAVE */
 
 int proc_get_new_bcn_max(struct seq_file *m, void *v);

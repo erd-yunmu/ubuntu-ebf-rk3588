@@ -14,6 +14,7 @@
  ******************************************************************************/
 
 #include "../mac_priv.h"
+#include "../../include/mac_top.h"
 #include "init_8852b.h"
 #include "pwr_seq_func_8852b.h"
 #include "cmac_tx_8852b.h"
@@ -28,6 +29,11 @@
 #include "hci_fc_8852b.h"
 #include "dle_8852b.h"
 #include "wowlan_8852b.h"
+#include "dbg_cmd_8852b.h"
+#include "ser_8852b.h"
+#include "../err_flag.h"
+#include "../sta_sch.h"
+
 #if MAC_AX_PCIE_SUPPORT
 #include "_pcie_8852b.h"
 #endif
@@ -46,46 +52,6 @@ static struct mac_ax_priv_ops mac8852b_priv_ops = {
 	NULL, /* intf_pwr_switch */
 	dmac_func_en_8852b, /* dmac_func_en */
 	dmac_func_pre_en_8852b, /* dmac_func_pre_en */
-	mac_init_cctl_info_8852b, /* init cmac table */
-	cmac_init, /*cmac module init*/
-	cmac_func_en,/* cmac_func_en */
-	macid_idle_ck_8852b, /* macid_idle_ck */
-	stop_sch_tx_8852b, /* stop_sch_tx */
-	switch_efuse_bank_8852b, /* switch_efuse_bank */
-	enable_efuse_sw_pwr_cut_8852b, /* enable_efuse_sw_pwr_cut */
-	disable_efuse_sw_pwr_cut_8852b, /* disable_efuse_sw_pwr_cut */
-	get_h2creg_offset_8852b, /* get_h2creg_offset */
-	get_c2hreg_offset_8852b, /* get_c2hreg_offset */
-	ser_imr_config, /*ser_imr_config , 52b 52a using same api*/
-	disconnect_flush_key, /* disconnect_flush_key */
-	sec_info_tbl_init, /* sec_info_tbl_init */
-	free_sec_info_tbl, /* free_sec_info_tbl */
-	mac_wowlan_secinfo, /* mac_wowlan_secinfo */
-	mac_get_rrsr_cfg_8852b, /*get RRSR related config*/
-	mac_set_rrsr_cfg_8852b, /*set RRSR related config*/
-	mac_get_cts_rrsr_cfg_8852b, /*get CTS RRSR related config*/
-	mac_set_cts_rrsr_cfg_8852b, /*set CTS RRSR related config*/
-	mac_cfg_gnt_8852b, /* cfg_ctrl_path*/
-	mac_cfg_ctrl_path_8852b, /* cfg_ctrl_path */
-	mac_get_gnt_8852b, /* get_gnt */
-	mac_get_ctrl_path_8852b, /* get_ctrl_path */
-	get_bbrpt_dle_cfg_8852b, /*get_bbrpt_dle_cfg*/
-	dbg_port_sel_8852b, /*for mac debug port*/
-	tx_flow_ptcl_dbg_port_8852b, /*for mac tx flow ptcl dbg*/
-	tx_flow_sch_dbg_port_8852b, /*for mac tx schdueler ptcl dbg*/
-	ss_stat_chk_8852b, /*for mac station scheduler check*/
-	dmac_dbg_dump_8852b, /*for dmac debug dump*/
-	cmac_dbg_dump_8852b, /*for cmac debug dump*/
-	crit_dbg_dump_8852b, /*for system critical debug dump*/
-	tx_dbg_dump_8852b, /*for tx flow debug dump*/
-	coex_mac_init_8852b, /* coex_mac_init */
-	set_fc_page_ctrl_reg_8852b, /* set_fc_page_ctrl_reg */
-	get_fc_page_info_8852b, /* get_fc_page_info */
-	set_fc_pubpg_8852b, /* set_fc_pubpg */
-	get_fc_mix_info_8852b, /* get_fc_mix_info */
-	set_fc_h2c_8852b, /* set_fc_h2c */
-	set_fc_mix_cfg_8852b, /* set_fc_mix_cfg */
-	set_fc_func_en_8852b, /* set_fc_func_en */
 	dle_dfi_ctrl_8852b, /* dle_dfi_ctrl */
 	dle_is_txq_empty_8852b, /* dle_is_txq_empty */
 	dle_is_rxq_empty_8852b, /* dle_is_rxq_empty */
@@ -97,10 +63,73 @@ static struct mac_ax_priv_ops mac8852b_priv_ops = {
 	wde_quota_cfg_8852b, /* wde_quota_cfg */
 	ple_quota_cfg_8852b, /* ple_quota_cfg */
 	chk_dle_rdy_8852b, /* chk_dle_rdy */
+	mac_init_cctl_info_8852b, /* init cmac table */
+	cmac_init, /*cmac module init*/
+	cmac_func_en,/* cmac_func_en */
+	macid_idle_ck_8852b, /* macid_idle_ck */
+	stop_sch_tx_8852b, /* stop_sch_tx */
+	switch_efuse_bank_8852b, /* switch_efuse_bank */
+	enable_efuse_sw_pwr_cut_8852b, /* enable_efuse_sw_pwr_cut */
+	disable_efuse_sw_pwr_cut_8852b, /* disable_efuse_sw_pwr_cut */
+	efuse_info_init_8852b, /* efuse_info_init */
+	get_h2creg_offset_8852b, /* get_h2creg_offset */
+	get_c2hreg_offset_8852b, /* get_c2hreg_offset */
+#if MAC_FEAT_COEX
+	mac_cfg_gnt_8852b, /* cfg_ctrl_path*/
+	mac_cfg_ctrl_path_8852b, /* cfg_ctrl_path */
+	mac_get_gnt_8852b, /* get_gnt */
+	mac_get_ctrl_path_8852b, /* get_ctrl_path */
+#else
+	coex_mac_init_8852b, /* coex_mac_init */
+#endif /* MAC_FEAT_COEX */
+	ser_imr_config_8852b, /*ser_imr_config auto gen*/
+	ser_imr_config_patch_8852b, /*ser_imr_config */
+	disconnect_flush_key, /* disconnect_flush_key */
+	sec_info_tbl_init, /* sec_info_tbl_init */
+	free_sec_info_tbl, /* free_sec_info_tbl */
+	mac_wowlan_secinfo, /* mac_wowlan_secinfo */
+	mac_get_rrsr_cfg_8852b, /*get RRSR related config*/
+	mac_set_rrsr_cfg_8852b, /*set RRSR related config*/
+	mac_get_cts_rrsr_cfg_8852b, /*get CTS RRSR related config*/
+	mac_set_cts_rrsr_cfg_8852b, /*set CTS RRSR related config*/
+	/*DMAC*/
+#if MAC_FEAT_PHY_RPT
+	get_bbrpt_dle_cfg_8852b, /*get_bbrpt_dle_cfg*/
+#endif
+	set_fc_page_ctrl_reg_8852b, /* set_fc_page_ctrl_reg */
+	get_fc_page_info_8852b, /* get_fc_page_info */
+	set_fc_pubpg_8852b, /* set_fc_pubpg */
+	get_fc_mix_info_8852b, /* get_fc_mix_info */
+	set_fc_h2c_8852b, /* set_fc_h2c */
+	set_fc_mix_cfg_8852b, /* set_fc_mix_cfg */
+	set_fc_func_en_8852b, /* set_fc_func_en */
+	mac_ss_stat_chk, /*for mac station scheduler check*/
+	mac_bacam_init, /* bacam init */
+	/* Debug Dump*/
+#if MAC_AX_FEATURE_DBGPKG
+	dmac_dbg_dump_8852b, /*for dmac debug dump*/
+	cmac_dbg_dump_8852b, /*for cmac debug dump*/
+	crit_dbg_dump_8852b, /*for system critical debug dump*/
+	tx_dbg_dump_8852b, /*for tx flow debug dump*/
 	is_dbg_port_not_valid_8852b, /* is_dbg_port_not_valid */
 	dbg_port_sel_rst_8852b, /* dbg_port_sel_rst */
 	dle_dfi_sel_8852b, /* dle_dfi_sel */
-	mac_bacam_init, /* bacam init */
+	get_check_reg_8852b, /* get_check_reg */
+	dbg_port_sel_8852b, /*for mac debug port*/
+	tx_flow_ptcl_dbg_port_8852b, /*for mac tx flow ptcl dbg*/
+	tx_flow_sch_dbg_port_8852b, /*for mac tx schdueler ptcl dbg*/
+#endif /* MAC_AX_FEATURE_DBGPKG */
+	/* ERROR FLAG CHECKER */
+#if MAC_AX_FEATURE_ERR_FLAG
+	err_flag_cmac_8852b,
+	err_flag_dmac_8852b,
+	err_flag_rst_cmac_8852b,
+	err_flag_rst_dmac_8852b,
+	err_flag_chk,
+#endif /* MAC_AX_FEATURE_ERR_FLAG */
+#if MAC_SELF_DIAG_INFO
+	get_ser_freq, /* get ser frequency*/
+#endif /* #if MAC_SELF_DIAG_INFO */
 #if MAC_AX_PCIE_SUPPORT
 	get_pcie_info_def_8852b, /* get_pcie_info_def */
 	get_bdram_tbl_pcie_8852b, /* get_bdram_tbl_pcie */
@@ -111,6 +140,7 @@ static struct mac_ax_priv_ops mac8852b_priv_ops = {
 	get_rxbd_reg_pcie_8852b, /* get_rxbd_reg_pcie */
 	set_rxbd_reg_pcie_8852b, /* set_rxbd_reg_pcie */
 	ltr_sw_trigger_8852b, /* ltr_sw_trigger */
+	ltr_dyn_ctrl_8852b, /* ltr_dyn_ctrl */
 	pcie_cfgspc_write_8852b, /* pcie_cfgspc_write */
 	pcie_cfgspc_read_8852b, /* pcie_cfgspc_read */
 	pcie_ltr_write_8852b, /* pcie_ltr_write */
@@ -126,11 +156,16 @@ static struct mac_ax_priv_ops mac8852b_priv_ops = {
 	mode_op_pcie_8852b, /* mode_op_pcie */
 	get_err_flag_pcie_8852b, /* get_err_flag_pcie */
 	mac_auto_refclk_cal_pcie_8852b, /* mac_auto_refclk_cal_pcie */
+	sync_trx_bd_idx_pcie, /* sync_trx_bd_idx */
+	mac_read_pcie_cfg_spc, /* read_pcie_cfg_spc */
+	pcie_aspm_frontdoor_set_8852b, /* pcie_aspm_frontdoor_set */
 #ifdef RTW_WKARD_GET_PROCESSOR_ID
 	chk_proc_long_ldy, /* chk_proc_long_ldy_pcie */
 #endif
-	sync_trx_bd_idx_pcie, /* sync_trx_bd_idx */
-	mac_read_pcie_cfg_spc, /* read_pcie_cfg_spc */
+	get_pcie_support_width_8852b, /* get_pcie_support_width */
+	get_pcie_link_width_8852b, /* get_pcie_link_width */
+	set_pcie_link_width_8852b, /* set_pcie_link_width */
+	pcie_set_oobs_8852b, /* pcie_set_oob */
 #endif
 #if MAC_AX_SDIO_SUPPORT
 	r_indir_cmd52_sdio_8852b, /* r_indir_cmd52_sdio */
@@ -141,7 +176,7 @@ static struct mac_ax_priv_ops mac8852b_priv_ops = {
 	w_indir_cmd52_sdio_8852b, /* w_indir_cmd52_sdio */
 	w_indir_cmd53_sdio_8852b, /* w_indir_cmd53_sdio */
 	ud_fs_8852b, /* ud_fs */
-	sdio_pre_init_8852b, /* sdio_pre_init */
+	sdio_pre_init, /* sdio_pre_init */
 	tx_mode_cfg_sdio_8852b, /* tx_mode_cfg_sdio */
 	leave_suspend_sdio_8852b, /* leave_suspend_sdio */
 	get_int_latency_sdio_8852b, /* get_int_latency_sdio */
@@ -152,10 +187,16 @@ static struct mac_ax_priv_ops mac8852b_priv_ops = {
 	rx_agg_cfg_sdio_8852b, /* rx_agg_cfg_sdio */
 	aval_page_cfg_sdio_8852b, /* aval_page_cfg_sdio */
 	get_sdio_rx_req_len_8852b, /* get_sdio_rx_req_len */
+	read_sdio_cccr_8852b, /* read_sdio_cccr */
 #endif
 #if MAC_AX_USB_SUPPORT
 	usb_ep_cfg_8852b, /* USB endpoint pause release */
+	read_usb2phy_para_8852b, /* read_usb2phy_para */
+	write_usb2phy_para_8852b, /* write_usb2phy_para */
+	read_usb3phy_para_8852b, /* read_usb3phy_para */
+	write_usb3phy_para_8852b, /* write_usb3phy_para */
 #endif
+	/* WOWLAN */
 	get_wake_reason_8852b, /* get_wake_reason */
 };
 

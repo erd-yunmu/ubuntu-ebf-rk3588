@@ -192,6 +192,29 @@ enum rtw_hal_status rtw_efuse_shadow_load(void *efuse, bool is_limit)
 	return status;
 }
 
+bool rtw_efuse_chk_tssi_data_vaild(void *efuse) {
+	struct efuse_t *efuse_info = efuse;
+	u32 i =0 , countr =0;
+
+	/*path s0*/
+	for (i = 0x210 ; i <= 0x239; i++) {
+		if ((efuse_info->shadow_map[i]) != 0xff)
+			countr++;
+	}
+	/*path s1*/
+	for (i = 0x23a ; i <= 0x2dc; i++) {
+		if ((efuse_info->shadow_map[i]) != 0xff)
+			countr++;
+	}
+	PHL_INFO("%s , check Efuse countr = %d\n", __func__, countr);
+	if (countr > 40) {
+		PHL_INFO("%s check eFuse TSSI Data SUCCESS !!!\n", __func__);
+		return true;
+	}
+	PHL_INFO("%s eFuse TSSI Data all are 0xff, return STATUS_FAILURE !!!\n", __func__);
+	return false;
+}
+
 enum rtw_hal_status rtw_efuse_shadow_file_load(void *efuse, char *ic_name, bool is_limit)
 {
 	enum rtw_hal_status status = RTW_HAL_STATUS_SUCCESS;
@@ -199,13 +222,12 @@ enum rtw_hal_status rtw_efuse_shadow_file_load(void *efuse, char *ic_name, bool 
 #ifdef CONFIG_EFUSE_CONFIG_FILE
 	struct efuse_t *efuse_info = efuse;
 
-	if (efuse_info->is_map_valid != true ||
-		rtw_hal_rf_check_efuse_data(efuse_info->hal_com, HW_PHY_0) != true) {
+	if (efuse_info->is_map_valid != true || rtw_efuse_chk_tssi_data_vaild(efuse_info) != true) {
 
 		if (rtw_hal_efuse_shadow_file_load(efuse_info->hal_com ,
 						ic_name, is_limit) == RTW_HAL_STATUS_SUCCESS) {
 
-			if (rtw_hal_rf_check_efuse_data(efuse_info->hal_com, HW_PHY_0) == true) {
+			if (rtw_efuse_chk_tssi_data_vaild(efuse_info) == true) {
 				efuse_info->is_map_valid = true;
 				PHL_INFO(" %s() hal_rf check file efuse is_map_valid.\n", __FUNCTION__);
 			} else {
@@ -414,7 +436,14 @@ enum rtw_hal_status rtw_efuse_shadow2buf(void *efuse, u8 *destbuf, u16 buflen)
 {
 	enum rtw_hal_status status = RTW_HAL_STATUS_SUCCESS;
 	struct efuse_t *efuse_info = efuse;
+	u16 offset;
 
+	if (efuse_info->efuse_a_die_size != 0) {
+		for (offset = efuse_info->a_die_start_offset;
+			offset < (efuse_info->a_die_start_offset + (u32)efuse_info->efuse_a_die_size); offset++)
+			efuse_info->shadow_map[offset] =
+						efuse_info->shadow_map[offset + efuse_info->hci_to_a_die_offset];
+	}
 	_os_mem_cpy(efuse_info->hal_com->drv_priv, (void *)destbuf,
 				(void *)efuse_info->shadow_map , buflen);
 
@@ -844,7 +873,7 @@ u32 rtw_efuse_init(struct rtw_phl_com_t *phl_com,
 
 	if(efuse_info == NULL) {
 		hal_status = RTW_HAL_STATUS_RESOURCE;
-		goto error_efuse_init;
+		return hal_status;
 	}
 
 	/* Allocate shadow map memory */
@@ -1002,7 +1031,6 @@ error_efuse_mask_init:
 error_efuse_shadow_init:
 	_os_mem_free(hal_com->drv_priv, efuse_info, sizeof(struct efuse_t));
 
-error_efuse_init:
 	return hal_status;
 }
 
@@ -1043,10 +1071,8 @@ void rtw_efuse_deinit(struct rtw_hal_com_t *hal_com, void *efuse)
 		efuse_info->shadow_map = NULL;
 	}
 
-	if (efuse_info) {
-		_os_mem_free(hal_com->drv_priv, efuse_info, sizeof(struct efuse_t));
-		efuse_info = NULL;
-	}
+	_os_mem_free(hal_com->drv_priv, efuse_info, sizeof(struct efuse_t));
+	efuse_info = NULL;
 }
 
 /* BT EFUSE API */
@@ -1094,7 +1120,7 @@ enum rtw_hal_status rtw_efuse_bt_shadow_load(void *efuse)
 	struct efuse_t *efuse_info = efuse;
 
 	status = rtw_hal_mac_read_log_efuse_bt_map(efuse_info->hal_com,
-											efuse_info->bt_shadow_map);
+						efuse_info->bt_shadow_map, efuse_info->bt_log_efuse_size);
 
 	return status;
 }
@@ -1133,7 +1159,7 @@ enum rtw_hal_status rtw_efuse_bt_shadow_update(void *efuse)
 
 	/* Reload shadow map after PG */
 	reload_status = rtw_hal_mac_read_log_efuse_bt_map(efuse_info->hal_com,
-								efuse_info->bt_shadow_map);
+								efuse_info->bt_shadow_map, efuse_info->bt_log_efuse_size);
 	if(reload_status != RTW_HAL_STATUS_SUCCESS)
 		PHL_WARN("%s: Reload bt shadow map Fail!\n", __FUNCTION__);
 
@@ -1489,7 +1515,7 @@ enum rtw_hal_status rtw_efuse_renew(void *efuse, u8 type)
 
 	if (type == HAL_MP_EFUSE_WIFI) {
 		rtw_hal_bb_get_efuse_init(efuse_info->hal_com);
-		rtw_hal_rf_get_efuse_ex(efuse_info->hal_com, HW_PHY_MAX);
+		rtw_hal_rf_get_efuse_ex(efuse_info->hal_com, HW_PHY_0);
 		PHL_INFO("%s: hal efuse renew done\n", __FUNCTION__);
 
 	} else if (type == HAL_MP_EFUSE_BT) {

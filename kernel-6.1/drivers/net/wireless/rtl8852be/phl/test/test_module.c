@@ -116,12 +116,20 @@ static u8 _dequeue_head_obj(void *d,
 	struct test_obj_queue *queue, struct test_object_ex **obj)
 {
 	(*obj) = NULL;
-	if(list_empty(&(queue->q)))
-		return false;
+
 	_os_mutex_lock(d, &queue->lock);
+
+	if(list_empty(&(queue->q))){
+		_os_mutex_unlock(d, &queue->lock);
+		return false;
+	}
+
 	(*obj) = list_first_entry(&(queue->q),
 				struct test_object_ex, test_obj.list);
-	list_del(&((*obj)->test_obj.list));
+
+	if (*obj != NULL)
+		list_del(&((*obj)->test_obj.list));
+
 	_os_mutex_unlock(d, &queue->lock);
 	return ((*obj) == NULL|| ((struct list_head*)(*obj)) == &(queue->q)) ? \
 		(false) : (true);

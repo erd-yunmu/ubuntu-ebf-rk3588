@@ -55,6 +55,64 @@
 #define FWCMD_C2H_CL_NULL		0xFF
 #define FWCMD_C2H_FUNC_NULL		0xFF
 #define FWCMD_C2H_CAT_NULL		0xFF
+#define AP_SELF_DIAG_RST_ELEMENT_SIZE		12
+#define AP_SELF_DIAG_RST_WARN_BITMAP_OFFSET	4
+#define AP_SELF_DIAG_RST_ERR_BITMAP_OFFSET	8
+
+#define OM_ADV_DL_MU_DATA_DIS	0
+
+#define H2CB_CMD_HDR_SIZE	(FWCMD_HDR_LEN + WD_BODY_LEN_V1)
+#define H2CB_CMD_SIZE		(H2C_CMD_LEN - FWCMD_HDR_LEN)
+#define H2CB_CMD_QLEN		8
+
+#define H2CB_DATA_HDR_SIZE	(FWCMD_HDR_LEN + WD_BODY_LEN_V1)
+#define H2CB_DATA_SIZE		(H2C_DATA_LEN - FWCMD_HDR_LEN)
+#define H2CB_DATA_QLEN		4
+
+#define H2CB_LONG_DATA_HDR_SIZE	(FWCMD_HDR_LEN + WD_BODY_LEN)
+#define H2CB_LONG_DATA_SIZE	(H2C_LONG_DATA_LEN - FWCMD_HDR_LEN)
+#define H2CB_LONG_DATA_QLEN	1
+
+#define FWCMD_WQ_MAX_JOB_NUM	5
+
+#define FWCMD_LMT		12
+
+#define MAC_AX_H2C_LMT_EN	0
+
+#define FWCMD_H2CREG_BYTE0_SH 0
+#define FWCMD_H2CREG_BYTE0_MSK 0xFF
+#define FWCMD_H2CREG_BYTE1_SH 8
+#define FWCMD_H2CREG_BYTE1_MSK 0xFF
+#define FWCMD_H2CREG_BYTE2_SH 16
+#define FWCMD_H2CREG_BYTE2_MSK 0xFF
+#define FWCMD_H2CREG_BYTE3_SH 24
+#define FWCMD_H2CREG_BYTE3_MSK 0xFF
+
+#define SCANOFLD_RSP_EVT_ID 1
+#define SCANOFLD_RSP_EVT_PARSE 1
+#define SCANOFLD_ACK_BAND_SHIFT 6
+#define SCANOFLD_ACK_RETURN_MASK 0x3F
+
+#define H2CB_FLAGS_FREED	BIT(0)
+
+#define MAC_AX_H2CREG_CNT 100
+#define MAC_AX_H2CREG_US 200
+
+/* cat: NONMAC */
+#define H2C_CLASS_PHYDM_MAX 0x7
+#define H2C_CLASS_RF_MAX 0xf
+#define H2C_CLASS_BTC_MAX 0x17
+
+#if NINTENDO_EN
+// C2H TWT_NOTIFY_EVT
+#define FWCMD_C2H_FUNC_TWT_NOTIFY_EVT 0x02
+#define FWCMD_C2H_TWT_NOTIFY_EVT_TYPE_SH 0
+#define FWCMD_C2H_TWT_NOTIFY_EVT_TYPE_MSK 0xff
+#define FWCMD_C2H_TWT_NOTIFY_EVT_TSF_LOW_SH 0
+#define FWCMD_C2H_TWT_NOTIFY_EVT_TSF_LOW_MSK 0xffffffff
+#define FWCMD_C2H_TWT_NOTIFY_EVT_TSF_HIGH_SH 0
+#define FWCMD_C2H_TWT_NOTIFY_EVT_TSF_HIGH_MSK 0xffffffff
+#endif
 
 /**
  * @struct h2c_buf_head
@@ -144,26 +202,44 @@ struct h2c_buf {
 	struct h2c_buf *prev;
 	enum h2c_buf_class _class_;
 	u32 id;
-	u8 master;
 	u32 len;
 	u8 *head;
 	u8 *end;
 	u8 *data;
 	u8 *tail;
 	u32 hdr_len;
-#define H2CB_FLAGS_FREED	BIT(0)
 	u32 flags;
+	u8 master;
 	u8 h2c_seq;
 };
 
 struct h2c_info {
+	u16 content_len;
 	u8 h2c_cat;
 	u8 h2c_class;
 	u8 h2c_func;
 	u8 rec_ack;
 	u8 done_ack;
 	u8 agg_en;
-	u16 content_len;
+};
+
+/**
+ * @struct c2h_proc_class
+ * @brief c2h_proc_class
+ *
+ * @var c2h_proc_class::id
+ * Please Place Description here.
+ * @var c2h_proc_class::handler
+ * Please Place Description here.
+ */
+struct h2c_allloc_status {
+	u16 ldata;
+	u16 data;
+	u16 cmd;
+	u16 mac;
+	u16 bb;
+	u16 rf;
+	u16 btc;
 };
 
 /**
@@ -176,14 +252,14 @@ struct h2c_info {
  * Please Place Description here.
  */
 struct c2h_proc_class {
-	u16 id;
 	u32 (*handler)(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
 		       struct rtw_c2h_info *info);
+	u16 id;
 };
 
 struct fw_status_proc_class {
-	u16 id;
 	u32 (*handler)(struct mac_ax_adapter *adapter, u8 *buf, u32 len);
+	u16 id;
 };
 
 /**
@@ -196,9 +272,9 @@ struct fw_status_proc_class {
  * Please Place Description here.
  */
 struct c2h_proc_func {
-	u16 id;
 	u32 (*handler)(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
 		       struct rtw_c2h_info *info);
+	u16 id;
 };
 
 /**
@@ -216,30 +292,47 @@ struct c2h_proc_func {
  */
 
 struct mac_ax_c2hreg_info {
+	u8 *content;
 	u8 id;
 	u8 content_len;
-	u8 *content;
 	u8 c2hreg[C2HREG_LEN];
 };
 
 struct mac_ax_c2hreg_cont {
+	struct fwcmd_c2hreg c2h_content;
 	u8 id;
 	u8 content_len;
-	struct fwcmd_c2hreg c2h_content;
 };
 
 struct mac_ax_c2hreg_poll {
-	u8 polling_id;
+	struct mac_ax_c2hreg_cont c2hreg_cont;
 	u32 retry_cnt;
 	u32 retry_wait_us;
-	struct mac_ax_c2hreg_cont c2hreg_cont;
+	u8 polling_id;
 };
 
 struct mac_ax_h2creg_info {
+	struct fwcmd_h2creg h2c_content;
 	u8 id;
 	u8 content_len;
-	struct fwcmd_h2creg h2c_content;
 };
+
+struct c2h_event_id_proc {
+	u32 (*hdl)(struct mac_ax_adapter *adapter, struct rtw_c2h_info *c2h,
+		   enum phl_msg_evt_id *id, u8 *c2h_info);
+	u8 cat;
+	u8 cls;
+	u8 func;
+};
+
+#if NINTENDO_EN
+// C2H TWT_NOTIFY_EVT
+struct fwcmd_twt_notify_evt {
+	u32 dword0;
+	u32 dword1;
+	u32 dword2;
+};
+#endif
 
 /**
  * @addtogroup Firmware
@@ -539,6 +632,8 @@ u32 h2c_pkt_set_cmd(struct mac_ax_adapter *adapter, struct h2c_buf *h2cb,
 u32 h2c_pkt_build_txd(struct mac_ax_adapter *adapter, struct h2c_buf *h2cb);
 u32 h2c_agg_enqueue(struct mac_ax_adapter *adapter, h2c_buf *h2cb);
 
+u32 get_h2cb_status(struct h2c_allloc_status *h2c_status);
+
 /**
  * @addtogroup Firmware
  * @{
@@ -652,53 +747,6 @@ u8 c2h_field_parsing(struct mac_ax_adapter *adapter,
 /**
  * @addtogroup Firmware
  * @{
- * @addtogroup C2H
- * @{
- */
-
-/**
- * @brief mac_fw_log_cfg
- *
- * @param *adapter
- * @param *log_cfg
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_fw_log_cfg(struct mac_ax_adapter *adapter,
-		   struct mac_ax_fw_log *log_cfg);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup Beacon
- * @{
- */
-
-/**
- * @brief mac_send_bcn_h2c
- *
- * @param *adapter
- * @param *info
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_send_bcn_h2c(struct mac_ax_adapter *adapter,
-		     struct mac_ax_bcn_info *info);
-
-u32 mac_set_bcn_dynamic_mech(struct mac_ax_adapter *adapter,
-			     struct mac_ax_bcn_dynamic_mech *bcn_dynamic_mech);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
  * @addtogroup H2C
  * @{
  */
@@ -712,7 +760,9 @@ u32 mac_set_bcn_dynamic_mech(struct mac_ax_adapter *adapter,
  * @return Please Place Description here.
  * @retval u32
  */
+ #if MAC_FEAT_PSAP
 u32 mac_host_getpkt_h2c(struct mac_ax_adapter *adapter, u8 macid, u8 pkttype);
+ #endif
 /**
  * @}
  * @}
@@ -736,28 +786,6 @@ u32 mac_host_getpkt_h2c(struct mac_ax_adapter *adapter, u8 macid, u8 pkttype);
  */
 u32 mac_outsrc_h2c_common(struct mac_ax_adapter *adapter,
 			  struct rtw_g6_h2c_hdr *hdr, u32 *pvalue);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup Beacon
- * @{
- */
-
-/**
- * @brief mac_ie_cam_upd
- *
- * @param *adapter
- * @param *info
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_ie_cam_upd(struct mac_ax_adapter *adapter,
-		   struct mac_ax_ie_cam_cmd_info *info);
 /**
  * @}
  * @}
@@ -860,10 +888,257 @@ u32 mac_get_c2h_event(struct mac_ax_adapter *adapter,
  * @}
  */
 
-u32 mac_notify_fw_dbcc(struct mac_ax_adapter *adapter, u8 en);
-
 u32 mac_set_h2c_c2h_mon(struct mac_ax_adapter *adapter, u8 en);
 
 u32 mac_h2c_common(struct mac_ax_adapter *adapter, struct h2c_info *info, u32 *content);
+
+u32 mac_get_h2c_max_content_len(struct mac_ax_adapter *adapter);
+
+u32 c2h_wow_aoac_report_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			    struct rtw_c2h_info *info);
+			   				
+u32 c2h_apf_ofld_report_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			   struct rtw_c2h_info *info);
+
+u32 c2h_wow(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+	    struct rtw_c2h_info *info);
+
+static u32 c2h_usr_tx_rpt_info(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			       struct rtw_c2h_info *info);
+
+static u32 c2h_tx_duty_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+			   u32 len, struct rtw_c2h_info *info);
+
+u32 c2h_twt(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+	    struct rtw_c2h_info *info);
+
+static u32 c2h_tsf32_togl_rpt_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+				  u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_scanofld_rsp_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+				u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_read_rsp_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+			    u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_pkt_ofld_rsp_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+				u32 len, struct rtw_c2h_info *info);
+
+u32 c2h_nan(struct mac_ax_adapter *adapter, u8 *buf, u32 len, struct rtw_c2h_info *info);
+
+#if MAC_FEAT_MCC
+u32 c2h_mcc_tsf_rpt_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			struct rtw_c2h_info *info);
+
+u32 c2h_mcc_status_rpt_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			   struct rtw_c2h_info *info);
+
+u32 c2h_mcc_req_ack_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			struct rtw_c2h_info *info);
+
+u32 c2h_mcc_rcv_ack_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			struct rtw_c2h_info *info);
+
+u32 c2h_mcc(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+	    struct rtw_c2h_info *info);
+
+#endif /* MAC_FEAT_MCC */
+
+static u32 c2h_macid_pause_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+			       u32 len, struct rtw_c2h_info *info);
+
+u32 c2h_fw_ofld(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+		struct rtw_c2h_info *info);
+
+u32 c2h_fw_info(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+		struct rtw_c2h_info *info);
+
+u32 c2h_fw_dbg(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+	       struct rtw_c2h_info *info);
+
+static u32 c2h_fwi_rev_ack(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			   struct rtw_c2h_info *info);
+
+static u32 c2h_fwi_done_ack(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			    struct rtw_c2h_info *info);
+
+static u32 c2h_fwi_cmd_log(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			   struct rtw_c2h_info *info);
+
+static u32 c2h_fwi_bcn_upd_done(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+				struct rtw_c2h_info *info);
+
+static u32 c2h_fwi_bcn_stats(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			     struct rtw_c2h_info *info);
+
+static u32 c2h_fwi_bcn_csazero(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			       struct rtw_c2h_info *info);
+
+static u32 c2h_fwi_bcn_bc_chg_zero(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+				   struct rtw_c2h_info *info);
+
+static u32 c2h_fwdx_info_handler(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+				 struct rtw_c2h_info *info);
+
+static u32 c2h_frame_to_act_rpt(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+				struct rtw_c2h_info *info);
+
+u32 c2h_fast_ch_sw(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+		   struct rtw_c2h_info *info);
+
+u32 c2h_wps_rpt(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+		struct rtw_c2h_info *info);
+
+static u32 c2h_twt_wait_announ_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+				   u32 len, struct rtw_c2h_info *info);
+
+u32 c2h_rx_dbg_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+		   struct rtw_c2h_info *info);
+
+u32 c2h_port_init_stat(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+		       struct rtw_c2h_info *info);
+
+u32 c2h_port_cfg_stat(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+		      struct rtw_c2h_info *info);
+
+u32 c2h_nan_tsf_info_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			 struct rtw_c2h_info *info);
+
+u32 c2h_nan_deinit_rpt_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			   struct rtw_c2h_info *info);
+
+u32 c2h_nan_cluster_info_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			     struct rtw_c2h_info *info);
+
+u32 c2h_nan_act_req_ack_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			    struct rtw_c2h_info *info);
+
+static u32 c2h_misc_ccxrpt(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			   struct rtw_c2h_info *info);
+
+u32 c2h_fast_ch_sw_rpt_hdl(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			   struct rtw_c2h_info *info);
+
+static u32 c2h_dump_efuse_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+			      u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_csi_tx_result_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+				 u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_cmd_ofld_rsp_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+				u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_cl_mport(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			struct rtw_c2h_info *info);
+
+static u32 c2h_cl_misc(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+		       struct rtw_c2h_info *info);
+
+static u32 c2h_ch_switch_rpt_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+				 u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_beacon_resend_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+				 u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_bcn_sync_rpt_info(struct mac_ax_adapter *adapter, u8 *buf,
+				 u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_bcn_filter_rpt_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+				  u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_bcn_erly_notify(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			       struct rtw_c2h_info *info);
+
+static u32 get_wps_rpt_event_id(struct mac_ax_adapter *adapter,
+				struct rtw_c2h_info *c2h,
+				enum phl_msg_evt_id *id,
+				u8 *c2h_info);
+
+static u32 get_bcn_resend_event(struct mac_ax_adapter *adapter,
+				struct rtw_c2h_info *c2h,
+				enum phl_msg_evt_id *id,
+				u8 *c2h_info);
+
+static u32 get_tsf32_togl_rpt_event(struct mac_ax_adapter *adapter,
+				    struct rtw_c2h_info *c2h,
+				    enum phl_msg_evt_id *id,
+				    u8 *c2h_info);
+
+static u32 get_fw_rx_dbg_event(struct mac_ax_adapter *adapter,
+			       struct rtw_c2h_info *c2h,
+			       enum phl_msg_evt_id *id,
+			       u8 *c2h_info);
+
+static u32 get_bcn_csa_event(struct mac_ax_adapter *adapter,
+			     struct rtw_c2h_info *c2h,
+			     enum phl_msg_evt_id *id,
+			     u8 *c2h_info);
+
+static u32 get_bcn_bc_chg_event(struct mac_ax_adapter *adapter,
+				struct rtw_c2h_info *c2h,
+				enum phl_msg_evt_id *id,
+				u8 *c2h_info);
+
+static u32 get_scanofld_event(struct mac_ax_adapter *adapter, struct rtw_c2h_info *c2h,
+			      enum phl_msg_evt_id *id, u8 *c2h_info);
+
+static u32 get_usr_txrpt_info_event(struct mac_ax_adapter *adapter,
+				    struct rtw_c2h_info *c2h,
+				    enum phl_msg_evt_id *id,
+				    u8 *c2h_info);
+
+static u32 get_frame_to_act_rpt_event(struct mac_ax_adapter *adapter,
+				      struct rtw_c2h_info *c2h,
+				      enum phl_msg_evt_id *id,
+				      u8 *c2h_info);
+
+static u32 get_act_schedule_req_ack_event(struct mac_ax_adapter *adapter,
+					  struct rtw_c2h_info *c2h,
+					  enum phl_msg_evt_id *id,
+					  u8 *c2h_info);
+
+static u32 get_nan_cluster_info_event(struct mac_ax_adapter *adapter,
+				      struct rtw_c2h_info *c2h,
+				      enum phl_msg_evt_id *id,
+				      u8 *c2h_info);
+
+static u32 get_nan_tsf_info_event(struct mac_ax_adapter *adapter,
+				  struct rtw_c2h_info *c2h,
+				  enum phl_msg_evt_id *id,
+				  u8 *c2h_info);
+
+static u32 get_nan_deinit_rpt_event(struct mac_ax_adapter *adapter,
+				    struct rtw_c2h_info *c2h,
+				    enum phl_msg_evt_id *id,
+				    u8 *c2h_info);
+
+static u32 get_nan_cluster_join_event(struct mac_ax_adapter *adapter,
+				      struct rtw_c2h_info *c2h,
+				      enum phl_msg_evt_id *id,
+				      u8 *c2h_info);
+				
+static u32 c2h_wait_announ_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+			       u32 len, struct rtw_c2h_info *info);
+
+static u32 c2h_stat_rpt_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+			    u32 len, struct rtw_c2h_info *info);
+
+#if NINTENDO_EN
+static u32 get_twt_notify_event(struct mac_ax_adapter *adapter,
+				struct rtw_c2h_info *c2h,
+				enum phl_msg_evt_id *id,
+				u8 *c2h_info);
+
+static u32 c2h_twt_notify_evt_hdl(struct mac_ax_adapter *adapter, u8 *buf,
+				  u32 len, struct rtw_c2h_info *info);
+#endif
+
+#ifdef CONFIG_PHL_APF
+static u32 get_apf_rpt_notify_event(struct mac_ax_adapter *adapter,
+		      struct rtw_c2h_info *c2h,
+		      enum phl_msg_evt_id *id,
+		      u8 *c2h_info);
+#endif
+
 #endif
 

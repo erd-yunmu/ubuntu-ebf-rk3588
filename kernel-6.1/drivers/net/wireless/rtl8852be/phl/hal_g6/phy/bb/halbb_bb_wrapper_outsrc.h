@@ -121,6 +121,9 @@ struct rtw_tpu_info { /*TX Power Unit (TPU)*/
 
 /*===== [BE] ===============================================================*/
 #define BE_IC_TPU
+#if defined(BB_8952A_SUPPORT)
+#define HALBB_TX_RFSI_CTRL_SUPPORT
+#endif
 
 #ifdef BE_IC_TPU
 struct bb_tpu_pwr_by_rate_info_be { /*TX Power Unit (TPU)*/
@@ -151,6 +154,23 @@ struct bb_tpu_pwr_lmt_ru_info_be { /*TX Power Unit (TPU)*/
 	s8 pwr_lmt_ru106_26_be[HALBB_MAX_PATH][TPU_SIZE_BW20_SC_BE]; /* {{path_i}_{i is enable}} x {0~15: 16 * 20M = 320M } */
 };
 
+#ifdef HALBB_TX_RFSI_CTRL_SUPPORT
+struct bb_cfr_ofst_info_be {
+	u8 cfr_ofst_cck[HALBB_MAX_PATH];
+	u8 cfr_ofst_cck_dup[HALBB_MAX_PATH];
+	u8 cfr_ofst_lgcy_non_dup[HALBB_MAX_PATH];
+	u8 cfr_ofst_20m[HALBB_MAX_PATH];
+	u8 cfr_ofst_40m[HALBB_MAX_PATH];
+	u8 cfr_ofst_80m[HALBB_MAX_PATH];
+	u8 cfr_ofst_160m[HALBB_MAX_PATH];
+	u8 cfr_ofst_320m[HALBB_MAX_PATH];
+};
+
+struct bb_cfr_pwr_th_info_be {
+	s16 cfr_pwr_th[TPU_SIZE_PWR_TAB_DBW];
+};
+
+#endif
 struct bb_tpu_be_info { /*TX Power Unit (TPU)*/
 	/*[Pwr By rate for BE]*/ /*-> HW: s(7,1)*/
 	struct bb_tpu_pwr_by_rate_info_be rtw_tpu_pwr_by_rate_be_i;
@@ -181,7 +201,11 @@ struct bb_tpu_be_info { /*TX Power Unit (TPU)*/
 	u8 pwr_cusofst_sw; /*-> HW: u(4,0)*/
 	/*[Pwr Limit Enable]*/
 	bool pwr_lmt_en;
-	
+#ifdef HALBB_TX_RFSI_CTRL_SUPPORT
+	struct bb_cfr_ofst_info_be rtw_cfr_ofst_be_i; /*-> HW: u(6,1)*/
+	struct bb_cfr_pwr_th_info_be rtw_cfr_pwr_th_be_i; /*-> HW: s(9,2)*/
+	u8 cfr_lmt_th; /*-> HW: u(3,0)*/
+#endif
 	/*[Misc]*/
 	enum rtw_tpu_op_mode op_mode; /*In debug mode, only debug tool control TPU APIs*/
 	bool normal_mode_lock_en;

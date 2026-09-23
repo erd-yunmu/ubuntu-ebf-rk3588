@@ -25,12 +25,11 @@
 #include "halbb_precomp.h"
 
 #ifdef HALBB_STATISTICS_SUPPORT
-
 void halbb_set_crc32_cnt2_rate(struct bb_info *bb, u16 rate_idx)
 {
 	struct bb_stat_info *stat_t = &bb->bb_stat_i;
 	struct bb_usr_set_info *usr_set = &stat_t->bb_usr_set_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
+	struct bb_stat_cr_info *cr = &bb->bb_cmn_hooker->bb_stat_cr_i;
 	bool is_ofdm_rate = halbb_is_ofdm_rate(bb, rate_idx);
 	bool is_ht_rate = halbb_is_ht_rate(bb, rate_idx);
 	bool is_vht_rate = halbb_is_vht_rate(bb, rate_idx);
@@ -79,16 +78,14 @@ void halbb_set_crc32_cnt2_rate(struct bb_info *bb, u16 rate_idx)
 		halbb_set_reg(bb, reg_addr, he_ss_bitmask, ss - 1);
 		usr_set->he2_rate_idx = rate_idx;
 	}
-	
+
 #ifdef BB_1115_DVLP_SPF
-	if ((bb->ic_type == BB_RLE1115)) {
-		if (is_eht_rate) {
-			rate_digi = halbb_rate_2_rate_digit(bb, rate_idx);
-			ss = halbb_rate_to_num_ss(bb, rate_idx);
-			halbb_set_reg(bb, reg_addr, eht_mcs_bitmask, rate_digi);
-			halbb_set_reg(bb, reg_addr, eht_ss_bitmask, ss - 1);
-			usr_set->eht2_rate_idx = rate_idx;
-		}
+	if (is_eht_rate) {
+		rate_digi = halbb_rate_2_rate_digit(bb, rate_idx);
+		ss = halbb_rate_to_num_ss(bb, rate_idx);
+		halbb_set_reg(bb, reg_addr, eht_mcs_bitmask, rate_digi);
+		halbb_set_reg(bb, reg_addr, eht_ss_bitmask, ss - 1);
+		usr_set->eht2_rate_idx = rate_idx;
 	}
 #endif
 }
@@ -101,7 +98,7 @@ void halbb_set_crc32_cnt3_format(struct bb_info *bb, u8 usr_type_sel)
 	struct bb_crc_info *crc = &stat_t->bb_crc_i;
 	struct bb_crc2_info *crc2 = &stat_t->bb_crc2_i;
 	struct bb_usr_set_info *usr_set = &stat_t->bb_usr_set_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
+	struct bb_stat_cr_info *cr = &bb->bb_cmn_hooker->bb_stat_cr_i;
 	u32 reg_addr = cr->intf_r_mac_hdr_type;
 	u32 type_bitmask = cr->intf_r_mac_hdr_type_m;
 	
@@ -190,11 +187,13 @@ void halbb_crc32_cnt_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 	u8 usr_type_sel = 0;
 	enum phl_phy_idx bkp_phy_idx = bb->bb_phy_idx;
 
-	if ((_os_strcmp(input[1], help) == 0)) {
+	if (_os_strcmp(input[1], help) == 0) {
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "show {phy_idx}\n");
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-			    "HW report counter reset en: {0} {en}\n");
+			    "rst_en {en}\n");
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "fw_en {0: from drv, 1 : from fw}\n");
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			 "Get CRC_OK/error for specific rate_idx or mac hdr type\n");
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
@@ -228,10 +227,6 @@ void halbb_crc32_cnt_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			 "stat {2} {12: QoS Data}\n");
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-			    "Chk hang Auto recovery enable: {3} {en}\n");
-		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-			    "Chk hang limit: {4} {#limit}\n");
-		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			 "============== Notes ==============\n");
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			 "------------ Rate_idx ------------\n");
@@ -249,19 +244,8 @@ void halbb_crc32_cnt_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 			 "HE_1ss_idx: 384~395\n");
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			 "HE_2ss_idx: 400~411\n");
-
-#if 0
-	} else if (_os_strcmp(input[1], "ex") == 0) {
-		HALBB_SCAN(input[2], DCMD_DECIMAL, &var[0]);
-
-		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-			    "halbb_pmac_statistics_ex: en=%d\n", var[0]);
-		
-		halbb_pmac_statistics_ex(bb, (bool)var[0], bb->bb_phy_idx);
-#endif
 	} else if (_os_strcmp(input[1], "show") == 0) {
 		HALBB_SCAN(input[2], DCMD_DECIMAL, &var[0]);
-
 
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "[Get PMAC Counter] phy_idx = %d\n", bb->bb_phy_idx);
@@ -269,17 +253,28 @@ void halbb_crc32_cnt_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 		if ((bb->dbg_component & DBG_FA_CNT) == 0)
 			bb->dbg_component |= DBG_FA_CNT;
 
+		stat_t->stat_fw_en = false;
 		halbb_pmac_statistics_io_en(bb);
-
+		stat_t->stat_show_en = true;
+	} else if (_os_strcmp(input[1], "rst_en") == 0) {
+		HALBB_SCAN(input[2], DCMD_DECIMAL, &var[1]);
+		stat_t->cnt_reset_en = (bool)var[1];
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "PMAC Rpt cnt reset en=%d\n", stat_t->cnt_reset_en);
+	} else if (_os_strcmp(input[1], "fw_en") == 0) {
+		HALBB_SCAN(input[2], DCMD_DECIMAL, &var[1]);
+		if (bb->ic_type & BB_IC_AX_SERIES) {
+			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+				    "PMAC fw en not support!\n");
+		} else {
+			stat_t->stat_fw_en = (bool)var[1];
+			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+				    "PMAC fw en=%d\n", stat_t->stat_fw_en);
+		}
 	} else {
 		HALBB_SCAN(input[1], DCMD_DECIMAL, &var[0]);
 
-		if (var[0] == 0) {
-			HALBB_SCAN(input[2], DCMD_DECIMAL, &var[1]);
-			stat_t->cnt_reset_en = (u8)var[1];
-			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-				    "HW report counter reset en=%d\n", stat_t->cnt_reset_en);
-		} else if (var[0] == 1) {
+		if (var[0] == 1) {
 			HALBB_SCAN(input[2], DCMD_DECIMAL, &var[1]);
 			rate = (u16)var[1];
 			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
@@ -291,590 +286,8 @@ void halbb_crc32_cnt_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 				   "{MAC header type}={%d}", usr_type_sel);
 			halbb_set_crc32_cnt3_format(bb, usr_type_sel);
-		} else if (var[0] == 3) {
-			HALBB_SCAN(input[2], DCMD_DECIMAL, &var[1]);
-			stat_t->hang_recovery_en = (u8)var[1];
-			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-				    "Chk hang Auto recovery enable=%d\n", stat_t->hang_recovery_en);
-		} else if (var[0] == 4) {
-			HALBB_SCAN(input[2], DCMD_DECIMAL, &var[1]);
-			stat_t->chk_hang_limit = (u8)var[1];
-			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-				    "Chk hang limit=%d\n", stat_t->chk_hang_limit);
 		} 
 	}	
-}
-
-void halbb_print_cnt3(struct bb_info *bb, enum phl_phy_idx phy_idx)
-{
-	struct bb_stat_info *stat_t = &bb->bb_stat_i;
-	struct bb_fa_info *fa = &stat_t->bb_fa_i;
-	struct bb_cca_info *cca = &stat_t->bb_cca_i;
-	struct bb_crc_info *crc = &stat_t->bb_crc_i;
-	struct bb_usr_set_info *usr_set = &stat_t->bb_usr_set_i;
-	struct bb_crc2_info *crc2 = &stat_t->bb_crc2_i;
-	//char dbg_buf[HALBB_SNPRINT_SIZE] = {0};
-	u32 tmp = 0;
-	u8 pcr = 0;
-	tmp = crc2->cnt_ofdm3_crc32_ok + crc2->cnt_ofdm3_crc32_error;
-	pcr = (u8)HALBB_DIV(crc2->cnt_ofdm3_crc32_ok * 100, tmp);
-
-	if (bb->hal_com->dbcc_en) {
-		BB_DBG(bb, DBG_FA_CNT, "[DBCC!!!!]===>\n");
-		BB_DBG(bb, DBG_FA_CNT, "[The following statistics is at %s]===>\n", phy_idx == HW_PHY_0 ? "PHY-0" : "PHY-1");
-	}
-
-	switch(usr_set->stat_type_sel_i) {
-	case STATE_PROBE_RESP:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[Probe Response Data CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_BEACON:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[Beacon CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_ACTION:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[Action CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_BFRP:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[BFRP CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_NDPA:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[NDPA CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_BA:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[BA CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_RTS:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[RTS CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_CTS:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[CTS CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_ACK:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[ACK CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_DATA:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[DATA CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_NULL:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[Null CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	case STATE_QOS:
-		BB_DBG(bb, DBG_FA_CNT,
-		  "[QoS CRC32 Cnt(OFDM only)] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-		  crc2->cnt_ofdm3_crc32_error,
-		  crc2->cnt_ofdm3_crc32_ok, pcr);
-		break;
-	default:
-		break;
-	}
-
-}
-
-void halbb_print_cnt2(struct bb_info *bb, enum phl_phy_idx phy_idx)
-{
-	struct bb_stat_info *stat_t = &bb->bb_stat_i;
-	struct bb_crc2_info *crc2 = &stat_t->bb_crc2_i;
-	struct bb_usr_set_info *usr_set = &stat_t->bb_usr_set_i;
-	u32 tmp = 0;
-	//char dbg_buf[HALBB_SNPRINT_SIZE] = {0};
-
-	if (bb->hal_com->dbcc_en) {
-		BB_DBG(bb, DBG_FA_CNT, "[DBCC!!!!]===>\n");
-		BB_DBG(bb, DBG_FA_CNT, "[The following statistics is at %s]===>\n", phy_idx == HW_PHY_0 ? "PHY-0" : "PHY-1");
-	}
-	
-	if (usr_set->ofdm2_rate_idx) {
-		tmp = crc2->cnt_ofdm2_crc32_error + crc2->cnt_ofdm2_crc32_ok;
-		crc2->ofdm2_pcr = (u8)HALBB_DIV(crc2->cnt_ofdm2_crc32_ok * 100,
-						tmp);
-		halbb_print_rate_2_buff(bb, usr_set->ofdm2_rate_idx, RTW_GILTF_LGI_4XHE32, bb->dbg_buf,
-					HALBB_SNPRINT_SIZE);
-		BB_DBG(bb, DBG_FA_CNT,
-			  "[OFDM:%s CRC32 Cnt] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-			  bb->dbg_buf, crc2->cnt_ofdm2_crc32_error,
-			  crc2->cnt_ofdm2_crc32_ok, crc2->ofdm2_pcr);
-	}
-	if (usr_set->ht2_rate_idx) {
-		tmp = crc2->cnt_ht2_crc32_error + crc2->cnt_ht2_crc32_ok;
-		crc2->ht2_pcr = (u8)HALBB_DIV(crc2->cnt_ht2_crc32_ok * 100,
-					      tmp);
-		halbb_print_rate_2_buff(bb, usr_set->ht2_rate_idx, RTW_GILTF_LGI_4XHE32, bb->dbg_buf,
-					HALBB_SNPRINT_SIZE);
-		BB_DBG(bb, DBG_FA_CNT,
-			  "[HT:%s CRC32 Cnt] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-			  bb->dbg_buf, crc2->cnt_ht2_crc32_error,
-			  crc2->cnt_ht2_crc32_ok, crc2->ht2_pcr);
-	}
-	if(usr_set->vht2_rate_idx) {
-		tmp = crc2->cnt_vht2_crc32_error +
-		      crc2->cnt_vht2_crc32_ok;
-		crc2->vht2_pcr = (u8)HALBB_DIV(crc2->cnt_vht2_crc32_ok *
-					       100, tmp);
-		halbb_print_rate_2_buff(bb, usr_set->vht2_rate_idx,
-					RTW_GILTF_LGI_4XHE32, bb->dbg_buf, HALBB_SNPRINT_SIZE);
-		BB_DBG(bb, DBG_FA_CNT,
-			  "[VHT:%s CRC32 Cnt] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-			  bb->dbg_buf, crc2->cnt_vht2_crc32_error,
-			  crc2->cnt_vht2_crc32_ok, crc2->vht2_pcr);
-	}
-	if (usr_set->he2_rate_idx) {
-		tmp = crc2->cnt_he2_crc32_error +
-		      crc2->cnt_he2_crc32_ok;
-		crc2->he2_pcr = (u8)HALBB_DIV(crc2->cnt_he2_crc32_ok *
-					       100, tmp);
-		halbb_print_rate_2_buff(bb, usr_set->he2_rate_idx,
-					RTW_GILTF_LGI_4XHE32, bb->dbg_buf, HALBB_SNPRINT_SIZE);
-		BB_DBG(bb, DBG_FA_CNT,
-			  "[HE:%s CRC32 Cnt] {error, ok}= {%d, %d} (PCR=%d percent)\n",
-			  bb->dbg_buf, crc2->cnt_he2_crc32_error,
-			  crc2->cnt_he2_crc32_ok, crc2->he2_pcr);
-	}
-}
-
-void halbb_chk_hang(struct bb_info *bb)
-{
-	struct bb_stat_info *stat = &bb->bb_stat_i;
-	struct bb_cca_info *cca = &stat->bb_cca_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
-	bool chk_hang_en = false;
-
-	/* According to sd4 info., when rx hang --> all cca brk, half of brk is l-sig brk */
-	chk_hang_en = (cca->cnt_cca_all == 0);
-
-	if (chk_hang_en) {
-		BB_DBG(bb, DBG_FA_CNT, "[CHK-HANG] ReasonCode:RHAX-2 (POP HANG)\n\n");
-		stat->chk_hang_cnt = stat->chk_hang_cnt + 1;
-
-		BB_DBG(bb, DBG_FA_CNT, "[CHK-HANG] hang_cnt=%d, hang_limit=%d, recovery_en=%d\n",
-			  stat->chk_hang_cnt, stat->chk_hang_limit, stat->hang_recovery_en);
-
-		if (stat->hang_recovery_en && (stat->chk_hang_cnt >= stat->chk_hang_limit)) {
-
-			BB_DBG(bb, DBG_FA_CNT, "[CHK-HANG] Change PoP counter limit\n");
-			halbb_set_reg(bb, cr->max_cnt_pop, cr->max_cnt_pop_m, 0x0);
-			halbb_delay_us(bb, 1);
-			halbb_set_reg(bb, cr->max_cnt_pop, cr->max_cnt_pop_m, 0x50);
-
-			stat->chk_hang_cnt = 0;
-		}
-	}
-}
-
-void halbb_print_cnt(struct bb_info *bb, bool cck_en, enum phl_phy_idx phy_idx, enum phl_phy_idx phy_idx_2)
-{
-
-	struct bb_stat_info *stat_t = &bb->bb_stat_i;
-	struct bb_fa_info *fa = &stat_t->bb_fa_i;
-	struct bb_cck_fa_info *cck_fa = &fa->bb_cck_fa_i;
-	struct bb_legacy_fa_info *legacy_fa = &fa->bb_legacy_fa_i;
-	struct bb_ht_fa_info *ht_fa = &fa->bb_ht_fa_i;
-	struct bb_vht_fa_info *vht_fa = &fa->bb_vht_fa_i;
-	struct bb_he_fa_info *he_fa = &fa->bb_he_fa_i;
-	struct bb_cca_info *cca = &stat_t->bb_cca_i;
-	struct bb_crc_info *crc = &stat_t->bb_crc_i;
-	struct bb_crc2_info *crc2 = &stat_t->bb_crc2_i;
-	struct bb_tx_cnt_info *tx = &stat_t->bb_tx_cnt_i;
-	struct rtw_hal_com_t *hal = bb->hal_com;
-	struct rtw_hal_stat_info *stat_info = &hal->band[bb->bb_phy_idx].stat_info;
-
-	if (bb->hal_com->dbcc_en) {
-		if (!cck_en) {
-			fa->cnt_fail_all = fa->cnt_ofdm_fail;
-			cca->cnt_cca_all = cca->cnt_ofdm_cca;
-		} else {
-			fa->cnt_fail_all = fa->cnt_ofdm_fail +
-					fa->cnt_cck_fail;
-			cca->cnt_cca_all = cca->cnt_cck_cca +
-					    cca->cnt_ofdm_cca;
-		}
-	} else {
-		if (!cck_en) {
-			fa->cnt_fail_all = fa->cnt_ofdm_fail;
-			cca->cnt_cca_all = cca->cnt_ofdm_cca;
-		} else {
-			fa->cnt_fail_all = fa->cnt_ofdm_fail +
-					fa->cnt_cck_fail;
-			cca->cnt_cca_all = cca->cnt_cck_cca +
-					    cca->cnt_ofdm_cca;
-		}
-		
-	}
-
-	crc->cnt_crc32_error_all = crc->cnt_he_crc32_error +
-				   crc->cnt_vht_crc32_error +
-				   crc->cnt_ht_crc32_error +
-				   crc->cnt_ofdm_crc32_error +
-				   crc->cnt_cck_crc32_error;
-
-	crc->cnt_crc32_ok_all = crc->cnt_he_crc32_ok +
-				 crc->cnt_vht_crc32_ok +
-				 crc->cnt_ht_crc32_ok +
-				 crc->cnt_ofdm_crc32_ok +
-				 crc->cnt_cck_crc32_ok;
-
-	stat_info->cnt_fail_all = fa->cnt_fail_all;
-	stat_info->cnt_cck_fail = fa->cnt_cck_fail;
-	stat_info->cnt_ofdm_fail = fa->cnt_ofdm_fail;
-	stat_info->cnt_cca_all = cca->cnt_cca_all;
-	stat_info->cnt_ofdm_cca = cca->cnt_ofdm_cca;
-	stat_info->cnt_cck_cca = cca->cnt_cck_cca;
-	stat_info->cnt_crc32_error_all = crc->cnt_crc32_error_all;
-	stat_info->cnt_he_crc32_error = crc->cnt_he_crc32_error;
-	stat_info->cnt_vht_crc32_error = crc->cnt_vht_crc32_error;
-	stat_info->cnt_ht_crc32_error = crc->cnt_ht_crc32_error;
-	stat_info->cnt_ofdm_crc32_error = crc->cnt_ofdm_crc32_error;
-	stat_info->cnt_cck_crc32_error = crc->cnt_cck_crc32_error;
-	stat_info->cnt_crc32_ok_all = crc->cnt_crc32_ok_all;
-	stat_info->cnt_he_crc32_ok = crc->cnt_he_crc32_ok;
-	stat_info->cnt_vht_crc32_ok = crc->cnt_vht_crc32_ok;
-	stat_info->cnt_ht_crc32_ok = crc->cnt_ht_crc32_ok;
-	stat_info->cnt_ofdm_crc32_ok = crc->cnt_ofdm_crc32_ok;
-	stat_info->cnt_cck_crc32_ok = crc->cnt_cck_crc32_ok;
-	stat_info->igi_fa_rssi = bb->bb_dig_i.p_cur_dig_unit->igi_fa_rssi;
-
-	if (bb->hal_com->dbcc_en) {
-		BB_DBG(bb, DBG_FA_CNT, "[DBCC!!!!]===>\n");
-		BB_DBG(bb, DBG_FA_CNT, "[The following statistics is at %s]===>\n", phy_idx == HW_PHY_0 ? "PHY-0" : "PHY-1");
-#if 1
-		if (cck_en) {
-			if (phy_idx_2 != HW_PHY_MAX)
-				BB_DBG(bb, DBG_FA_CNT, "[The following CCK statistics is at %s]===>\n", 
-				     phy_idx_2 == HW_PHY_0 ? "PHY-0" : "PHY-1");
-		}
-#endif
-	}
-	
-	BB_DBG(bb, DBG_FA_CNT, "[Tx counter]===>\n");
-	BB_DBG(bb, DBG_FA_CNT,
-	       "[Tx Cnt]{CCK_TXEN, CCK_TXON, OFDM_TXEN, OFDM_TXON}: {%d, %d, %d, %d}\n",
-	       tx->cck_mac_txen, tx->cck_phy_txon, tx->ofdm_mac_txen,
-	       tx->ofdm_phy_txon);
-
-	BB_DBG(bb, DBG_FA_CNT, "[Rx counter]===>\n");
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[CCA Cnt] {CCK, OFDM, Total} = {%d, %d, %d}\n",
-		  cca->cnt_cck_cca, cca->cnt_ofdm_cca, cca->cnt_cca_all);
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[CCA Spoofing Cnt] {CCK, OFDM} = {%d, %d}\n",
-		  cca->cnt_cck_spoofing, cca->cnt_ofdm_spoofing);
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[MPDU] {miss, CRC ok, CRC err} = {%d, %d, %d}\n",
-		  crc->cnt_ampdu_miss, crc->cnt_ampdu_crc_ok,
-		  crc->cnt_ampdu_crc_error);
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[Total HW Break counter] = {%d}\n", fa->cnt_total_brk);
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[FA Cnt] {CCK, OFDM, Total} = {%d, %d, %d}\n",
-		  fa->cnt_cck_fail, fa->cnt_ofdm_fail, fa->cnt_fail_all);
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[CCK FA] SFD_err=%d, SIG_err=%d CRC16=%d\n",
-		  cck_fa->sfd_gg_cnt, cck_fa->sig_gg_cnt, cck_fa->cnt_cck_crc_16);
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[OFDM FA] Parity_err=%d, Rate=%d, LSIG_brk_s=%d, LSIG_brk_l=%d, SBD=%d\n",
-		  legacy_fa->cnt_parity_fail, legacy_fa->cnt_rate_illegal,
-		  legacy_fa->cnt_lsig_brk_s_th, legacy_fa->cnt_lsig_brk_l_th,
-		  legacy_fa->cnt_sb_search_fail);
-	BB_DBG(bb, DBG_FA_CNT, "[HT FA] CRC8=%d, MCS=%d\n",
-		  ht_fa->cnt_crc8_fail, ht_fa->cnt_mcs_fail);
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[VHT FA] SIGA_CRC8=%d, MCS=%d\n",
-		  vht_fa->cnt_crc8_fail_vhta, vht_fa->cnt_mcs_fail_vht);
-#if 0
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[HE FA] SIGA_CRC4_SU=%d, SIGA_CRC4_ERSU=%d, SIGA_CRC4_MU=%d, SIGB_CRC4_ch1=%d, SIGB_CRC4_ch2=%d, MCS=%d, MCS_bcc=%d, MCS_DCM=%d\n",
-		  he_fa->cnt_crc4_fail_hea_su, he_fa->cnt_crc4_fail_hea_ersu,
-		  he_fa->cnt_crc4_fail_hea_mu, he_fa->cnt_crc4_fail_heb_ch1_mu,
-		  he_fa->cnt_crc4_fail_heb_ch2_mu, he_fa->cnt_mcs_fail_he,
-		  he_fa->cnt_mcs_fail_he_bcc, he_fa->cnt_mcs_fail_he_dcm);
-#endif
-
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[CRC32 OK Cnt] {CCK, OFDM, HT, VHT, HE, Total} = {%d, %d, %d, %d, %d, %d}\n",
-		  crc->cnt_cck_crc32_ok, crc->cnt_ofdm_crc32_ok,
-		  crc->cnt_ht_crc32_ok, crc->cnt_vht_crc32_ok,
-		  crc->cnt_he_crc32_ok, crc->cnt_crc32_ok_all);
-	BB_DBG(bb, DBG_FA_CNT,
-		  "[CRC32 Err Cnt] {CCK, OFDM, HT, VHT, HE, Total} = {%d, %d, %d, %d, %d, %d}\n",
-		  crc->cnt_cck_crc32_error, crc->cnt_ofdm_crc32_error,
-		  crc->cnt_ht_crc32_error, crc->cnt_vht_crc32_error,
-		  crc->cnt_he_crc32_error, crc->cnt_crc32_error_all);
-	BB_DBG(bb, DBG_FA_CNT, "[Halbb DM status]===>\n");
-	BB_DBG(bb, DBG_FA_CNT, "[DIG] IGI=%d\n", stat_info->igi_fa_rssi);
-}
-
-void halbb_cnt_reg_reset(struct bb_info *bb)
-{
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
-	/* @reset CCK FA counter */
-	halbb_set_reg(bb, cr->r1b_rx_rpt_rst, cr->r1b_rx_rpt_rst_m, 0);
-	halbb_set_reg(bb, cr->r1b_rx_rpt_rst, cr->r1b_rx_rpt_rst_m, 1);
-
-	/* @make sure cnt is enable */
-	halbb_set_reg_phy0_1(bb, cr->enable_all_cnt, cr->enable_all_cnt_m, 1);
-
-	/* @reset all bb hw cnt */
-	halbb_mp_reset_cnt(bb);
-}
-
-void halbb_cck_cnt_statistics(struct bb_info *bb)
-{
-	struct bb_stat_info *stat_t = &bb->bb_stat_i;
-	struct bb_fa_info *fa = &stat_t->bb_fa_i;
-	struct bb_cck_fa_info *cck_fa = &fa->bb_cck_fa_i;
-	struct bb_cca_info *cca = &stat_t->bb_cca_i;
-	struct bb_crc_info *crc = &stat_t->bb_crc_i;
-	struct bb_crc2_info *crc2 = &stat_t->bb_crc2_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
-
-	u32 ret_value = 0;
-
-	if ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) ||
-	    (bb->ic_type == BB_RTL8851B)) {
-		/* select cck dbg port */
-		halbb_set_reg(bb, cr->r1b_rr_sel, cr->r1b_rr_sel_m, 2);
-
-		/* read CCK CCA counter */
-		ret_value = halbb_get_reg(bb, cr->cck_cca, cr->cck_cca_m);
-		cca->cnt_cck_cca = ret_value;
-
-		/* select cck dbg port */
-		halbb_set_reg(bb, cr->r1b_rr_sel, cr->r1b_rr_sel_m, 1);
-
-		/* read CCK CRC32 counter */
-		ret_value = halbb_get_reg(bb, cr->cck_crc32ok, MASKDWORD);
-		crc->cnt_cck_crc32_ok = ret_value & cr->cck_crc32ok_m;
-		crc->cnt_cck_crc32_error = (ret_value & cr->cck_crc32fail_m) >> 16;
-
-		/* Read CCK FA counter */
-		ret_value = halbb_get_reg(bb, 0x23e0, MASKLWORD); // Reg. doc. doesn't have CCK report reg. 0x78(0x23), need change these addr. one by one
-		cck_fa->sfd_gg_cnt = ret_value;
-
-		ret_value = halbb_get_reg(bb, 0x23e0, MASKHWORD);
-		cck_fa->cnt_cck_crc_16 = ret_value;
-
-		ret_value = halbb_get_reg(bb, 0x23e8, MASKLWORD);
-		cck_fa->sig_gg_cnt = ret_value;
-
-		/* Number of spoofing*/
-		ret_value = halbb_get_reg(bb, 0x23ec, MASKBYTE0);
-		cca->cnt_cck_spoofing = ret_value;
-
-		//fa->cnt_cck_fail = cck_fa->sfd_gg_cnt + cck_fa->sig_gg_cnt;
-
-		/* Adjust FA computation due to repeated caculatation of brk_cnt when pop starting*/
-		fa->cnt_cck_fail = cca->cnt_cck_cca - crc->cnt_cck_crc32_ok -
-			           crc->cnt_cck_crc32_error - cca->cnt_cck_spoofing;
-
-	} else {
-		/* read CCK CCA counter */
-		ret_value = halbb_get_reg(bb, cr->cck_cca, cr->cck_cca_m);
-		cca->cnt_cck_cca = ret_value;
-
-		/* read CCK CRC32 counter */
-		ret_value = halbb_get_reg(bb, cr->cck_crc32ok, MASKDWORD);
-		crc->cnt_cck_crc32_ok = ret_value & cr->cck_crc32ok_m;
-		crc->cnt_cck_crc32_error = (ret_value & cr->cck_crc32fail_m) >> 16;
-
-		/* Read CCK FA counter */
-		ret_value = halbb_get_reg(bb, 0x23A0, MASKLWORD); // Reg. doc. doesn't have CCK report reg. 0x78(0x23), need change these addr. one by one
-		cck_fa->sfd_gg_cnt = ret_value;
-
-		ret_value = halbb_get_reg(bb, 0x23a0, MASKHWORD);
-		cck_fa->cnt_cck_crc_16 = ret_value;
-
-		ret_value = halbb_get_reg(bb, 0x23ac, MASKBYTE1);
-		cck_fa->sig_gg_cnt = ret_value;
-
-		/* Number of spoofing*/
-		ret_value = halbb_get_reg(bb, 0x23A8, MASKHWORD);
-		cca->cnt_cck_spoofing = ret_value;
-
-		/* 52C CCK_FA = CCK_BRK*/
-		ret_value = halbb_get_reg(bb, 0x239C, MASKHWORD);
-		fa->cnt_cck_fail = ret_value;
-	}
-}
-
-void halbb_ofdm_cnt_statistics(struct bb_info *bb, enum phl_phy_idx phy_idx)
-{
-	struct bb_stat_info *stat_t = &bb->bb_stat_i;
-	struct bb_fa_info *fa = &stat_t->bb_fa_i;
-	struct bb_legacy_fa_info *legacy_fa = &fa->bb_legacy_fa_i;
-	struct bb_ht_fa_info *ht_fa = &fa->bb_ht_fa_i;
-	struct bb_vht_fa_info *vht_fa = &fa->bb_vht_fa_i;
-	struct bb_he_fa_info *he_fa = &fa->bb_he_fa_i;
-	struct bb_cca_info *cca = &stat_t->bb_cca_i;
-	struct bb_crc_info *crc = &stat_t->bb_crc_i;
-	struct bb_crc2_info *crc2 = &stat_t->bb_crc2_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
-	u32 ret_value = 0;
-
-	/* read OFDM CRC32 counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->l_crc_ok, MASKDWORD, phy_idx);
-	crc->cnt_ofdm_crc32_ok = ret_value & cr->l_crc_ok_m;
-	crc->cnt_ofdm_crc32_error = (ret_value & cr->l_crc_err_m) >> 16;
-
-	/* read OFDM2 CRC32 counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->l_crc_ok2, MASKDWORD, phy_idx);
-	crc2->cnt_ofdm2_crc32_ok = ret_value & cr->l_crc_ok2_m;
-	crc2->cnt_ofdm2_crc32_error = (ret_value & cr->l_crc_err2_m) >> 16;
-
-	/* read OFDM3 CRC32 counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->l_crc_ok3, MASKDWORD, phy_idx);
-	crc2->cnt_ofdm3_crc32_ok = ret_value & cr->l_crc_ok3_m;
-	crc2->cnt_ofdm3_crc32_error = (ret_value & cr->l_crc_err3_m) >> 16;
-
-	/* read HT CRC32 counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->ht_crc_ok, MASKDWORD, phy_idx);
-	crc->cnt_ht_crc32_ok = ret_value & cr->ht_crc_ok_m;
-	crc->cnt_ht_crc32_error = (ret_value & cr->ht_crc_err_m) >> 16;
-
-	/* read HT2 CRC32 counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->ht_crc_ok2, MASKDWORD, phy_idx);
-	crc2->cnt_ht2_crc32_ok = ret_value & cr->ht_crc_ok2_m;
-	crc2->cnt_ht2_crc32_error = (ret_value & cr->ht_crc_err2_m) >> 16;
-
-	/*read VHT CRC32 counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->vht_crc_ok, MASKDWORD, phy_idx);
-	crc->cnt_vht_crc32_ok = ret_value & cr->vht_crc_ok_m;
-	crc->cnt_vht_crc32_error = (ret_value & cr->vht_crc_err_m) >> 16;
-
-	/*read VHT2 CRC32 counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->vht_crc_ok2, MASKDWORD, phy_idx);
-	crc2->cnt_vht2_crc32_ok = ret_value & cr->vht_crc_ok2_m;
-	crc2->cnt_vht2_crc32_error = (ret_value & cr->vht_crc_err2_m) >> 16;
-
-	/*read HE CRC32 counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->he_crc_ok, MASKDWORD, phy_idx);
-	crc->cnt_he_crc32_ok = ret_value & cr->he_crc_ok_m;
-	crc->cnt_he_crc32_error = (ret_value & cr->he_crc_err_m) >> 16;
-
-	/*read HE2 CRC32 counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->he_crc_ok2, MASKDWORD, phy_idx);
-	crc2->cnt_he2_crc32_ok = ret_value & cr->he_crc_ok2_m;
-	crc2->cnt_he2_crc32_error = (ret_value & cr->he_crc_err2_m) >> 16;
-
-	ret_value = halbb_get_reg_cmn(bb, cr->brk, cr->brk_m, phy_idx);
-	fa->cnt_total_brk = ret_value;
-
-	/*read EHT CRC32 counter */
-
-	/*read EHT2 CRC32 counter */
-
-	/* Acut workaround because of no HE cnt */
-	fa->cnt_ofdm_fail= ret_value;
-
-	/* @calculate OFDM FA counter instead of reading brk_cnt*/
-	ret_value = halbb_get_reg_cmn(bb, cr->search_fail, cr->search_fail_m, phy_idx);
-	legacy_fa->cnt_sb_search_fail = ret_value;
-	
-	/* Legacy portion */
-	ret_value = halbb_get_reg_cmn(bb, cr->lsig_brk_s_th, cr->lsig_brk_s_th_m, phy_idx);
-	legacy_fa->cnt_lsig_brk_s_th = ret_value;
-
-	ret_value = halbb_get_reg_cmn(bb, cr->lsig_brk_l_th, cr->lsig_brk_l_th_m, phy_idx);
-	legacy_fa->cnt_lsig_brk_l_th = ret_value;
-
-	ret_value = halbb_get_reg_cmn(bb, cr->rxl_err_parity, cr->rxl_err_parity_m, phy_idx);
-	legacy_fa->cnt_parity_fail = ret_value;
-	
-	ret_value = halbb_get_reg_cmn(bb, cr->rxl_err_rate, cr->rxl_err_rate_m, phy_idx);
-	legacy_fa->cnt_rate_illegal = ret_value;
-
-	/* HT portion */
-	ret_value = halbb_get_reg_cmn(bb, cr->ht_not_support_mcs, cr->ht_not_support_mcs_m, phy_idx);
-	ht_fa->cnt_mcs_fail = ret_value;
-
-	ret_value = halbb_get_reg_cmn(bb, cr->htsig_crc8_err_s_th, cr->htsig_crc8_err_s_th_m, phy_idx);
-	ht_fa->cnt_crc8_fail_s_th = ret_value;
-
-	ret_value = halbb_get_reg_cmn(bb, cr->htsig_crc8_err_l_th, cr->htsig_crc8_err_l_th_m, phy_idx);
-	ht_fa->cnt_crc8_fail_l_th = ret_value;
-
-	ht_fa->cnt_crc8_fail = ht_fa->cnt_crc8_fail_s_th + ht_fa->cnt_crc8_fail_l_th;
-
-	/* VHT portion */
-	ret_value = halbb_get_reg_cmn(bb, cr->vht_not_support_mcs, cr->vht_not_support_mcs_m, phy_idx);
-	vht_fa->cnt_mcs_fail_vht = ret_value;
-
-	ret_value = halbb_get_reg_cmn(bb, cr->vht_err_siga_crc8, cr->vht_err_siga_crc8_m, phy_idx);
-	vht_fa->cnt_crc8_fail_vhta = ret_value;
-
-	/* read OFDM CCA counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->ofdm_cca, cr->ofdm_cca_m, phy_idx);
-	cca->cnt_ofdm_cca = ret_value;
-	ret_value = halbb_get_reg_cmn(bb, cr->cca_spoofing, cr->cca_spoofing_m, phy_idx);
-	cca->cnt_ofdm_spoofing = ret_value;
-	ret_value = halbb_get_reg_cmn(bb, cr->ampdu_miss, cr->ampdu_miss_m, phy_idx);
-	crc->cnt_ampdu_miss = ret_value;
-	ret_value = halbb_get_reg_cmn(bb, cr->ampdu_crc_ok, cr->ampdu_crc_ok_m, phy_idx);
-	crc->cnt_ampdu_crc_ok = ret_value;
-	ret_value = halbb_get_reg_cmn(bb, cr->ampdu_crc_err, cr->ampdu_crc_err_m, phy_idx);
-	crc->cnt_ampdu_crc_error = ret_value;
-	/* POP counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->cnt_pop_trig, cr->cnt_pop_trig_m, phy_idx);
-	cca->pop_cnt = ret_value;
-
-}
-
-void halbb_cck_tx_cnt_statistics(struct bb_info *bb)
-{
-	struct bb_stat_info *stat_t = &bb->bb_stat_i;
-	struct bb_tx_cnt_info *tx = &stat_t->bb_tx_cnt_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
-	u32 ret_value = 0;
-
-	/* read Tx counter */
-	ret_value = halbb_get_reg(bb, cr->ccktxon, cr->ccktxon_m);
-	tx->cck_phy_txon = ret_value;
-	ret_value = halbb_get_reg(bb, cr->ccktxen, cr->ccktxen_m);
-	tx->cck_mac_txen = ret_value;
-}
-
-void halbb_ofdm_tx_cnt_statistics(struct bb_info *bb, enum phl_phy_idx phy_idx)
-{
-	struct bb_stat_info *stat_t = &bb->bb_stat_i;
-	struct bb_tx_cnt_info *tx = &stat_t->bb_tx_cnt_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
-	u32 ret_value = 0;
-
-	/* read Tx counter */
-	ret_value = halbb_get_reg_cmn(bb, cr->ofdmtxon, MASKDWORD, phy_idx);
-	tx->ofdm_phy_txon = ret_value & cr->ofdmtxon_m;
-	tx->ofdm_mac_txen = (ret_value & cr->ofdmtxen_m) >> 16;
 }
 
 void halbb_statistics_reset(struct bb_info *bb)
@@ -894,114 +307,24 @@ void halbb_statistics_reset(struct bb_info *bb)
 	halbb_mem_set(bb, crc2, 0, sizeof(struct bb_crc2_info));
 }
 
-void halbb_statistics(struct bb_info *bb)
-{
-	struct bb_stat_info *stat_t = &bb->bb_stat_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
-	//char dbg_buf[HALBB_SNPRINT_SIZE] = {0};
-	u32 tmp = 0;
-	u8 path_a_ch  = 0;
-	u8 path_b_ch = 0;
-	bool cck_en = 0;
-	u8 cck_band_sel = 0;
-
-	/* Always turn on*/
-	if (!(bb->support_ability & BB_FA_CNT))
-		return;
-
-	BB_DBG(bb, DBG_FA_CNT, "[%s]===>\n", __func__);
-
-	/*Need to provide API by HALRF . Dino 2020.02.21*/
-	path_a_ch = (u8)halbb_read_rf_reg(bb, RF_PATH_A, 0x18, 0x3ff);
-	path_b_ch = (u8)halbb_read_rf_reg(bb, RF_PATH_B, 0x18, 0x3ff);
-
-	cck_en = (path_a_ch <= 14) || (path_b_ch <= 14);
-	cck_band_sel = (u8)halbb_get_reg(bb, cr->dbcc, cr->dbcc_m);
-	
-	if (bb->hal_com->dbcc_en) {
-		if (!cck_en) {
-			halbb_ofdm_tx_cnt_statistics(bb, HW_PHY_0);
-			halbb_ofdm_cnt_statistics(bb, HW_PHY_0);
-
-			halbb_print_cnt(bb, cck_en, HW_PHY_0, HW_PHY_MAX);
-			halbb_print_cnt2(bb, HW_PHY_0);
-			halbb_print_cnt3(bb, HW_PHY_0);
-
-			halbb_ofdm_tx_cnt_statistics(bb, HW_PHY_1);
-			halbb_ofdm_cnt_statistics(bb, HW_PHY_1);
-
-			halbb_print_cnt(bb, cck_en, HW_PHY_1, HW_PHY_MAX);
-			halbb_print_cnt2(bb, HW_PHY_1);
-			halbb_print_cnt3(bb, HW_PHY_1);
-		} else {
-			halbb_cck_tx_cnt_statistics(bb);
-			halbb_ofdm_tx_cnt_statistics(bb, HW_PHY_0);
-			halbb_cck_cnt_statistics(bb);
-			halbb_ofdm_cnt_statistics(bb, HW_PHY_0);
-
-			halbb_print_cnt(bb, cck_en, HW_PHY_0, HW_PHY_0);
-			halbb_print_cnt2(bb, HW_PHY_0);
-			halbb_print_cnt3(bb, HW_PHY_0);
-
-			halbb_ofdm_tx_cnt_statistics(bb, HW_PHY_1);
-			halbb_ofdm_cnt_statistics(bb, HW_PHY_1);
-
-			halbb_print_cnt(bb, cck_en, HW_PHY_1, HW_PHY_MAX);
-			halbb_print_cnt2(bb, HW_PHY_1);
-			halbb_print_cnt3(bb, HW_PHY_1);
-		}/*else if (cck_en && (cck_band_sel == 1)) {
-			halbb_cck_cnt_statistics(bb, HW_PHY_1);
-			halbb_ofdm_cnt_statistics(bb, HW_PHY_0);
-			
-			halbb_print_cnt(bb, cck_en, HW_PHY_0, HW_PHY_1);
-			halbb_print_cnt2(bb, HW_PHY_0);
-			halbb_print_cnt3(bb, HW_PHY_0);
-		}*/
-	} else {
-		if (!cck_en) {
-			halbb_ofdm_tx_cnt_statistics(bb, HW_PHY_0);
-			halbb_ofdm_cnt_statistics(bb, HW_PHY_0);
-
-			halbb_print_cnt(bb, cck_en, HW_PHY_0, HW_PHY_MAX);
-			halbb_print_cnt2(bb, HW_PHY_0);
-			halbb_print_cnt3(bb, HW_PHY_0);
-		} else {
-			halbb_cck_tx_cnt_statistics(bb);
-			halbb_ofdm_tx_cnt_statistics(bb, HW_PHY_0);
-			halbb_cck_cnt_statistics(bb);
-			halbb_ofdm_cnt_statistics(bb, HW_PHY_0);
-			
-			halbb_print_cnt(bb, cck_en, HW_PHY_0, HW_PHY_0);
-			halbb_print_cnt2(bb, HW_PHY_0);
-			halbb_print_cnt3(bb, HW_PHY_0);
-		}
-	}
-
-/*==52A CBV CCV/52B/52C Rx hang workaround==*/
-#if defined(BB_8852B_SUPPORT) && defined(HALBB_RESOLVED_POP_BY_BB)
-	halbb_chk_hang(bb);
-#endif
-/*==========================================*/
-
-	if (stat_t->cnt_reset_en)
-	halbb_cnt_reg_reset(bb);
-}
-
 void halbb_statistics_init(struct bb_info *bb)
 {
 	struct bb_stat_info *stat_t = &bb->bb_stat_i;
 	struct bb_stat_hang_info *hang = &bb->bb_stat_i.bb_stat_hang_i;
 
-	stat_t->chk_hang_cnt = 0;
 	hang->consecutive_no_tx_cnt = 0;
 	hang->consecutive_no_rx_cnt = 0;
 	hang->hang_occur = false;
+	stat_t->stat_fw_en = false;
+	stat_t->stat_show_en = false;
 
-	stat_t->hang_recovery_en = HANG_RECOVERY;
-	stat_t->chk_hang_limit = HANG_LIMIT;
-	stat_t->cnt_reset_en = true;
+	if (phl_is_mp_mode(bb->phl_com))
+		stat_t->cnt_reset_en = false;
+	else
+		stat_t->cnt_reset_en = true;
 	halbb_statistics_reset(bb);
 	halbb_set_crc32_cnt2_rate(bb, BB_06M);
+
 	if (bb->ic_type & BB_IC_BE_SERIES) {
 		halbb_set_crc32_cnt2_rate(bb, BE_BB_HT_MCS0);
 		halbb_set_crc32_cnt2_rate(bb, BE_BB_VHT_1SS_MCS0);
@@ -1017,7 +340,7 @@ void halbb_statistics_init(struct bb_info *bb)
 
 void halbb_cr_cfg_stat_init(struct bb_info *bb)
 {
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
+	struct bb_stat_cr_info *cr = &bb->bb_cmn_hooker->bb_stat_cr_i;
 
 	switch (bb->cr_type) {
 
@@ -1379,6 +702,16 @@ void halbb_cr_cfg_stat_init(struct bb_info *bb)
 		cr->cck_crc32fail_m = CNT_CCK_CRC32FAIL_P0_A2_M;
 		cr->cca_spoofing = CNT_CCA_SPOOFING_A2;
 		cr->cca_spoofing_m = CNT_CCA_SPOOFING_A2_M;
+		cr->cck_sfd_gg_cnt = SFD_GG_CNT_A2;
+		cr->cck_sfd_gg_cnt_m = SFD_GG_CNT_A2_M;
+		cr->cck_crc_16 = CRC16_GG_CNT_A2;
+		cr->cck_crc_16_m = CRC16_GG_CNT_A2_M;
+		cr->cck_sig_gg_cnt = SIG_GG_CNT_A2;
+		cr->cck_sig_gg_cnt_m = SIG_GG_CNT_A2_M;
+		cr->cck_spoofing = SPOOF_CNT_A2;
+		cr->cck_spoofing_m = SPOOF_CNT_A2_M;
+		cr->cck_brk_cnt = BRK_CNT_A2;
+		cr->cck_brk_cnt_m = BRK_CNT_A2_M;
 		cr->lsig_brk_s_th = CNT_LSIG_BRK_S_TH_A2;
 		cr->lsig_brk_s_th_m = CNT_LSIG_BRK_S_TH_A2_M;
 		cr->lsig_brk_l_th = CNT_LSIG_BRK_L_TH_A2;
@@ -1552,6 +885,16 @@ void halbb_cr_cfg_stat_init(struct bb_info *bb)
 		cr->cck_crc32fail_m = CNT_CCK_CRC32FAIL_P0_BE0_M;
 		cr->cca_spoofing = CNT_CCA_SPOOFING_BE0;
 		cr->cca_spoofing_m = CNT_CCA_SPOOFING_BE0_M;
+		cr->cck_sfd_gg_cnt = SFD_GG_CNT_BE0;
+		cr->cck_sfd_gg_cnt_m = SFD_GG_CNT_BE0_M;
+		cr->cck_crc_16 = CRC16_GG_CNT_BE0;
+		cr->cck_crc_16_m = CRC16_GG_CNT_BE0_M;
+		cr->cck_sig_gg_cnt = SIG_GG_CNT_BE0;
+		cr->cck_sig_gg_cnt_m = SIG_GG_CNT_BE0_M;
+		cr->cck_spoofing = SPOOF_CNT_BE0;
+		cr->cck_spoofing_m = SPOOF_CNT_BE0_M;
+		cr->cck_brk_cnt = BRK_CNT_BE0;
+		cr->cck_brk_cnt_m = BRK_CNT_BE0_M;
 		cr->lsig_brk_s_th = CNT_LSIG_BRK_S_TH_BE0;
 		cr->lsig_brk_s_th_m = CNT_LSIG_BRK_S_TH_BE0_M;
 		cr->lsig_brk_l_th = CNT_LSIG_BRK_L_TH_BE0;
@@ -1735,6 +1078,16 @@ void halbb_cr_cfg_stat_init(struct bb_info *bb)
 		cr->cck_crc32fail_m = CNT_CCK_CRC32FAIL_P0_BE1_M;
 		cr->cca_spoofing = CNT_CCA_SPOOFING_BE1;
 		cr->cca_spoofing_m = CNT_CCA_SPOOFING_BE1_M;
+		cr->cck_sfd_gg_cnt = SFD_GG_CNT_BE1;
+		cr->cck_sfd_gg_cnt_m = SFD_GG_CNT_BE1_M;
+		cr->cck_crc_16 = CRC16_GG_CNT_BE1;
+		cr->cck_crc_16_m = CRC16_GG_CNT_BE1_M;
+		cr->cck_sig_gg_cnt = SIG_GG_CNT_BE1;
+		cr->cck_sig_gg_cnt_m = SIG_GG_CNT_BE1_M;
+		cr->cck_spoofing = SPOOF_CNT_BE1;
+		cr->cck_spoofing_m = SPOOF_CNT_BE1_M;
+		cr->cck_brk_cnt = BRK_CNT_BE1;
+		cr->cck_brk_cnt_m = BRK_CNT_BE1_M;
 		cr->lsig_brk_s_th = CNT_LSIG_BRK_S_TH_BE1;
 		cr->lsig_brk_s_th_m = CNT_LSIG_BRK_S_TH_BE1_M;
 		cr->lsig_brk_l_th = CNT_LSIG_BRK_L_TH_BE1;
@@ -1920,10 +1273,6 @@ void halbb_cr_cfg_stat_init(struct bb_info *bb)
 	}
 }
 
-#define DVLP_DBCC	1
-
-#if DVLP_DBCC
-
 void halbb_auto_debug_pmac_cnt_chk(struct bb_info *bb)
 {
 	struct bb_stat_info *stat = &bb->bb_stat_i;
@@ -1954,7 +1303,7 @@ void halbb_pmac_cck_tx_cnt(struct bb_info *bb)
 {
 	struct bb_stat_info *stat_t = &bb->bb_stat_i;
 	struct bb_tx_cnt_info *tx = &stat_t->bb_tx_cnt_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
+	struct bb_stat_cr_info *cr = &bb->bb_cmn_hooker->bb_stat_cr_i;
 
 	/* read Tx counter */
 	tx->cck_phy_txon = halbb_get_reg(bb, cr->ccktxon, cr->ccktxon_m);
@@ -1969,7 +1318,7 @@ void halbb_pmac_cck_cnt(struct bb_info *bb)
 	struct bb_cca_info *cca = &stat_t->bb_cca_i;
 	struct bb_crc_info *crc = &stat_t->bb_crc_i;
 	struct bb_crc2_info *crc2 = &stat_t->bb_crc2_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
+	struct bb_stat_cr_info *cr = &bb->bb_cmn_hooker->bb_stat_cr_i;
 	u32 ret_value = 0;
 
 	if ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) ||
@@ -2025,31 +1374,23 @@ void halbb_pmac_cck_cnt(struct bb_info *bb)
 		BB_DBG(bb, DBG_FA_CNT, "[%s] Type AP2\n", __func__);
 
 		/* read CCK CCA counter */
-		ret_value = halbb_get_reg(bb, cr->cck_cca, cr->cck_cca_m);
-		cca->cnt_cck_cca = ret_value;
+		cca->cnt_cck_cca = halbb_get_reg_cmn(bb, cr->cck_cca, cr->cck_cca_m, bb->bb_phy_idx);
 
 		/* read CCK CRC32 counter */
-		ret_value = halbb_get_reg(bb, cr->cck_crc32ok, MASKDWORD);
-		crc->cnt_cck_crc32_ok = ret_value & cr->cck_crc32ok_m;
-		crc->cnt_cck_crc32_error = (ret_value & cr->cck_crc32fail_m) >> 16;
+		crc->cnt_cck_crc32_ok = halbb_get_reg_cmn(bb, cr->cck_crc32ok, cr->cck_crc32ok_m, bb->bb_phy_idx);
+		crc->cnt_cck_crc32_error = halbb_get_reg_cmn(bb, cr->cck_crc32ok, cr->cck_crc32fail_m, bb->bb_phy_idx);
+
 
 		/* Read CCK FA counter */
-		ret_value = halbb_get_reg(bb, 0x23A0, MASKLWORD); // Reg. doc. doesn't have CCK report reg. 0x78(0x23), need change these addr. one by one
-		cck_fa->sfd_gg_cnt = ret_value;
-
-		ret_value = halbb_get_reg(bb, 0x23a0, MASKHWORD);
-		cck_fa->cnt_cck_crc_16 = ret_value;
-
-		ret_value = halbb_get_reg(bb, 0x23ac, MASKBYTE1);
-		cck_fa->sig_gg_cnt = ret_value;
+		cck_fa->sfd_gg_cnt = halbb_get_reg_cmn(bb, cr->cck_sfd_gg_cnt, cr->cck_sfd_gg_cnt_m, bb->bb_phy_idx);
+		cck_fa->cnt_cck_crc_16 = halbb_get_reg_cmn(bb, cr->cck_crc_16, cr->cck_crc_16_m, bb->bb_phy_idx);
+		cck_fa->sig_gg_cnt = halbb_get_reg_cmn(bb, cr->cck_sig_gg_cnt, cr->cck_sig_gg_cnt_m, bb->bb_phy_idx);
 
 		/* Number of spoofing*/
-		ret_value = halbb_get_reg(bb, 0x23A8, MASKHWORD);
-		cca->cnt_cck_spoofing = ret_value;
+		cca->cnt_cck_spoofing = halbb_get_reg_cmn(bb, cr->cck_spoofing, cr->cck_spoofing_m, bb->bb_phy_idx);
 
 		/* 52C CCK_FA = CCK_BRK*/
-		ret_value = halbb_get_reg(bb, 0x239C, MASKHWORD);
-		fa->cnt_cck_fail = ret_value;
+		fa->cnt_cck_fail = halbb_get_reg_cmn(bb, cr->cck_brk_cnt, cr->cck_brk_cnt_m, bb->bb_phy_idx);
 	}
 }
 
@@ -2057,7 +1398,7 @@ void halbb_pmac_ofdm_tx_cnt(struct bb_info *bb)
 {
 	struct bb_stat_info *stat_t = &bb->bb_stat_i;
 	struct bb_tx_cnt_info *tx = &stat_t->bb_tx_cnt_i;
-	struct bb_stat_cr_info *cr = &stat_t->bb_stat_cr_i;
+	struct bb_stat_cr_info *cr = &bb->bb_cmn_hooker->bb_stat_cr_i;
 	enum phl_phy_idx phy_idx = bb->bb_phy_idx;
 	u32 ret_value = 0;
 
@@ -2078,7 +1419,7 @@ void halbb_pmac_ofdm_cnt(struct bb_info *bb)
 	struct bb_cca_info *cca = &stat_t->bb_cca_i;
 	struct bb_crc_info *crc = &stat_t->bb_crc_i;
 	struct bb_crc2_info *crc2 = &stat_t->bb_crc2_i;
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
+	struct bb_stat_cr_info *cr = &bb->bb_cmn_hooker->bb_stat_cr_i;
 	struct bb_tx_cnt_info *tx = &stat_t->bb_tx_cnt_i;
 	enum phl_phy_idx phy_idx = bb->bb_phy_idx;
 	u32 ret_value = 0;
@@ -2128,7 +1469,12 @@ void halbb_pmac_ofdm_cnt(struct bb_info *bb)
 	crc2->cnt_he2_crc32_ok = ret_value & cr->he_crc_ok2_m;
 	crc2->cnt_he2_crc32_error = (ret_value & cr->he_crc_err2_m) >> 16;
 
-#ifdef HALBB_COMPILE_BE0_SERIES
+	/*read AMPDU CRC32 counter */
+	ret_value = halbb_get_reg_cmn(bb, cr->ampdu_crc_ok, MASKDWORD, phy_idx);
+	crc->cnt_ampdu_crc_ok = ret_value & cr->ampdu_crc_ok_m;
+	crc->cnt_ampdu_crc_error = (ret_value & cr->ampdu_crc_err_m) >> 16;
+
+#ifdef HALBB_COMPILE_BE_SERIES
 	if (bb->ic_type & BB_IC_BE_SERIES) {
 		/*read EHT CRC32 counter */
 		ret_value = halbb_get_reg_cmn(bb, cr->eht_crc_ok, MASKDWORD, phy_idx);
@@ -2219,6 +1565,7 @@ void halbb_pmac_print_cnt(struct bb_info *bb, bool cck_en)
 	struct bb_crc2_info *crc2 = &stat_t->bb_crc2_i;
 	struct bb_tx_cnt_info *tx = &stat_t->bb_tx_cnt_i;
 	struct rtw_hal_stat_info *stat_info = &bb->hal_com->band[bb->bb_phy_idx].stat_info;
+	struct halbb_mcc_dm *mcc_dm = &bb->mcc_dm;
 
 	if (!cck_en) {
 		fa->cnt_fail_all = fa->cnt_ofdm_fail;
@@ -2320,8 +1667,10 @@ void halbb_pmac_print_cnt(struct bb_info *bb, bool cck_en)
 
 	halbb_print_devider(bb, BB_DEVIDER_LEN_16, false, DBG_FA_CNT);
 
-	BB_DBG(bb, DBG_FA_CNT, "[HALBB DM status]\n");
-	BB_DBG(bb, DBG_FA_CNT, " *[DIG] IGI=%d\n", stat_info->igi_fa_rssi);
+	if (mcc_dm->mcc_status_en == BB_MCC_DISABLE) {
+		BB_DBG(bb, DBG_FA_CNT, "[HALBB DM status]\n");
+		BB_DBG(bb, DBG_FA_CNT, " *[DIG] IGI=%d\n", stat_info->igi_fa_rssi);
+	}
 }
 
 void halbb_pmac_print_cnt2(struct bb_info *bb)
@@ -2493,7 +1842,7 @@ void halbb_pmac_print_cnt3(struct bb_info *bb)
 
 void halbb_pmac_cnt_reg_reset(struct bb_info *bb, bool cck_en)
 {
-	struct bb_stat_cr_info *cr = &bb->bb_stat_i.bb_stat_cr_i;
+	struct bb_stat_cr_info *cr = &bb->bb_cmn_hooker->bb_stat_cr_i;
 
 	if (cck_en) {
 		/* @reset CCK FA counter */
@@ -2508,8 +1857,24 @@ void halbb_pmac_cnt_reg_reset(struct bb_info *bb, bool cck_en)
 	halbb_mp_cnt_reset(bb);
 }
 
+void halbb_pmac_statistics_pause_val(struct bb_info *bb, u32 *val_buf, u8 val_len)
+{
+	struct bb_env_mntr_info *env = &bb->bb_env_mntr_i;
+	u32 tmp_val = 0;
+
+	if (val_len != 1) {
+		BB_DBG(bb, DBG_FA_CNT, "[Error][Statistics]Need val_len=1\n");
+		return;
+	}
+
+	tmp_val = val_buf[0]; /*Just prevent compile warning*/
+
+	BB_DBG(bb, DBG_FA_CNT, "[%s]\n", __func__);
+}
+
 void halbb_pmac_statistics_io_en(struct bb_info *bb)
 {
+	struct bb_stat_info *stat_t = &bb->bb_stat_i;
 	enum phl_phy_idx phy_idx = bb->bb_phy_idx;
 	u8 fc = bb->hal_com->band[phy_idx].cur_chandef.center_ch;
 	bool cck_en = false;
@@ -2519,30 +1884,60 @@ void halbb_pmac_statistics_io_en(struct bb_info *bb)
 		return;
 	}
 
-	if (fc <= 14)
+	if (fc <= 14 || bb->bb_api_i.central_ch <= 14)
 		cck_en = true;
 
 	BB_DBG(bb, DBG_FA_CNT, "[%s] phy=%d, cck_en=%d, fc=%d\n",
 	       __func__, phy_idx, cck_en, fc);
 
-	if (cck_en) {
-		halbb_pmac_cck_tx_cnt(bb);
-		halbb_pmac_cck_cnt(bb);
+	#ifdef HALBB_COMPILE_AP2_SERIES
+	if (stat_t->stat_fw_en) {
+		halbb_fw_h2c_statistics_en(bb, FW_STAT_Watchdog);
 	}
+	#endif
 
-	halbb_pmac_ofdm_tx_cnt(bb);
-	halbb_pmac_ofdm_cnt(bb);
+	if (!stat_t->stat_fw_en) {
+		if (cck_en) {
+			halbb_pmac_cck_tx_cnt(bb);
+			halbb_pmac_cck_cnt(bb);
+		}
 
-	halbb_pmac_print_cnt(bb, cck_en);
-	halbb_pmac_print_cnt2(bb);
-	halbb_pmac_print_cnt3(bb);
+		halbb_pmac_ofdm_tx_cnt(bb);
+		halbb_pmac_ofdm_cnt(bb);
+
+		if (stat_t->stat_show_en) {
+			halbb_pmac_print_cnt(bb, cck_en);
+			halbb_pmac_print_cnt2(bb);
+			halbb_pmac_print_cnt3(bb);
+		} else {
+			BB_DBG(bb, DBG_FA_CNT, "Please enter stat show cmd again!\n");
+		}
+	}
 
 	#ifdef HALBB_AUTO_DBG_SUPPORT
 	halbb_auto_debug_pmac_cnt_chk(bb);
 	#endif
 
-	if (bb->bb_stat_i.cnt_reset_en)
-		halbb_pmac_cnt_reg_reset(bb, cck_en);
+	if (!stat_t->stat_fw_en) {
+		if (bb->bb_stat_i.cnt_reset_en)
+			halbb_pmac_cnt_reg_reset(bb, cck_en);
+	}
+}
+
+bool halbb_pmac_statistics_abort(struct bb_info *bb)
+{
+	if (!(bb->support_ability & BB_FA_CNT)) {
+		BB_DBG(bb, DBG_ENV_MNTR, "[%s] Pmac_statistics Not support\n", __func__);
+		return true;
+	}
+
+	if (bb->pause_ability & BB_FA_CNT) {
+		BB_DBG(bb, DBG_FA_CNT, "[%s]: Pause FA_cnt in LV=%d\n",
+		       __func__, bb->pause_lv_table.lv_fa_cnt);
+		return true;
+	}
+
+	return false;
 }
 
 void halbb_pmac_statistics(struct bb_info *bb)
@@ -2551,14 +1946,10 @@ void halbb_pmac_statistics(struct bb_info *bb)
 	u8 fc = bb->hal_com->band[phy_idx].cur_chandef.center_ch;
 	bool cck_en = false;
 
-	if (!(bb->support_ability & BB_FA_CNT))
+	halbb_show_cr_cnt(bb, BB_WD_PMAC_STATISTICS);
+
+	if (halbb_pmac_statistics_abort(bb))
 		return;
-	
-	if (bb->pause_ability & BB_FA_CNT) {
-		BB_DBG(bb, DBG_FA_CNT, "Return: Pause FA_cnt in LV=%d\n",
-		       bb->pause_lv_table.lv_fa_cnt);
-		return;
-	}
 
 	halbb_pmac_statistics_io_en(bb);
 }
@@ -2591,6 +1982,204 @@ void halbb_pmac_statistics_ex(struct bb_info *bb_0, bool en, enum phl_phy_idx ph
 	halbb_pmac_statistics_io_en(bb);
 }
 
-#endif
+#ifdef HALBB_COMPILE_AP2_SERIES
+void halbb_fw_h2c_statistics_en(struct bb_info *bb, u8 fw_rpt_mode)
+{
+	struct bb_stat_h2c_info fw_stat_i = {0};
+	bool ret_val = false;
+	u8 cmdlen = sizeof(struct bb_stat_h2c_info);
+	u32 *bb_h2c = NULL;
+	
+	bb_h2c = (u32*)&fw_stat_i;
 
+	fw_stat_i.fw_rpt_mode = fw_rpt_mode;
+	fw_stat_i.phy_idx = (u8)bb->bb_phy_idx;
+	BB_DBG(bb, DBG_FA_CNT, "FW statistics mode: [%d], phy_idx = %d\n", fw_stat_i.fw_rpt_mode, fw_stat_i.phy_idx);
+	ret_val = halbb_fill_h2c_cmd(bb, cmdlen, DM_H2C_FW_STAT_INFO, HALBB_H2C_DM, bb_h2c);
+
+	if (ret_val == false)
+		BB_WARNING(" H2C cmd: FW statistics failed!!\n");
+}
+
+u32 halbb_get_fw_c2h_statistics(struct bb_info *bb_0, u16 len, u8 *c2h)
+{
+	struct bb_info *bb = bb_0;
+	struct bb_stat_c2h_rpt *c2h_rpt = NULL;
+	struct bb_stat_info *stat_t = NULL;
+	struct bb_tx_cnt_info *tx = NULL;
+	struct bb_fa_info *fa = NULL;
+	struct bb_legacy_fa_info *legacy_fa = NULL;
+	struct bb_ht_fa_info *ht_fa = NULL;
+	struct bb_vht_fa_info *vht_fa = NULL;
+	struct bb_he_fa_info *he_fa = NULL;
+	struct bb_cck_fa_info *cck_fa = NULL;
+	struct bb_cca_info *cca = NULL;
+	struct bb_crc_info *crc = NULL;
+	struct bb_crc2_info *crc2 = NULL;
+	struct halbb_mcc_dm *mcc_dm = NULL;
+	bool cck_en = false;
+
+	if (!c2h) {
+		BB_WARNING("Error fw statistics c2h failed!!\n");
+		return _FAIL;
+	}
+
+	c2h_rpt = (struct bb_stat_c2h_rpt *)c2h;
+	#ifdef HALBB_DBCC_SUPPORT
+	HALBB_GET_PHY_PTR(bb_0, bb, c2h_rpt->phy_idx);
+	#endif
+
+	if (c2h_rpt->center_ch == 0) {
+		BB_WARNING("[%s] phy=%d, fc=%d\n", __func__, c2h_rpt->phy_idx, c2h_rpt->center_ch);
+		return _FAIL;
+	}
+
+	if (!(bb->ic_type & BB_RTL8852C)) {
+		BB_WARNING("[%s] Not Support FW statistics\n", __func__);
+		return _FAIL;
+	}
+
+	halbb_statistics_reset(bb);
+
+	stat_t = &bb->bb_stat_i;
+	tx = &stat_t->bb_tx_cnt_i;
+	fa = &stat_t->bb_fa_i;
+	legacy_fa = &fa->bb_legacy_fa_i;
+	ht_fa = &fa->bb_ht_fa_i;
+	vht_fa = &fa->bb_vht_fa_i;
+	he_fa = &fa->bb_he_fa_i;
+	cck_fa = &fa->bb_cck_fa_i;
+	cca = &stat_t->bb_cca_i;
+	crc = &stat_t->bb_crc_i;
+	crc2 = &stat_t->bb_crc2_i;
+	mcc_dm = &bb->mcc_dm;
+
+	if (mcc_dm->mcc_status_en == BB_MCC_ENABLE)
+		BB_DBG(bb, DBG_FA_CNT, "MCC FW C2H : BB[%d] channel = %d, PD_low_bd(ofdm) = (-%d) dBm\n", c2h_rpt->phy_idx, c2h_rpt->center_ch, 102 - (c2h_rpt->ofdm_pd_idx << 1));
+	else
+		BB_DBG(bb, DBG_FA_CNT, "STAT FW C2H : BB[%d] channel = %d\n", c2h_rpt->phy_idx, c2h_rpt->center_ch);
+
+	if (c2h_rpt->center_ch <= 14)
+		cck_en = true;
+
+	if (cck_en) {
+		/* read Tx counter */
+		tx->cck_phy_txon = c2h_rpt->cck_phy_txon;
+		tx->cck_mac_txen = c2h_rpt->cck_mac_txen;
+
+		/* read CCK CCA counter */
+		cca->cnt_cck_cca = c2h_rpt->cnt_cck_cca;
+
+		/* read CCK CRC32 counter */
+		crc->cnt_cck_crc32_ok = c2h_rpt->cnt_cck_crc32_ok;
+		crc->cnt_cck_crc32_error = c2h_rpt->cnt_cck_crc32_error;
+
+		/* Read CCK FA counter */
+		cck_fa->sfd_gg_cnt = c2h_rpt->sfd_gg_cnt;
+		cck_fa->cnt_cck_crc_16 = c2h_rpt->cnt_cck_crc_16;
+		cck_fa->sig_gg_cnt = c2h_rpt->sig_gg_cnt;
+
+		/* Number of spoofing*/
+		cca->cnt_cck_spoofing = c2h_rpt->cnt_cck_spoofing;
+
+		/* 52C CCK_FA = CCK_BRK*/
+		fa->cnt_cck_fail = c2h_rpt->cnt_cck_fail;
+	}
+
+	tx->ofdm_phy_txon = c2h_rpt->ofdm_phy_txon;
+	tx->ofdm_mac_txen = c2h_rpt->ofdm_mac_txen;
+
+	/* read OFDM CRC32 counter */
+	crc->cnt_ofdm_crc32_ok = c2h_rpt->cnt_ofdm_crc32_ok;
+	crc->cnt_ofdm_crc32_error = c2h_rpt->cnt_ofdm_crc32_error;
+
+	/* read OFDM2 CRC32 counter */
+	crc2->cnt_ofdm2_crc32_ok = c2h_rpt->cnt_ofdm2_crc32_ok;
+	crc2->cnt_ofdm2_crc32_error = c2h_rpt->cnt_ofdm2_crc32_error;
+
+	/* read OFDM3 CRC32 counter */
+	crc2->cnt_ofdm3_crc32_ok = c2h_rpt->cnt_ofdm3_crc32_ok;
+	crc2->cnt_ofdm3_crc32_error = c2h_rpt->cnt_ofdm3_crc32_error;
+
+	/* read HT CRC32 counter */
+	crc->cnt_ht_crc32_ok = c2h_rpt->cnt_ht_crc32_ok;
+	crc->cnt_ht_crc32_error = c2h_rpt->cnt_ht_crc32_error;
+
+	/* read HT2 CRC32 counter */
+	crc2->cnt_ht2_crc32_ok = c2h_rpt->cnt_ht2_crc32_ok;
+	crc2->cnt_ht2_crc32_error = c2h_rpt->cnt_ht2_crc32_error;
+
+	/*read VHT CRC32 counter */
+	crc->cnt_vht_crc32_ok = c2h_rpt->cnt_vht_crc32_ok;
+	crc->cnt_vht_crc32_error = c2h_rpt->cnt_vht_crc32_error;
+
+	/*read VHT2 CRC32 counter */
+	crc2->cnt_vht2_crc32_ok = c2h_rpt->cnt_vht2_crc32_ok;
+	crc2->cnt_vht2_crc32_error = c2h_rpt->cnt_vht2_crc32_error;
+
+	/*read HE CRC32 counter */
+	crc->cnt_he_crc32_ok = c2h_rpt->cnt_he_crc32_ok;
+	crc->cnt_he_crc32_error = c2h_rpt->cnt_he_crc32_error;
+
+	/*read HE2 CRC32 counter */
+	crc2->cnt_he2_crc32_ok = c2h_rpt->cnt_he2_crc32_ok;
+	crc2->cnt_he2_crc32_error = c2h_rpt->cnt_he2_crc32_error;
+
+	/*read AMPDU CRC32 counter */
+	crc->cnt_ampdu_crc_ok = c2h_rpt->cnt_ampdu_crc_ok;
+	crc->cnt_ampdu_crc_error = c2h_rpt->cnt_ampdu_crc_error;
+
+	/*read EHT CRC32 counter */
+	crc->cnt_eht_crc32_ok = c2h_rpt->cnt_eht_crc32_ok;
+	crc->cnt_eht_crc32_error = c2h_rpt->cnt_eht_crc32_error;
+
+	/*read EHT2 CRC32 counter */
+	crc2->cnt_eht2_crc32_ok = c2h_rpt->cnt_eht2_crc32_ok;
+	crc2->cnt_eht2_crc32_error = c2h_rpt->cnt_eht2_crc32_error;
+
+	/* After BB parameter v42, BB will trigger break to reset BB TX outer */
+	/* BB FA counter plus 1 after every PHY_TXON JIRA: WLANBB-2954*/
+	fa->cnt_ofdm_fail = c2h_rpt->cnt_ofdm_fail;
+
+	/* Acut workaround because of no HE cnt */
+	fa->cnt_total_brk = fa->cnt_ofdm_fail;
+
+	/* @calculate OFDM FA counter instead of reading brk_cnt*/
+	legacy_fa->cnt_sb_search_fail = c2h_rpt->cnt_sb_search_fail;
+
+	/* Legacy portion */
+	legacy_fa->cnt_lsig_brk_s_th = c2h_rpt->cnt_lsig_brk_s_th;
+	legacy_fa->cnt_lsig_brk_l_th = c2h_rpt->cnt_lsig_brk_l_th;
+	legacy_fa->cnt_parity_fail = c2h_rpt->cnt_parity_fail;
+	legacy_fa->cnt_rate_illegal = c2h_rpt->cnt_rate_illegal;
+
+	/* HT portion */
+	ht_fa->cnt_mcs_fail = c2h_rpt->cnt_mcs_fail;
+	ht_fa->cnt_crc8_fail_s_th = c2h_rpt->cnt_crc8_fail_s_th;
+	ht_fa->cnt_crc8_fail_l_th = c2h_rpt->cnt_crc8_fail_l_th;
+	ht_fa->cnt_crc8_fail = ht_fa->cnt_crc8_fail_s_th + ht_fa->cnt_crc8_fail_l_th;
+
+	/* VHT portion */
+	vht_fa->cnt_mcs_fail_vht = c2h_rpt->cnt_mcs_fail_vht;
+	vht_fa->cnt_crc8_fail_vhta = c2h_rpt->cnt_crc8_fail_vhta;
+
+	/* read OFDM CCA counter */
+	cca->cnt_ofdm_cca = c2h_rpt->cnt_ofdm_cca;
+	cca->cnt_ofdm_spoofing = c2h_rpt->cnt_ofdm_spoofing;
+	crc->cnt_ampdu_miss = c2h_rpt->cnt_ampdu_miss;
+
+	/* POP counter */
+	cca->pop_cnt = c2h_rpt->pop_cnt;
+
+	if (stat_t->stat_show_en || mcc_dm->mcc_status_en == BB_MCC_ENABLE) {
+		halbb_pmac_print_cnt(bb, cck_en);
+		halbb_pmac_print_cnt2(bb);
+		halbb_pmac_print_cnt3(bb);
+	} else {
+		BB_DBG(bb, DBG_FA_CNT, "Please enter stat show cmd again!\n");
+	}
+
+	return _SUCCESS;
+}
+#endif
 #endif

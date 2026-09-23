@@ -114,6 +114,15 @@ out:
 	return wdev;
 }
 
+bool rtw_is_du_ndev(struct wiphy *wiphy, struct net_device *ndev)
+{
+	char du_ndev_name[IFNAMSIZ];
+
+	snprintf(du_ndev_name, IFNAMSIZ, "%s-du", wiphy_name(wiphy));
+
+	return strncmp(ndev->name, du_ndev_name, IFNAMSIZ) == 0;
+}
+
 void rtw_regd_free_du_wdev(struct wiphy *wiphy)
 {
 	struct dvobj_priv *dvobj = wiphy_to_dvobj(wiphy);
@@ -151,7 +160,7 @@ static void rtw_regd_schedule_dfs_chan_update(struct wiphy *wiphy)
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0))
 	cfg80211_ch_switch_notify(wiphy_data->du_wdev->netdev, &wiphy_data->du_chdef, 0);
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)) || defined(CONFIG_MLD_KERNEL_PATCH)
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)) || defined(CONFIG_ACK_5_15_LTS_KERNEL)
 	/* ToDo CONFIG_RTW_MLD */
 	cfg80211_ch_switch_notify(wiphy_data->du_wdev->netdev, &wiphy_data->du_chdef, 0, 0);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2))
@@ -244,8 +253,10 @@ static struct ieee80211_reg_rule rtw_get_ieee80211_reg_rule(struct get_chplan_re
 	)
 		rule.flags |= NL80211_RRF_AUTO_BW;
 
+	#if 0 /* TODO: limit to 20MHz */
 	if (regd_max_bw < 40)
 		rule.flags |= NL80211_RRF_NO_HT40;
+	#endif
 	if (regd_max_bw < 80)
 		rule.flags |= NL80211_RRF_NO_80MHZ;
 	if (regd_max_bw < 160)
@@ -369,8 +380,6 @@ static void rtw_regd_disable_no_20mhz_chs(struct wiphy *wiphy)
 			continue;
 		for (j = 0; j < sband->n_channels; j++) {
 			ch = &sband->channels[j];
-			if (!ch)
-				continue;
 			if (ch->flags & IEEE80211_CHAN_NO_20MHZ) {
 				RTW_INFO(FUNC_WIPHY_FMT" disable band:%d ch:%u w/o 20MHz\n", FUNC_WIPHY_ARG(wiphy), ch->band, ch->hw_value);
 				ch->flags = IEEE80211_CHAN_DISABLED;
@@ -439,8 +448,6 @@ static void rtw_regd_overide_flags(struct wiphy *wiphy, struct get_chplan_resp *
 			continue;
 		for (j = 0; j < sband->n_channels; j++) {
 			ch = &sband->channels[j];
-			if (!ch)
-				continue;
 			ch->flags = IEEE80211_CHAN_DISABLED;
 		}
 	}
@@ -578,6 +585,17 @@ void rtw_chset_apply_from_os(struct rtw_chset *chset, u8 d_flags)
 	rtw_chset_apply_wiphy_chans(chset, d_flags);
 }
 
+enum country_ie_slave_en_mode rtw_os_get_cis_en_mode(_adapter *adapter)
+{
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0))
+	struct wiphy *wiphy = adapter_to_wiphy(adapter);
+
+	if (wiphy->regulatory_flags & REGULATORY_COUNTRY_IE_IGNORE)
+		return CISEM_DISABLE;
+#endif
+	return CISEM_ENABLE;
+}
+
 s16 rtw_os_get_total_txpwr_regd_lmt_mbm(_adapter *adapter, enum band_type band, u8 cch, enum channel_width bw)
 {
 	struct wiphy *wiphy = adapter_to_wiphy(adapter);
@@ -626,6 +644,20 @@ static enum rtw_dfs_regd nl80211_dfs_regions_to_rtw_dfs_region(enum nl80211_dfs_
 	}
 };
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0)) */
+
+static enum rtw_env_t environment_cap_to_rtw_env(enum environment_cap env)
+{
+	switch (env) {
+	case ENVIRON_INDOOR:
+		return RTW_ENV_INDOOR;
+	case ENVIRON_OUTDOOR:
+		return RTW_ENV_OUTDOOR;
+	case ENVIRON_ANY:
+		return RTW_ENV_ANY;
+	}
+	rtw_warn_on(1);
+	return RTW_ENV_NUM;
+}
 #endif /* CONFIG_REGD_SRC_FROM_OS */
 
 static enum rtw_regd_inr nl80211_reg_initiator_to_rtw_regd_inr(enum nl80211_reg_initiator initiator)
@@ -642,7 +674,7 @@ static enum rtw_regd_inr nl80211_reg_initiator_to_rtw_regd_inr(enum nl80211_reg_
 	}
 	rtw_warn_on(1);
 	return RTW_REGD_SET_BY_NUM;
-};
+}
 
 #ifdef CONFIG_RTW_DEBUG
 static const char *nl80211_reg_initiator_str(enum nl80211_reg_initiator initiator)
@@ -771,13 +803,17 @@ static void rtw_reg_notifier(struct wiphy *wiphy, struct regulatory_request *req
 #ifdef CONFIG_REGD_SRC_FROM_OS
 	if (REGSTY_REGD_SRC_FROM_OS(regsty)) {
 		enum rtw_dfs_regd dfs_region =  RTW_DFS_REGD_NONE;
+		enum rtw_env_t env = RTW_ENV_NUM;
 
 		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0))
 		dfs_region = nl80211_dfs_regions_to_rtw_dfs_region(request->dfs_region);
 		#endif
 
+		if (request->initiator == NL80211_REGDOM_SET_BY_COUNTRY_IE)
+			env = environment_cap_to_rtw_env(request->country_ie_env);
+
 		/* trigger command to sync regulatory form OS */
-		rtw_sync_os_regd_cmd(wiphy_to_adapter(wiphy), RTW_CMDF_WAIT_ACK, request->alpha2, dfs_region, inr);
+		rtw_sync_os_regd_cmd(wiphy_to_adapter(wiphy), RTW_CMDF_WAIT_ACK, request->alpha2, dfs_region, env, inr);
 	} else
 #endif
 	{
@@ -786,7 +822,7 @@ static void rtw_reg_notifier(struct wiphy *wiphy, struct regulatory_request *req
 
 		switch (request->initiator) {
 		case NL80211_REGDOM_SET_BY_USER:
-			rtw_set_country(wiphy_to_adapter(wiphy), request->alpha2, inr);
+			rtw_set_country(wiphy_to_adapter(wiphy), request->alpha2, RTW_ENV_NUM, inr);
 			break;
 		case NL80211_REGDOM_SET_BY_DRIVER:
 		case NL80211_REGDOM_SET_BY_CORE:
@@ -961,6 +997,9 @@ static void async_cac_change_work_hdl(_workitem *work)
 	struct rtw_wiphy_data *wiphy_data = container_of(work, struct rtw_wiphy_data, async_cac_change_work);
 	struct async_cac_change_evt *evt;
 	_list *list, *head = &wiphy_data->async_cac_change_list;
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	unsigned int link_id = 0;
+	#endif
 
 	while (1) {
 		_rtw_mutex_lock_interruptible(&wiphy_data->async_cac_change_mutex);
@@ -975,7 +1014,13 @@ static void async_cac_change_work_hdl(_workitem *work)
 		evt = LIST_CONTAINOR(list, struct async_cac_change_evt, list);
 
 		rtnl_lock();
+
+		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+		cfg80211_cac_event(evt->netdev, &evt->chandef, evt->event, GFP_KERNEL, link_id);
+		#else
 		cfg80211_cac_event(evt->netdev, &evt->chandef, evt->event, GFP_KERNEL);
+		#endif
+
 		rtnl_unlock();
 
 		rtw_mfree(evt, sizeof(*evt));
@@ -1041,6 +1086,9 @@ static void rtw_cfg80211_cac_event(struct rf_ctl_t *rfctl, u8 band_idx
 	_adapter *iface;
 	int i;
 	bool async;
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	unsigned int link_id = 0;
+	#endif
 
 	if (!ifbmp) {
 		RTW_WARN(FUNC_HWBAND_FMT" ifbmp is empty", caller, HWBAND_ARG(band_idx));
@@ -1056,7 +1104,7 @@ static void rtw_cfg80211_cac_event(struct rf_ctl_t *rfctl, u8 band_idx
 			continue;
 		if (!iface->rtw_wdev)
 			continue;
-#if defined(CONFIG_MLD_KERNEL_PATCH) || (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2))
+#if defined(CONFIG_ACK_5_15_LTS_KERNEL) || (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2))
 		async = !((iface->rtw_wdev)->links[0].ap.chandef.chan);
 #else
 		async = !iface->rtw_wdev->chandef.chan;
@@ -1065,7 +1113,11 @@ static void rtw_cfg80211_cac_event(struct rf_ctl_t *rfctl, u8 band_idx
 		if (async)
 			cfg80211_cac_event_async(iface->pnetdev, &chdef, event);
 		else
+		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+			cfg80211_cac_event(iface->pnetdev, &chdef, event, GFP_KERNEL, link_id);
+		#else
 			cfg80211_cac_event(iface->pnetdev, &chdef, event, GFP_KERNEL);
+		#endif
 	}
 }
 
@@ -1094,6 +1146,7 @@ void rtw_cfg80211_cac_finished_event(struct rf_ctl_t *rfctl, u8 band_idx
 	struct wiphy *wiphy = dvobj_to_wiphy(dvobj); /* TODO: hwband specific wiphy mapping */
 	_adapter *iface;
 	int i;
+	bool cac;
 
 	if (!wiphy_ext_feature_isset(wiphy, NL80211_EXT_FEATURE_DFS_OFFLOAD))
 		return;
@@ -1102,8 +1155,15 @@ void rtw_cfg80211_cac_finished_event(struct rf_ctl_t *rfctl, u8 band_idx
 		iface = dvobj->padapters[i];
 		if (!iface || !(ifbmp & BIT(iface->iface_id)))
 			continue;
+
+		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+		cac = iface->rtw_wdev->links[0].cac_started;
+		#else
+		cac = iface->rtw_wdev->cac_started;
+		#endif
+
 		/* finish only for wdev with cac_started */
-		if (!iface->rtw_wdev || !iface->rtw_wdev->cac_started)
+		if (!iface->rtw_wdev || !cac)
 			ifbmp &= ~BIT(iface->iface_id);
 	}
 
@@ -1117,6 +1177,7 @@ void rtw_cfg80211_cac_aborted_event(struct rf_ctl_t *rfctl, u8 band_idx
 	struct wiphy *wiphy = dvobj_to_wiphy(dvobj); /* TODO: hwband specific wiphy mapping */
 	_adapter *iface;
 	int i;
+	bool cac;
 
 	if (!wiphy_ext_feature_isset(wiphy, NL80211_EXT_FEATURE_DFS_OFFLOAD))
 		return;
@@ -1125,8 +1186,14 @@ void rtw_cfg80211_cac_aborted_event(struct rf_ctl_t *rfctl, u8 band_idx
 		iface = dvobj->padapters[i];
 		if (!iface || !(ifbmp & BIT(iface->iface_id)))
 			continue;
+
+		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+		cac = iface->rtw_wdev->links[0].cac_started;
+		#else
+		cac = iface->rtw_wdev->cac_started;
+		#endif
 		/* abort only for wdev with cac_started */
-		if (!iface->rtw_wdev || !iface->rtw_wdev->cac_started)
+		if (!iface->rtw_wdev || !cac)
 			ifbmp &= ~BIT(iface->iface_id);
 	}
 
@@ -1159,6 +1226,7 @@ void rtw_cfg80211_cac_force_finished(struct rf_ctl_t *rfctl, u8 band_idx
 	struct ieee80211_channel *chan;
 	bool need_start = false;
 	u8 finished_ifbmp, started_ifbmp;
+	bool cac;
 
 	if (!wiphy_ext_feature_isset(wiphy, NL80211_EXT_FEATURE_DFS_OFFLOAD))
 		return;
@@ -1213,9 +1281,14 @@ void rtw_cfg80211_cac_force_finished(struct rf_ctl_t *rfctl, u8 band_idx
 			started_ifbmp &= ~BIT(iface->iface_id);
 			continue;
 		}
-		if (need_start && iface->rtw_wdev->cac_started)
+		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+		cac = iface->rtw_wdev->links[0].cac_started;
+		#else
+		cac = iface->rtw_wdev->cac_started;
+		#endif
+		if (need_start && cac)
 			started_ifbmp &= ~BIT(iface->iface_id);
-		else if (!need_start && !iface->rtw_wdev->cac_started)
+		else if (!need_start && !cac)
 			finished_ifbmp &= ~BIT(iface->iface_id);
 	}
 
@@ -1285,6 +1358,7 @@ int rtw_regd_init(struct wiphy *wiphy)
 #else
 	wiphy->regulatory_flags &= ~REGULATORY_STRICT_REG;
 	wiphy->regulatory_flags &= ~REGULATORY_DISABLE_BEACON_HINTS;
+	wiphy->regulatory_flags &= ~REGULATORY_COUNTRY_IE_IGNORE;
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 39))
@@ -1294,6 +1368,11 @@ int rtw_regd_init(struct wiphy *wiphy)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0))
 	if (rtw_regd_is_wiphy_self_managed(wiphy))
 		wiphy->regulatory_flags |= REGULATORY_WIPHY_SELF_MANAGED;
+	else
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0))
+	if (!REGSTY_REGD_SRC_OS_11D(dvobj_to_regsty(wiphy_to_dvobj(wiphy))))
+		wiphy->regulatory_flags |= REGULATORY_COUNTRY_IE_IGNORE;
 #endif
 
 #if defined(CONFIG_DFS_MASTER) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))

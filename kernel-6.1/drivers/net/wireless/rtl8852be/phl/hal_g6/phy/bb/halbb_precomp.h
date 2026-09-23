@@ -38,6 +38,7 @@
 #include "halbb_dbg_ex.h"
 #include "halbb_dbg_cnsl_out.h"
 #include "halbb_rua_tbl_ex.h"
+#include "halbb_dv_dbg.h"
 
 #if (PLATFOM_IS_LITTLE_ENDIAN)
 	#include "halbb_physts_ie_l_endian.h"
@@ -87,6 +88,7 @@
 	#include "halbb_8852c/halbb_8852c_dcra.h"
 	#include "halbb_8852c/halbb_8852c_dcra_ex.h"
 	#include "halbb_8852c/halbb_version_rtl8852d.h"
+	#include "halbb_8852c/halbb_version_rtl8842a.h"
 #endif
 
 #ifdef BB_8192XB_SUPPORT

@@ -33,8 +33,13 @@ struct hci_info_t {
 #endif
 	void *wd_dma_pool;
 	void *h2c_dma_pool;
+	_os_lock int_hdl_lock;
+	bool int_disabled;
+
 #elif defined(CONFIG_USB_HCI)
 	u16 usb_bulkout_size;
+	bool usb_in_rx_start;
+
 #elif defined(CONFIG_SDIO_HCI)
 	u32 tx_drop_cnt;	/* bit31 means overflow or not */
 #ifdef SDIO_TX_THREAD
@@ -127,6 +132,7 @@ struct phl_hci_trx_ops {
 	enum rtw_phl_status (*recycle_busy_wd)(struct phl_info_t *phl);
 	enum rtw_phl_status (*recycle_busy_h2c)(struct phl_info_t *phl);
 	void (*return_tx_wps)(struct phl_info_t *phl);
+	void (*read_hw_rx)(struct phl_info_t *phl);
 #endif
 
 #ifdef CONFIG_USB_HCI
@@ -365,6 +371,11 @@ struct phl_info_t {
 	void *ring_sts_pool;
 	void *rx_pkt_pool;
 	struct phl_h2c_pkt_pool *h2c_pool;
+	u8 tx_tid_turn;
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+	struct phl_h2c_pkt_alloc_cnt h2c_alloc_cnt;
+	struct rtw_h2c_pkt_return_list h2c_pkt_return_list;
+#endif
 
 	struct hci_info_t *hci;
 	struct phl_hci_trx_ops *hci_trx_ops;
@@ -393,6 +404,9 @@ struct phl_info_t {
 
 	void *led_ctrl;
 
+#ifdef CONFIG_QOS_MG
+	void *qm_ctrl; /* struct qm_ctrl_info */
+#endif /* CONFIG_QOS_MG */
 	void *ecsa_ctrl;
 #ifdef CONFIG_PHL_TDLS
 	struct phl_tdls_info_t tdls_info;

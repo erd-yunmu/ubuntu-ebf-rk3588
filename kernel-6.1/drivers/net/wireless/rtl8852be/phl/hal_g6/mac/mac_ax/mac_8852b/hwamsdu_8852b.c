@@ -16,7 +16,7 @@
 #include "hwamsdu_8852b.h"
 
 #if MAC_AX_8852B_SUPPORT
-
+#if MAC_FEAT_HWAMSDU
 u32 mac_enable_cut_hwamsdu_8852b(struct mac_ax_adapter *adapter,
 				 u8 enable,
 				 enum mac_ax_ex_shift aligned)
@@ -65,4 +65,5 @@ u32 mac_cut_hwamsdu_chk_mpdu_len_en_8852b(struct mac_ax_adapter *adapter,
 	return MACSUCCESS;
 }
 
+#endif
 #endif

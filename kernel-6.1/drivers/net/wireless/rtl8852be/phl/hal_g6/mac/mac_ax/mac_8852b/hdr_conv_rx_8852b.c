@@ -15,6 +15,7 @@
 #include "hdr_conv_rx_8852b.h"
 
 #if MAC_AX_8852B_SUPPORT
+#if MAC_FEAT_HDR_CONV
 u32 mac_hdr_conv_rx_en_8852b(struct mac_ax_adapter *adapter,
 			     struct mac_ax_rx_hdr_conv_cfg *cfg)
 {
@@ -26,4 +27,5 @@ u32 mac_hdr_conv_rx_en_driv_info_hdr_8852b(struct mac_ax_adapter *adapter,
 {
 	return MACNOTSUP;
 }
+#endif
 #endif

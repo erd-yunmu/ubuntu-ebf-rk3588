@@ -156,7 +156,7 @@ exit:
 	return ret;
 }
 
-bool rtw_rfctl_hwband_is_tx_blocked_by_ch_waiting(struct rf_ctl_t *rfctl, enum phl_band_idx hwband)
+static bool rtw_rfctl_hwband_is_tx_blocked_by_ch_waiting(struct rf_ctl_t *rfctl, enum phl_band_idx hwband)
 {
 	if (hwband >= HW_BAND_MAX)
 		return false;
@@ -443,32 +443,39 @@ static bool rtw_rfctl_chset_chk_non_ocp_finish_for_bchbw(struct rf_ctl_t *rfctl,
 {
 	struct rtw_chset *chset = &rfctl->chset;
 	RT_CHANNEL_INFO *chinfo;
+	s8 ch_idx[8]; /* 5G non_ocp up to 160MHz */
 	u8 cch;
 	u8 *op_chs;
 	u8 op_ch_num;
 	int i;
-	bool ret = 0;
+	bool ret = false;
 
 	cch = rtw_get_center_ch_by_band(band, ch, bw, offset);
 
 	if (!rtw_get_op_chs_by_bcch_bw(band, cch, bw, &op_chs, &op_ch_num))
 		goto exit;
 
+	if (op_ch_num > ARRAY_SIZE(ch_idx)) {
+		rtw_warn_on(1);
+		goto exit;
+	}
+
 	for (i = 0; i < op_ch_num; i++) {
 		if (0)
 			RTW_INFO("%u,%u,%u,%u - cch:%u, bw:%u, op_ch:%u\n", band, ch, bw, offset, cch, bw, *(op_chs + i));
-		chinfo = rtw_chset_get_chinfo_by_bch(chset, band, *(op_chs + i), true);
-		if (!chinfo)
+		ch_idx[i] = rtw_chset_search_bch_include_dis(chset, band, *(op_chs + i));
+		if (ch_idx[i] < 0)
 			break;
+		chinfo = &chset->chs[ch_idx[i]];
 		if (CH_IS_NON_OCP_STOPPED(chinfo) || CH_IS_NON_OCP(chinfo))
 			break;
 	}
 
 	if (op_ch_num != 0 && i == op_ch_num) {
-		ret = 1;
+		ret = true;
 		/* set to RTW_NON_OCP_STOPPED */
 		for (i = 0; i < op_ch_num; i++) {
-			chinfo = rtw_chset_get_chinfo_by_bch(chset, band, *(op_chs + i), true);
+			chinfo = &chset->chs[ch_idx[i]];
 			chinfo->non_ocp_end_time = RTW_NON_OCP_STOPPED;
 		}
 		for (i = HW_BAND_0; i < HW_BAND_MAX; i++) /* single chset shared by all hwband */
@@ -1409,6 +1416,7 @@ static bool rtw_choose_shortest_waiting_ch(struct rf_ctl_t *rfctl
 	int i, j;
 	u32 min_waiting_ms = 0;
 	u16 int_factor_c = 0;
+	u8 within_same_band = rfctl->ch_sel_within_same_band;
 
 	if (!dec_ch || !dec_bw || !dec_offset) {
 		rtw_warn_on(1);
@@ -1417,9 +1425,17 @@ static bool rtw_choose_shortest_waiting_ch(struct rf_ctl_t *rfctl
 
 	RTW_INFO("%s: sel_ch:%s-%u(%u) max_bw:%u e_flags:0x%02x d_flags:0x%02x cur_ch:%s-%u(%u) within_sb:%d%s%s\n"
 		, __func__, band_str(sel_band), sel_ch, sel_offset, max_bw, e_flags, d_flags
-		, band_str(cur_band), cur_ch, cur_offset, rfctl->ch_sel_within_same_band
+		, band_str(cur_band), cur_ch, cur_offset, within_same_band
 		, by_int_info ? " int" : "", mesh_only ? " mesh_only" : "");
 
+	if (sel_band != BAND_MAX && rtw_rfctl_is_regu_forbid_bss(rfctl, sel_band))
+		goto exit;
+	if (sel_band == BAND_MAX && within_same_band && rtw_rfctl_is_regu_forbid_bss(rfctl, cur_band)) {
+		RTW_INFO("%s: cancel within_sb because REGU_FORBID for %s BSS", __func__, band_str(cur_band));
+		within_same_band = RTW_CHSEL_BAND_ALL;
+	}
+
+choose:
 	/* full search and narrow bw judegement first to avoid potetial judegement timing issue */
 	for (bw = CHANNEL_WIDTH_20; bw <= max_bw; bw++) {
 		if (!rtw_hw_is_bw_support(dvobj, bw))
@@ -1437,10 +1453,12 @@ static bool rtw_choose_shortest_waiting_ch(struct rf_ctl_t *rfctl
 
 			band = chset->chs[i].band;
 			ch = chset->chs[i].ChannelNum;
+			if (rtw_rfctl_is_regu_forbid_bss(rfctl, band))
+				continue;
 			if (sel_band != BAND_MAX) {
 				if (band != sel_band)
 					continue;
-			} else if (rfctl->ch_sel_within_same_band && cur_band != band)
+			} else if (within_same_band && cur_band != band)
 				continue;
 			if (sel_ch) {
 				if (ch != sel_ch)
@@ -1526,6 +1544,7 @@ static bool rtw_choose_shortest_waiting_ch(struct rf_ctl_t *rfctl
 		}
 	}
 
+exit:
 	if (ch_c != 0) {
 		RTW_INFO("%s: select %s,%u,%u,%u waiting_ms:%u\n"
 			, __func__, band_str(band_c), ch_c, bw_c, offset_c, min_waiting_ms);
@@ -1537,8 +1556,11 @@ static bool rtw_choose_shortest_waiting_ch(struct rf_ctl_t *rfctl
 		return _TRUE;
 	} else {
 		RTW_INFO("%s: not found\n", __func__);
-		if (d_flags == 0)
-			rtw_warn_on(1);
+		if (sel_band == BAND_MAX && within_same_band == RTW_CHSEL_BAND_SAME_FIRST) {
+			RTW_INFO("%s: cancel within_sb and choose again", __func__);
+			within_same_band = RTW_CHSEL_BAND_ALL;
+			goto choose;
+		}
 	}
 
 	return _FALSE;
@@ -1620,7 +1642,7 @@ RTW_FUNC_2G_5G_ONLY bool rtw_rfctl_choose_chbw(struct rf_ctl_t *rfctl, u8 sel_ch
 
 void rtw_rfctl_dfs_init(struct rf_ctl_t *rfctl, struct registry_priv *regsty)
 {
-	rfctl->ch_sel_within_same_band = 1;
+	rfctl->ch_sel_within_same_band = RTW_CHSEL_BAND_SAME_FIRST;
 
 #ifdef CONFIG_DFS_MASTER
 	rfctl->dfs_region_domain = regsty->dfs_region_domain;

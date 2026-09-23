@@ -86,12 +86,16 @@ ifeq ($(CONFIG_RTL8852A), y)
 include $(phl_path_d1)/$(IC_NAME)/rtl8852a.mk
 endif
 ########### HAL_RTL8852B #################################
-ifneq ($(filter y,$(CONFIG_RTL8852B) $(CONFIG_RTL8852BP) $(CONFIG_RTL8852BT)),)
+ifneq ($(filter y,$(CONFIG_RTL8852B) $(CONFIG_RTL8852BP) $(CONFIG_RTL8852BPT) $(CONFIG_RTL8852BT)),)
 include $(phl_path_d1)/rtl8852b/rtl8852b.mk
 endif
 ########### HAL_RTL8852C #################################
 ifeq ($(CONFIG_RTL8852C), y)
 include $(phl_path_d1)/rtl8852c/rtl8852c.mk
+endif
+########### HAL_RTL8842A #################################
+ifeq ($(CONFIG_RTL8842A), y)
+include $(phl_path_d1)/rtl8842a/rtl8842a.mk
 endif
 ########### HAL_RTL8852D #################################
 ifeq ($(CONFIG_RTL8852D), y)

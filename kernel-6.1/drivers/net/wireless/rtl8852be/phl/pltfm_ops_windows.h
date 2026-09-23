@@ -14,34 +14,11 @@
  *****************************************************************************/
 #ifndef _HAL_PLTFM_WINDOWS_H_
 #define _HAL_PLTFM_WINDOWS_H_
-#include <ntdef.h>
-#include <ndis.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <ntstrsafe.h>
-#include "Core_Includes.h"  //WDK header files
 
-#include "StatusCode.h"
-#include "EndianFree.h"
-#include "LinkList.h"		//for N6C_pltfmdef - _RT_TIMER_HANDLE
-#include "Ms_pltfmdef.h"	//defined u8 :: XXX_pltfmdef.h must before pltfm_def.h
-#ifdef WIFICX_BASED
-	#include "CX_pltfmdef.h"
-#else
-	#include "N6C_pltfmdef.h"
-#endif
-#include "pltfm_def.h"
-
-#if defined(CONFIG_USB_HCI)
-#include <wdftypes.h> //for WDFUSBPIPE
-#include "core_util.h"
-#include "core_usb.h"
-#include "pltfm_usb.h"
-#endif
+#include "core4phl_inc.h"
 
 #include "phl_config.h"
 #ifdef CONFIG_PHL_WPP
-//#include "hal_g6\phy\rf\halrf_wpp.h"
 #include "hal_g6\mac\halmac_wpp.h"
 #include "hal_g6\phy\bb\halbb_wpp.h"
 #include "phl_wpp.h"
@@ -52,8 +29,6 @@
 #include "phl_acs_def.h"
 #include "hal_g6\mac\mac_exp_def.h"
 #include "phl_def.h"
-//#include "phl_types.h"
-//#include "PlatformDef.h"
 
 #define WriteLE4Byte(_ptr, _val)	WriteEF4Byte(_ptr,_val)
 #define WriteLE2Byte(_ptr, _val)	WriteEF2Byte(_ptr,_val)
@@ -156,6 +131,13 @@ static inline u32 _os_get_cur_time_ms(void)
 {
 	u64 ret;
 	ret = PlatformGetCurrentTime() / 1000;
+	return (u32)ret;
+}
+
+static inline _os_raw_time _os_get_cur_raw_time(void)
+{
+	u64 ret;
+	ret = PlatformGetCurrentTime();
 	return (u32)ret;
 }
 
@@ -717,6 +699,27 @@ static inline u8 _os_deinit_handler_ext(void *drv_priv,
 }
 
 /* File Operation */
+
+/*
+* if _os_file_readable() is supported
+*/
+static inline bool _os_file_readable_supported(void)
+{
+	return false;
+}
+
+/*
+* Test if the specific @param path is a file and readable.
+* If readable, @param sz is set to file size
+* @param path the path of the file to test
+* @param sz the file size if file is readable
+* @return true or false
+*/
+static inline bool _os_file_readable(const char *path, u32 *sz)
+{
+	return false;
+}
+
 static inline u32 _os_read_file(const char *path, u8 *buf, u32 sz)
 {
 	/* OS Dependent API */
@@ -767,6 +770,23 @@ static __inline u32 _os_write32_pcie(void *drv_priv, u32 addr, u32 val)
 	PlatformEFIOWrite4Byte(drv_priv, addr, val);
 	return 0;
 }
+
+static __inline bool _os_get_pci_cfg(void *drv_priv, u32 offset, void *buf, u32 len)
+{
+	if (len == platform_pci_get_conf_space(drv_priv, offset, buf, len))
+		return true;
+	else
+		return false;
+}
+
+static __inline bool _os_set_pci_cfg(void *drv_priv, u32 offset, void *buf, u32 len)
+{
+	if (len == platform_pci_set_conf_space(drv_priv, offset, buf, len))
+		return true;
+	else
+		return false;
+}
+
 #endif/*#ifdef CONFIG_PCI_HCI*/
 
 #ifdef CONFIG_USB_HCI

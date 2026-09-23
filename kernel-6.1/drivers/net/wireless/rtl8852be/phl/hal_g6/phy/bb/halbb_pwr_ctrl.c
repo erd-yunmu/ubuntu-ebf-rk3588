@@ -47,8 +47,8 @@ void halbb_set_ccath_macid(struct bb_info *bb, u16 macid, s8 cca_th, bool cca_th
 
 	//phl_sta_i = bb->phl_sta_info[macid];
 	/* pwr : S(8,1)*/
-	ret_v |= rtw_hal_mac_write_msk_pwr_reg(bb->hal_com, hw_band, reg_ofst, mask_ccath, cca_th);
-	ret_v |= rtw_hal_mac_write_msk_pwr_reg(bb->hal_com, hw_band, reg_ofst, mask_en, cca_th_en);
+	ret_v |= halbb_write_mask_pwr_reg_cmn(bb, hw_band, reg_ofst, mask_ccath, cca_th);
+	ret_v |= halbb_write_mask_pwr_reg_cmn(bb, hw_band, reg_ofst, mask_en, cca_th_en);
 	BB_DBG(bb, DBG_PWR_CTRL, "halbb_set_ccath_macid = %x %x\n", cca_th, cca_th_en);
 	if (ret_v != 0)
 		BB_WARNING("Error Set Pwr Macid for API return fail!!\n");
@@ -157,8 +157,34 @@ void halbb_set_pwr_macid_idx(struct bb_info *bb, u16 macid, s8 pwr, bool pwr_en,
 	u32 mask_en = BIT(24);
 	struct rtw_phl_stainfo_t *phl_sta_i = NULL;
 	enum phl_band_idx hw_band;
-	u32 reg_ofst = REG_PWRMACID_OFST + (macid << 2) + 0xd200;
-	
+	u32 reg_ofst = 0;
+
+	switch (bb->ic_type) {
+
+	#if defined(BB_8852A_2_SUPPORT) || defined(BB_8852B_SUPPORT) ||\
+	    defined(BB_8852C_SUPPORT) || defined(BB_8192XB_SUPPORT) ||\
+	    defined(BB_8851B_SUPPORT) || defined(HALBB_COMPILE_BE_SERIES)
+	case BB_RTL8852A:
+	case BB_RTL8852B:
+	case BB_RTL8852C:
+	case BB_RTL8192XB:
+	case BB_RTL8851B:
+		reg_ofst = REG_PWRMACID_OFST + (macid << 2) + 0xd200;
+		break;
+	case BB_RLE1115:
+	case BB_RTL8922A:
+		reg_ofst = (macid << 2) + 0xed00;
+		break;
+	case BB_RTL8934A:
+	case BB_RTL8952A:
+		reg_ofst = (macid << 2) + 0x1c800;
+		break;
+	#endif
+	default:
+		BB_WARNING("[DTP] IC selected wrong!!\n");
+		return;
+	}
+
 	if (!bb->sta_exist[macid]) {
 		BB_WARNING("Error Set Pwr Macid for STA not exist!!\n");
 		return;
@@ -176,8 +202,8 @@ void halbb_set_pwr_macid_idx(struct bb_info *bb, u16 macid, s8 pwr, bool pwr_en,
 	/* phy idx is one to one mapping to mac hw band idx */
 	hw_band = bb->bb_phy_idx;
 	/* pwr : S(8,1)*/
-	ret_v |= rtw_hal_mac_write_msk_pwr_reg(bb->hal_com, hw_band, reg_ofst, mask_pwr, pwr);
-	ret_v |= rtw_hal_mac_write_msk_pwr_reg(bb->hal_com, hw_band, reg_ofst, mask_en, pwr_en);
+	ret_v |= halbb_write_mask_pwr_reg_cmn(bb, hw_band, reg_ofst, mask_pwr, pwr);
+	ret_v |= halbb_write_mask_pwr_reg_cmn(bb, hw_band, reg_ofst, mask_en, pwr_en);
 	BB_DBG(bb, DBG_PWR_CTRL, "halbb_set_pwr_macid(%d) = %x %x\n", idx, pwr, pwr_en);
 	if (ret_v != 0)
 		BB_WARNING("Error Set Pwr Macid for API return fail!!\n");
@@ -206,7 +232,7 @@ void halbb_pwr_ctrl_en(struct bb_info *bb, bool pwr_ctrl_en)
 
 	#if defined(BB_8852A_2_SUPPORT) || defined(BB_8852B_SUPPORT) ||\
 	    defined(BB_8852C_SUPPORT) || defined(BB_8192XB_SUPPORT) ||\
-	    defined(BB_8851B_SUPPORT) || defined(BB_1115_SUPPORT)
+	    defined(BB_8851B_SUPPORT) || defined(HALBB_COMPILE_BE_SERIES)
 	case BB_RTL8852A:
 	case BB_RTL8852B:
 	case BB_RTL8852C:
@@ -216,6 +242,9 @@ void halbb_pwr_ctrl_en(struct bb_info *bb, bool pwr_ctrl_en)
 		mask_en = BIT(29);
 		break;
 	case BB_RLE1115:
+	case BB_RTL8922A:
+	case BB_RTL8934A:
+	case BB_RTL8952A:
 		reg_ofst = 0x11A58;
 		mask_en = BIT(13);
 		break;
@@ -230,13 +259,13 @@ void halbb_pwr_ctrl_en(struct bb_info *bb, bool pwr_ctrl_en)
 	}
 
 	if(pwr_ctrl_en) {
-		ret_v |= rtw_hal_mac_write_msk_pwr_reg(bb->hal_com, 0, reg_ofst, mask_en, 0x1);
+		ret_v |= halbb_write_mask_pwr_reg_cmn(bb, 0, reg_ofst, mask_en, 0x1);
 		if (bb->hal_com->dbcc_en) 
-			ret_v |= rtw_hal_mac_write_msk_pwr_reg(bb->hal_com, 1, reg_ofst, mask_en, 0x1);
+			ret_v |= halbb_write_mask_pwr_reg_cmn(bb, 1, reg_ofst, mask_en, 0x1);
 	} else {
-		ret_v |= rtw_hal_mac_write_msk_pwr_reg(bb->hal_com, 0, reg_ofst, mask_en, 0x0);
+		ret_v |= halbb_write_mask_pwr_reg_cmn(bb, 0, reg_ofst, mask_en, 0x0);
 		if (bb->hal_com->dbcc_en) 
-			ret_v |= rtw_hal_mac_write_msk_pwr_reg(bb->hal_com, 1, reg_ofst, mask_en, 0x0);
+			ret_v |= halbb_write_mask_pwr_reg_cmn(bb, 1, reg_ofst, mask_en, 0x0);
 	}
 	
 	if (ret_v != 0)
@@ -372,42 +401,55 @@ void halbb_set_pwr_ctrl(struct bb_info *bb, u16 macid, u8 pwr_lv)
 	/* only use pwr_tbl_0 */
 }
 
-void halbb_pwr_ctrl_per_sta(struct bb_info *bb, u16 macid)
+void halbb_pwr_ctrl_per_sta(struct bb_info *bb_0, u16 macid)
 {
+	struct bb_info *bb = bb_0;
 	struct rtw_phl_stainfo_t *sta;
-	struct bb_dtp_info *dtp = &bb->bb_pwr_ctrl_i.dtp_i[macid];
+	struct bb_dtp_info *dtp = NULL;
 	u8 lst_pwr_lv = 0;
 	u8 rssi = 0;
 
-	sta = bb->phl_sta_info[macid];
-	if (!sta) {
-		//BB_DBG(bb, DBG_PWR_CTRL, "NULL PHL STA info\n");
-		return;
-	}
-	if (is_sta_active(sta)) {
-		rssi = (sta->hal_sta->rssi_stat.rssi) >> 1;
-		lst_pwr_lv = dtp->last_pwr_lvl;
-		dtp->dyn_tx_pwr_lvl = halbb_pwr_lvl_check(bb, rssi, lst_pwr_lv);
-		BB_DBG(bb, DBG_PWR_CTRL,
-			  "STA=%d , RSSI: %d , GetPwrLv: %d\n", macid,
-			  rssi, dtp->dyn_tx_pwr_lvl);
-
-		if (dtp->dyn_tx_pwr_lvl == TX_HP_LV_UNCHANGE ||
-		    dtp->dyn_tx_pwr_lvl == lst_pwr_lv) {
-			dtp->dyn_tx_pwr_lvl = lst_pwr_lv;
-			BB_DBG(bb, DBG_PWR_CTRL,
-				  "DTP_lv not change: ((%d))\n",
-				  dtp->dyn_tx_pwr_lvl);
+	if (bb_0->sta_exist[macid]) {
+		sta = bb_0->phl_sta_info[macid];
+	} else {
+		#ifdef HALBB_DBCC_SUPPORT
+		HALBB_GET_PHY_PTR(bb_0, bb, HW_PHY_1);
+		if (bb->sta_exist[macid]) {
+			sta = bb->phl_sta_info[macid];
+		} else
+		#endif
+		{
 			return;
 		}
-
-		BB_DBG(bb, DBG_PWR_CTRL,
-			  "DTP_lv update: ((%d)) -> ((%d))\n", lst_pwr_lv,
-			  dtp->dyn_tx_pwr_lvl);
-
-		dtp->last_pwr_lvl = dtp->dyn_tx_pwr_lvl;
-		halbb_set_pwr_ctrl(bb, macid, dtp->dyn_tx_pwr_lvl);
 	}
+
+	if (!is_sta_active(sta))
+		return;
+
+	dtp = &bb->bb_pwr_ctrl_i.dtp_i[macid];
+
+	rssi = (sta->hal_sta->rssi_stat.rssi) >> 1;
+	lst_pwr_lv = dtp->last_pwr_lvl;
+	dtp->dyn_tx_pwr_lvl = halbb_pwr_lvl_check(bb, rssi, lst_pwr_lv);
+	BB_DBG(bb, DBG_PWR_CTRL,
+		  "STA=%d , RSSI: %d , GetPwrLv: %d\n", macid,
+		  rssi, dtp->dyn_tx_pwr_lvl);
+
+	if (dtp->dyn_tx_pwr_lvl == TX_HP_LV_UNCHANGE ||
+	    dtp->dyn_tx_pwr_lvl == lst_pwr_lv) {
+		dtp->dyn_tx_pwr_lvl = lst_pwr_lv;
+		BB_DBG(bb, DBG_PWR_CTRL,
+			  "DTP_lv not change: ((%d))\n",
+			  dtp->dyn_tx_pwr_lvl);
+		return;
+	}
+
+	BB_DBG(bb, DBG_PWR_CTRL,
+		  "DTP_lv update: ((%d)) -> ((%d))\n", lst_pwr_lv,
+		  dtp->dyn_tx_pwr_lvl);
+
+	dtp->last_pwr_lvl = dtp->dyn_tx_pwr_lvl;
+	halbb_set_pwr_ctrl(bb, macid, dtp->dyn_tx_pwr_lvl);
 }
 
 void halbb_pwr_ctrl_ability_set(struct bb_info *bb, bool enable)
@@ -423,6 +465,8 @@ void halbb_pwr_ctrl(struct bb_info *bb)
 	struct bb_pwr_ctrl_info *pwr_ctrl = &bb->bb_pwr_ctrl_i;
 	u16 i;
 	u32 id = bb->phl_com->id.id & 0xFFFF;
+
+	halbb_show_cr_cnt(bb, BB_WD_PWR_CTRL);
 
 #ifdef HALBB_FW_OFLD_SUPPORT
 	halbb_fwofld_bitmap_en(bb, true, FW_OFLD_BB_API);
@@ -546,8 +590,7 @@ void halbb_pwr_ctrl_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 		return;
 	}
 	for (i = 0; i < 8; i++) {
-		if (input[i + 1])
-			HALBB_SCAN(input[i + 1], DCMD_DECIMAL, &val[i]);
+		HALBB_SCAN(input[i + 1], DCMD_DECIMAL, &val[i]);
 	}
 	switch (val[0]) {
 	case 0:
@@ -667,10 +710,26 @@ void halbb_macid_ctrl_init(struct bb_info *bb)
 		return;
 	}
 
-	for (i = 0; i < PHL_MAX_STA_NUM; i++) {
+	for (i = 0; i <= 10; i++) {
 		reg_ofst = MACREG_PWRMACID_CR + (i << 2);
-		ret_v = rtw_hal_mac_set_pwr_reg( bb->hal_com, (u8)bb->bb_phy_idx, reg_ofst, 0);
+		ret_v = halbb_set_pwr_reg_cmn(bb, (u8)bb->bb_phy_idx, reg_ofst, 0);
 	}
+}
+
+void halbb_per_macid_ctrl_init(struct bb_info *bb, u16 macid)
+{
+	u16 i = 0;
+	u32 reg_ofst = 0;
+
+	BB_DBG(bb, DBG_PWR_CTRL, "[%s] phy_idx=%d\n", __func__, bb->bb_phy_idx);
+
+	if (bb->hal_com == NULL || bb->bb_80211spec == BB_BE_IC) {
+		BB_WARNING("[%s]\n", __func__);
+		return;
+	}
+
+	reg_ofst = MACREG_PWRMACID_CR + (u32)(macid << 2);
+	halbb_set_pwr_reg_cmn(bb, (u8)bb->bb_phy_idx, reg_ofst, 0);
 }
 
 void halbb_txdiff_tbl_init(struct bb_info* bb)
@@ -746,23 +805,20 @@ void halbb_txdiff_tbl_init(struct bb_info* bb)
 		break;
 	#endif
 	default:
-		break;
-	}
-
-	if (!mcs_size_tab) {
-		BB_WARNING("[%s]\n", "IC_TYPE Selected Wrong");
+		if (bb->bb_80211spec == BB_AX_IC)
+			BB_WARNING("[%s]\n", "IC_TYPE Selected Wrong");
 		return;
 	}
 
 	loop_tmp = (u16)(mcs_size_tab * 4);
 
 	for (i = 0; i < loop_tmp; i++) {
-		rtw_hal_mac_set_pwr_reg(bb->hal_com, (u8)bb->bb_phy_idx, cr_start_addr, txdiff_tbl[i]);
+		halbb_set_pwr_reg_cmn(bb, (u8)bb->bb_phy_idx, cr_start_addr, txdiff_tbl[i]);
 		cr_start_addr += 0x4;
 	}
 	
 	for (i = 0; i < 12 * 4; i++) {
-		rtw_hal_mac_set_pwr_reg(bb->hal_com, (u8)bb->bb_phy_idx, cr_start_addr_cck_lgcy, txdiff_tbl_cck_lgcy[i]);
+		halbb_set_pwr_reg_cmn(bb, (u8)bb->bb_phy_idx, cr_start_addr_cck_lgcy, txdiff_tbl_cck_lgcy[i]);
 		cr_start_addr_cck_lgcy += 0x4;
 	}
 
@@ -811,7 +867,7 @@ void halbb_tpu_mac_cr_init(struct bb_info *bb, enum phl_phy_idx phy_idx)
 
 	for (i = 0; i < cr_size; i+=2) {
 		BB_DBG(bb, DBG_INIT, "0x%x = 0x%x\n", tpu_array[i], tpu_array[i+1]);
-		rtw_hal_mac_set_pwr_reg(bb->hal_com, band, tpu_array[i], tpu_array[i+1]);
+		halbb_set_pwr_reg_cmn(bb, band, tpu_array[i], tpu_array[i+1]);
 	}
 
 	halbb_set_pwr_ul_tb_ofst(bb, 0, phy_idx);
@@ -835,12 +891,12 @@ void halbb_tssi_ctrl_mac_cr_init(struct bb_info *bb, enum phl_phy_idx phy_idx)
 
 	base = 0xD908;
 	for (offset = 0; offset <= 4 * 21; offset += 4) {
-		rtw_hal_mac_set_pwr_reg(hal_com, (u8)band, base + offset, 0x0);
+		halbb_set_pwr_reg_cmn(bb, (u8)band, base + offset, 0x0);
 	}
 
 	for (i = 0; i < cr_size; i += 2) {
 		BB_DBG(bb, DBG_INIT, "0x%x = 0x%x\n", tssi_ctrl_cr_array[i], tssi_ctrl_cr_array[i+1]);
-		rtw_hal_mac_set_pwr_reg(hal_com, (u8)band, tssi_ctrl_cr_array[i], tssi_ctrl_cr_array[i+1]);
+		halbb_set_pwr_reg_cmn(bb, (u8)band, tssi_ctrl_cr_array[i], tssi_ctrl_cr_array[i+1]);
 	}
 
 	halbb_tssi_ctrl_set_dbw_table(bb);
@@ -881,96 +937,96 @@ void halbb_tssi_ctrl_set_bandedge_cfg(struct bb_info *bb,
 	if (bandedge_cfg == TSSI_BANDEDGE_FLAT) {
 
 		/*r_bandedge_zero_cfg_sbw20*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD91C, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD91C, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
 
 		/*r_bandedge_zero_cfg_sbw40_0*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD920, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][1]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD920, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][1]);
 
 		/*r_bandedge_zero_cfg_sbw40_1*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD920, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][2]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD920, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][2]);
 
 		/*r_bandedge_zero_cfg_sbw80_0*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD920, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][3]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD920, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][3]);
 
 		/*r_bandedge_zero_cfg_sbw80_1*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD920, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][4]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD920, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][4]);
 
 		/*r_bandedge_zero_cfg_sbw80_2*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD924, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][5]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD924, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][5]);
 
 		/*r_bandedge_zero_cfg_sbw80_3*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD924, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][6]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD924, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][6]);
 
 		/*r_bandedge_zero_cfg_sbw160_0*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD914, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][7]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD914, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][7]);
 
 		/*r_bandedge_zero_cfg_sbw160_1*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD918, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][8]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD918, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][8]);
 
 		/*r_bandedge_zero_cfg_sbw160_2*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD918, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][9]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD918, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][9]);
 
 		/*r_bandedge_zero_cfg_sbw160_3*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD918, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][10]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD918, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][10]);
 
 		/*r_bandedge_zero_cfg_sbw160_4*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD918, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][11]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD918, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][11]);
 
 		/*r_bandedge_zero_cfg_sbw160_5*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD91C, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][12]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD91C, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][12]);
 
 		/*r_bandedge_zero_cfg_sbw160_6*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD91C, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][13]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD91C, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][13]);
 
 		/*r_bandedge_zero_cfg_sbw160_7*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD91C, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][14]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD91C, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][14]);
 
 	} else if ((bandedge_cfg == TSSI_BANDEDGE_LOW) || (bandedge_cfg== TSSI_BANDEDGE_MID) || (bandedge_cfg == TSSI_BANDEDGE_HIGH)) {
 
 		/*r_bandedge_nonzero_cfg_sbw20*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD910, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD910, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
 
 		/*r_bandedge_nonzero_cfg_sbw40_0*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD910, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][1]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD910, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][1]);
 
 		/*r_bandedge_nonzero_cfg_sbw40_1*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD910, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][2]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD910, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][2]);
 
 		/*r_bandedge_nonzero_cfg_sbw80_0*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD910, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][3]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD910, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][3]);
 
 		/*r_bandedge_nonzero_cfg_sbw80_1*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD914, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][4]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD914, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][4]);
 
 		/*r_bandedge_nonzero_cfg_sbw80_2*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD914, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][5]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD914, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][5]);
 
 		/*r_bandedge_nonzero_cfg_sbw80_3*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD914, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][6]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD914, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][6]);
 
 		/*r_bandedge_nonzero_cfg_sbw160_0*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD908, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][7]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD908, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][7]);
 
 		/*r_bandedge_nonzero_cfg_sbw160_1*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD908, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][8]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD908, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][8]);
 
 		/*r_bandedge_nonzero_cfg_sbw160_2*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD908, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][9]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD908, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][9]);
 
 		/*r_bandedge_nonzero_cfg_sbw160_3*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD908, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][10]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD908, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][10]);
 
 		/*r_bandedge_nonzero_cfg_sbw160_4*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD90C, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][11]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD90C, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][11]);
 
 		/*r_bandedge_nonzero_cfg_sbw160_5*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD90C, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][12]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD90C, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][12]);
 
 		/*r_bandedge_nonzero_cfg_sbw160_6*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD90C, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][13]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD90C, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][13]);
 
 		/*r_bandedge_nonzero_cfg_sbw160_7*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD90C, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][14]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD90C, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][14]);
 
 	} else {
 		BB_WARNING("[%s]\n", __func__);
@@ -978,7 +1034,7 @@ void halbb_tssi_ctrl_set_bandedge_cfg(struct bb_info *bb,
 	}
 
 	/*r_bandedge_cfg*/
-	rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD94C, BIT30 | BIT31, (u32)bandedge_cfg);
+	halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD94C, BIT30 | BIT31, (u32)bandedge_cfg);
 
 	halbb_tssi_ctrl_set_fast_mode_cfg(bb, band, bandedge_cfg);
 
@@ -994,29 +1050,29 @@ void halbb_tssi_ctrl_set_fast_mode_cfg(struct bb_info *bb,
 
 	if (bandedge_cfg == TSSI_BANDEDGE_FLAT) {
 		/*r_ch_comb_ofst_bandedge_zero_bw20*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD934, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD934, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
 
 		/*r_ch_comb_ofst_bandedge_zero_bw40*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD934, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD934, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
 
 		/*r_ch_comb_ofst_bandedge_zero_bw80*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD938, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD938, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
 
 		/*r_ch_comb_ofst_bandedge_zero_bw160*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD934, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD934, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
 
 	} else if ((bandedge_cfg == TSSI_BANDEDGE_LOW) || (bandedge_cfg== TSSI_BANDEDGE_MID) || (bandedge_cfg == TSSI_BANDEDGE_HIGH)) {
 		/*r_ch_comb_ofst_bandedge_nonzero_bw20*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD930, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD930, 0xff0000, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
 
 		/*r_ch_comb_ofst_bandedge_nonzero_bw40*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD930, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD930, 0xff000000, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
 
 		/*r_ch_comb_ofst_bandedge_nonzero_bw80*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD934, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD934, 0xff, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
 
 		/*r_ch_comb_ofst_bandedge_nonzero_bw160*/
-		rtw_hal_mac_write_msk_pwr_reg(hal_com, (u8)band, 0xD930, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
+		halbb_write_mask_pwr_reg_cmn(bb, (u8)band, 0xD930, 0xff00, tssi_i->tssi_dbw_table[bandedge_cfg][0]);
 	}
 }
 
@@ -1388,7 +1444,7 @@ void halbb_pwr_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 		HALBB_SCAN(input[5], DCMD_DECIMAL, &val[2]);
 		if (_os_strcmp(input[2], "lgcy") == 0) {
 			rate_idx = (u8)val[0];
-			if (rate_idx > TPU_SIZE_PWR_TAB_lGCY)
+			if (rate_idx >= TPU_SIZE_PWR_TAB_lGCY)
 				return;
 
 			*(tpu->rtw_tpu_pwr_by_rate_i.pwr_by_rate_lgcy + rate_idx) = (s8)val[1];
@@ -1396,10 +1452,10 @@ void halbb_pwr_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 				 "[TX Pw] lgcy[%d] = (%d.%d)dBm\n", rate_idx, val[1]>>1, (val[1] & 1)*5);
 		} else if (_os_strcmp(input[2], "mcs") == 0) {
 			path = (u8)val[0];
-			if (path > HAL_MAX_PATH)
+			if (path >= HAL_MAX_PATH)
 				return;
 			rate_idx = (u8)val[1];
-			if (rate_idx > TPU_SIZE_PWR_TAB)
+			if (rate_idx >= TPU_SIZE_PWR_TAB)
 				return;
 
 			*(*(tpu->rtw_tpu_pwr_by_rate_i.pwr_by_rate + path) + rate_idx) = (s8)val[2];
@@ -1435,14 +1491,14 @@ void halbb_pwr_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 			HALBB_SCAN(input[3], DCMD_DECIMAL, &val[0]);
 
 			size_tmp = sizeof(struct rtw_tpu_pwr_imt_info) / sizeof(s8);
-			tmp_s8 = &lmt->pwr_lmt_cck_20m[0][0];
+			tmp_s8 = (u8 *)lmt;
 
 			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 				 "pwr_lmt_size = %d\n", size_tmp);
 
 			for (i = 0; i < size_tmp; i++) {
-				*tmp_s8 = (u8)val[0];
-				tmp_s8++;
+				*(tmp_s8 + i)= (u8)val[0];
+				//tmp_s8++;
 			}
 			rtw_hal_mac_write_pwr_limit_reg(bb->hal_com, (enum phl_band_idx)bb->bb_phy_idx);
 			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,

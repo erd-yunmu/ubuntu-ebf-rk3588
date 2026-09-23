@@ -319,7 +319,6 @@ static inline u32 pm_cam_fwd_cfg(struct mac_ax_adapter *adapter,
 
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		PLTFM_MSG_ERR("[ERR]%s PM_CAM API is removed in 52C & 92XB & 51E & 52D.\n"
 			      , __func__);

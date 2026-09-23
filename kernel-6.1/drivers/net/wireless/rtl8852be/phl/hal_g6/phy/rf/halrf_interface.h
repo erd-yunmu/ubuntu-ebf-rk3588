@@ -117,11 +117,16 @@
 #define halrf_bb_ctrl_cck_en(rf, cck_en, phy_idx) rtw_hal_bb_ctrl_cck_en((rf)->hal_com, cck_en, phy_idx)
 #define halrf_bb_query_cck_en(rf, phy_idx) rtw_hal_bb_query_cck_en((rf)->hal_com, phy_idx)
 #define halrf_bb_adc_cfg(rf, bw, path, phy_idx) rtw_hal_bb_adc_cfg((rf)->hal_com, bw, path, phy_idx)
+#define halrf_bb_bb_reset_cmn(rf, en, phy_idx) rtw_hal_bb_bb_reset_cmn((rf)->hal_com, en, phy_idx)
 
 #define halrf_mutex_init(rf, mutex) hal_mutex_init((rf)->hal_com, mutex)
 #define halrf_mutex_deinit(rf, mutex) hal_mutex_deinit((rf)->hal_com, mutex)
 #define halrf_mutex_lock(rf, mutex) hal_mutex_lock((rf)->hal_com, mutex)
 #define halrf_mutex_unlock(rf, mutex) hal_mutex_unlock((rf)->hal_com, mutex)
+
+/*Share Xtal*/
+#define harlf_mac_set_xsi(rf, offset, val) rtw_hal_mac_set_xsi((rf)->hal_com, offset, val)
+#define harlf_mac_get_xsi(rf, offset, val) rtw_hal_mac_get_xsi((rf)->hal_com, offset, val)
 
 /*SER control*/
 #define halrf_mac_ctrl_ser(rf, rsn, en) rtw_hal_mac_ctrl_ser((rf)->hal_com, rsn, en)
@@ -130,6 +135,12 @@
 /*BB DFS*/
 #define halrf_is_radar_detect_enabled(rf, phy_idx) rtw_hal_is_radar_detect_enabled((rf)->hal_com, phy_idx)
 #define halrf_bb_dfs_rpt_cfg(rf, phy_idx, dfs_en) rtw_hal_bb_dfs_rpt_cfg((rf)->hal_com, phy_idx, dfs_en)
+#endif
+
+#ifdef CONFIG_PHL_DIAGNOSE
+#define halrf_dz_event(rf, type, level, version, buf, len) rtw_hal_rf_diagnostic_event((rf)->hal_com, type, level, version, buf, len)
+#else
+#define halrf_dz_event(rf, type, level, version, buf, len)
 #endif
 
 /*@--------------------------[Enum]------------------------------------------*/

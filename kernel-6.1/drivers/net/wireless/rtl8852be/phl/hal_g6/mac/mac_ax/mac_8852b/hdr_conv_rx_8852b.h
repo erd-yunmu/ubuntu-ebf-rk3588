@@ -19,7 +19,7 @@
 #include "../../type.h"
 #include "../../mac_ax.h"
 #include "../../mac_def.h"
-
+#if MAC_FEAT_HDR_CONV
 /**
  * @brief enable/disable RX MAC Header Conversion
  *
@@ -40,4 +40,5 @@ u32 mac_hdr_conv_rx_en_8852b(struct mac_ax_adapter *adapter,
  */
 u32 mac_hdr_conv_rx_en_driv_info_hdr_8852b(struct mac_ax_adapter *adapter,
 					   struct mac_ax_rx_driv_info_hdr_cfg *cfg);
+#endif
 #endif

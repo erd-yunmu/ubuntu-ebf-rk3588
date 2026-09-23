@@ -74,11 +74,10 @@
 	#define HALBB_DIG_TDMA_SUPPORT
 	#endif
 	#endif
-	#ifndef DRV_BB_DIG_MCC_DISABLE
-	#define HALBB_DIG_MCC_SUPPORT
-	#define HALBB_DIG_MCC_SUPPORT_IC (BB_RTL8852A | BB_RTL8852B | BB_RTL8851B)
-	#endif
 	#define HALBB_DIG_DAMPING_CHK
+#endif
+#ifndef DRV_BB_MCC_DISABLE
+	#define HALBB_MCC_SUPPORT
 #endif
 #ifndef DRV_BB_LA_MODE_DISABLE
 	#define HALBB_LA_MODE_SUPPORT
@@ -121,6 +120,10 @@
 #endif
 #ifndef DRV_BB_AUTO_DBG_DISABLE
 	#define HALBB_AUTO_DBG_SUPPORT
+
+	#ifndef DRV_BB_SELF_DIAG_DISABLE
+	#define HALBB_SELF_DIAG_SUPPORT
+	#endif
 #endif
 #ifndef DRV_BB_ANT_DIV_DISABLE
 	#define HALBB_ANT_DIV_SUPPORT
@@ -141,9 +144,13 @@
 	#if (defined(CONFIG_PHL_IO_OFLD))
 	#define HALBB_FW_NORMAL_OFLD_SUPPORT
 	#endif
-	#if (defined(CONFIG_FW_DBCC_OFLD_SUPPORT))
+	#if (defined(CONFIG_FW_DBCC_OFLD_SUPPORT) || defined(HALBB_COMPILE_IC_DBCC_MLO))
 	#define HALBB_FW_DBCC_OFLD_SUPPORT
 	#endif
+#endif
+
+#ifdef CONFIG_PHL_BCNOFLD
+	#define HALBB_BCNOFLD_SUPPORT
 #endif
 
 /*[DBCC]*/
@@ -196,4 +203,7 @@
 	#define HALBB_CONFIG_HT2VHT_SUPPORT
 #endif
 
+#ifndef DRV_BB_DV_PXP_DISABLE
+	#define HALBB_DV_PXP_DBG_SUPPORT
+#endif
 #endif

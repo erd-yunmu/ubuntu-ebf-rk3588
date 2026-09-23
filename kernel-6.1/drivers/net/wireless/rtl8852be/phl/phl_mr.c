@@ -384,25 +384,12 @@ _phl_wr_offch_bcn_hdl(struct phl_info_t *phl_info,
 		if (rlink->hw_band != hw_band)
 			continue;
 
-		if (((TEST_STATUS_FLAG(rlink->status, RLINK_STATUS_BCN_STOP)) && off_ch) ||
-		   ((!TEST_STATUS_FLAG(rlink->status, RLINK_STATUS_BCN_STOP)) && !off_ch))
-			continue;
-
-		hsts = rtw_hal_beacon_stop(phl_info->hal, rlink, off_ch);
-		if (hsts == RTW_HAL_STATUS_SUCCESS) {
-			if (off_ch)
-				SET_STATUS_FLAG(rlink->status, RLINK_STATUS_BCN_STOP);
-			else
-				CLEAR_STATUS_FLAG(rlink->status, RLINK_STATUS_BCN_STOP);
-			PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_,
-				"%s: wr(%d) rlink(%d)- hw_band(%d) off_ch(%d)\n",
-				__func__, wr->id, rlink->id, hw_band, off_ch);
-		}
-		else {
+		hsts = rtw_hal_beacon_stop(phl_info->hal, rlink,
+			RLINK_BCN_STOP_RSON_DEFAULT, off_ch);
+		if (hsts != RTW_HAL_STATUS_SUCCESS) {
 			PHL_ERR("%s %s beacon failed\n", __func__,
 				(off_ch) ? "stop" : "resume");
 			psts = RTW_PHL_STATUS_FAILURE;
-			break;
 		}
 	}
 	return psts;
@@ -414,8 +401,9 @@ _phl_wr_offch_ps_hdl(struct phl_info_t *phl_info,
 		 struct rtw_wifi_role_t *wr,
 		 bool off_ch,
 		 void *obj_priv,
-		 bool (*issue_null_data)(void *priv, u8 ridx, u8 lidx, bool ps)
-)
+		 u8 module_id,
+		 bool (*issue_null_data)(void *priv, u8 ridx, u8 lidx, bool ps,
+		                         u8 module_id))
 {
 	enum rtw_phl_status psts = RTW_PHL_STATUS_SUCCESS;
 	struct rtw_wifi_role_link_t *rlink = NULL;
@@ -430,8 +418,8 @@ _phl_wr_offch_ps_hdl(struct phl_info_t *phl_info,
 		if (((TEST_STATUS_FLAG(rlink->status, RLINK_STATUS_PS_ANN)) && off_ch) ||
 		    ((!TEST_STATUS_FLAG(rlink->status, RLINK_STATUS_PS_ANN)) && !off_ch))
 			continue;
-
-		if (issue_null_data(obj_priv, wr->id, idx, off_ch) == _SUCCESS) {
+		if (issue_null_data(obj_priv, wr->id, idx, off_ch, module_id)
+		                    == _SUCCESS) {
 			if (off_ch) {
 				SET_STATUS_FLAG(rlink->status, RLINK_STATUS_PS_ANN);
 				#ifdef RTW_WKARD_ISSUE_NULL_SLEEP_PROTECTION
@@ -461,8 +449,9 @@ _phl_mr_offch_hdl(struct phl_info_t *phl_info,
 		 u8 hw_band,
 		 bool off_ch,
 		 void *obj_priv,
-		 bool (*issue_null_data)(void *priv, u8 ridx, u8 lidx, bool ps)
-)
+		 u8 module_id,
+		 bool (*issue_null_data)(void *priv, u8 ridx, u8 lidx, bool ps,
+		                         u8 module_id))
 {
 	enum rtw_phl_status psts = RTW_PHL_STATUS_FAILURE;
 	struct rtw_phl_com_t *phl_com = phl_info->phl_com;
@@ -479,7 +468,7 @@ _phl_mr_offch_hdl(struct phl_info_t *phl_info,
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 
 	if (issue_null_data == NULL) {
@@ -540,8 +529,13 @@ _phl_mr_offch_hdl(struct phl_info_t *phl_info,
 		/* issue null-data on current channel */
 		if ((mctx.role_map_ps) && (mctx.role_map_ps & BIT(ridx))) {
 			wr = &phl_com->wifi_roles[ridx];
+#ifdef RTW_WKARD_TXPAUSE_BF_ISSUE_NULL
+			if (off_ch && rtw_phl_cmd_scan_inprogress(phl_info, hw_band))
+				rtw_hal_scan_pause_tx_fifo(phl_info->hal, hw_band, true);
+#endif
 			psts = _phl_wr_offch_ps_hdl(phl_info, hw_band, wr, off_ch,
-						      obj_priv, issue_null_data);
+						      obj_priv, module_id,
+						      issue_null_data);
 			if (psts == RTW_PHL_STATUS_FAILURE) {
 				PHL_ERR("%s ridx:%d _phl_wr_offch_ps_hdl failed\n",
 					__func__, ridx);
@@ -552,7 +546,7 @@ _phl_mr_offch_hdl(struct phl_info_t *phl_info,
 
 _exit:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 
 	return psts;
@@ -561,11 +555,13 @@ _exit:
 #else /*!CONFIG_MR_SUPPORT*/
 static enum rtw_phl_status
 _phl_wr_offch_hdl(struct phl_info_t *phl_info,
-			   u8 hw_band,
-			   struct rtw_wifi_role_t *wrole,
-			   bool off_ch,
-			   void *obj_priv,
-			   bool (*issue_null_data)(void *priv, u8 ridx, u8 lidx, bool ps))
+                  u8 hw_band,
+                  struct rtw_wifi_role_t *wrole,
+                  bool off_ch,
+                  void *obj_priv,
+                  u8 module_id,
+                  bool (*issue_null_data)(void *priv, u8 ridx,
+                                          u8 lidx, bool ps, u8 module_id))
 {
 	enum rtw_phl_status psts = RTW_PHL_STATUS_FAILURE;
 	struct rtw_phl_com_t *phl_com = phl_info->phl_com;
@@ -579,7 +575,7 @@ _phl_wr_offch_hdl(struct phl_info_t *phl_info,
 #ifdef DBG_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_MONITOR_TIME */
 
 	ctx_num = phl_mr_get_chanctx_num(phl_info, band_ctrl);
@@ -612,11 +608,16 @@ _phl_wr_offch_hdl(struct phl_info_t *phl_info,
 			_os_warn_on(1);
 			goto _exit;
 		}
+#ifdef RTW_WKARD_TXPAUSE_BF_ISSUE_NULL
+		if (off_ch && rtw_phl_cmd_scan_inprogress(phl_info, hw_band))
+			rtw_hal_scan_pause_tx_fifo(phl_info->hal, hw_band, true);
+#endif
 		psts = _phl_wr_offch_ps_hdl(phl_info,
 					      hw_band,
 					      wrole,
 					      off_ch,
 					      obj_priv,
+					      module_id,
 					      issue_null_data);
 
 	} else if (rtw_phl_role_is_ap_category(wrole)) {
@@ -628,7 +629,7 @@ _phl_wr_offch_hdl(struct phl_info_t *phl_info,
 
 _exit:
 #ifdef DBG_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_MONITOR_TIME */
 
 	return psts;
@@ -641,18 +642,19 @@ phl_mr_offch_hdl(struct phl_info_t *phl_info,
                  struct rtw_wifi_role_link_t *rlink,
                  bool off_ch,
                  void *obj_priv,
-                 bool (*issue_null_data)(void *priv, u8 ridx, u8 lidx, bool ps)
+                 u8 module_id,
+                 bool (*issue_null_data)(void *priv, u8 ridx, u8 lidx,
+                                         bool ps, u8 module_id)
 )
 {
 	enum rtw_phl_status psts = RTW_PHL_STATUS_FAILURE;
 
 #ifdef CONFIG_MR_SUPPORT
 	psts = _phl_mr_offch_hdl(phl_info, rlink->hw_band, off_ch, obj_priv,
-				  issue_null_data);
+	                          module_id, issue_null_data);
 #else /*!CONFIG_MR_SUPPORT*/
 	psts = _phl_wr_offch_hdl(phl_info, rlink->hw_band, wrole,
-				  off_ch, obj_priv,
-				  issue_null_data);
+				  off_ch, obj_priv, module_id, issue_null_data);
 #endif
 	return psts;
 }
@@ -748,13 +750,13 @@ phl_mr_dbcc_proto_hdl(struct phl_info_t *phl_info,
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	dbcc_proto.dbcc_en = dbcc_en;
 	dbcc_proto.wr = wrole;
 	ret = mr_ctl->mr_ops.dbcc_protocol_hdl(phl_com->drv_priv, band_idx, &dbcc_proto);
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return (ret == _SUCCESS) ? RTW_PHL_STATUS_SUCCESS
 				 : RTW_PHL_STATUS_FAILURE;
@@ -793,7 +795,7 @@ static void _phl_mr_pause_trx(struct phl_info_t *phl_info, enum phl_band_idx ban
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	ctl.id = PHL_MDL_MRC;
 
@@ -815,7 +817,7 @@ static void _phl_mr_pause_trx(struct phl_info_t *phl_info, enum phl_band_idx ban
 
 err:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(phl_info->phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return;
 }
@@ -826,7 +828,7 @@ static void _phl_mr_resume_trx(struct phl_info_t *phl_info, enum phl_band_idx ba
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 
 	/* Enable all of txch dma */
@@ -843,7 +845,7 @@ static void _phl_mr_resume_trx(struct phl_info_t *phl_info, enum phl_band_idx ba
 
 err:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(phl_info->phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return;
 }
@@ -856,7 +858,7 @@ _phl_mrc_module_dbcc_en_hdl(struct phl_info_t *phl_info,
 	struct rtw_phl_com_t *phl_com = phl_info->phl_com;
 
 	struct rtw_wifi_role_link_t *rlink = NULL;
-	bool (*core_issue_null_data)(void *, u8, u8, bool) = NULL;
+	bool (*core_issue_null_data)(void *, u8, u8, bool, u8) = NULL;
 	struct rtw_phl_evt_ops *ops = &phl_com->evt_ops;
 	struct rtw_chan_def op_chdef = {0};
 	u8 hal_ch = 0;
@@ -864,7 +866,7 @@ _phl_mrc_module_dbcc_en_hdl(struct phl_info_t *phl_info,
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 
 	PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "%s: Rid(%d)\n",
@@ -898,6 +900,7 @@ _phl_mrc_module_dbcc_en_hdl(struct phl_info_t *phl_info,
 			  HW_BAND_0,
 			  true,
 			  phl_com->drv_priv,
+			  PHL_MDL_MRC,
 			  core_issue_null_data);
 
 	/* 2.pause Tx- SW,HW*/
@@ -923,6 +926,7 @@ _phl_mrc_module_dbcc_en_hdl(struct phl_info_t *phl_info,
 			  HW_BAND_0,
 			  false,
 			  phl_com->drv_priv,
+			  PHL_MDL_MRC,
 			  core_issue_null_data);
 
 	phl_mr_trig_dbcc_enable(phl_info, false);
@@ -930,7 +934,7 @@ _phl_mrc_module_dbcc_en_hdl(struct phl_info_t *phl_info,
 	PHL_INFO("%s wr(%d) success....\n", __func__, role->id);
 _exit:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(phl_info->phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return ret;
 }
@@ -1105,15 +1109,21 @@ _phl_mrc_module_dbcc_dis_pre_hdl(struct phl_info_t *phl_info,
 	u8 role_num = 0, ridx;
 	struct rtw_wifi_role_t *wr = NULL;
 	struct rtw_wifi_role_link_t *rlink = NULL;
-	bool (*core_issue_null_data)(void *priv, u8 ridx, u8 lidx, bool ps) = NULL;
+	bool (*core_issue_null_data)(void *, u8, u8, bool, u8) = NULL;
 	int chctx_num = 0;
 	enum phl_band_idx band_idx = HW_BAND_0;
 	u8 hal_ch = 0;
 	int b0_chctx_num = 0;
 	int b1_chctx_num = 0;
 	bool rd_enabled = false;
+#ifdef DBG_DBCC_MONITOR_TIME
+	u32 start_t = 0;
+
+	PHL_FUN_MON_START(&start_t);
+#endif /* DBG_DBCC_MONITOR_TIME */
 
 	rlink = &role->rlink[RTW_RLINK_PRIMARY];
+
 	if (ops->issue_null_data)
 		core_issue_null_data = ops->issue_null_data;
 
@@ -1144,6 +1154,7 @@ _phl_mrc_module_dbcc_dis_pre_hdl(struct phl_info_t *phl_info,
 			  band_idx,
 			  true,
 			  phl_com->drv_priv,
+			  PHL_MDL_MRC,
 			  core_issue_null_data);
 
 	/* 2.pause Tx- SW,HW*/
@@ -1210,9 +1221,15 @@ _phl_mrc_module_dbcc_dis_pre_hdl(struct phl_info_t *phl_info,
 			  HW_BAND_0,
 			  false,
 			  phl_com->drv_priv,
+			  PHL_MDL_MRC,
 			  core_issue_null_data);
 
 	ret = MDL_RET_SUCCESS;
+
+#ifdef DBG_DBCC_MONITOR_TIME
+	PHL_FUNC_MON_END(phl_com, &start_t, TIME_PHL_MAX);
+#endif /* DBG_DBCC_MONITOR_TIME */
+
 	return ret;
 }
 
@@ -1273,7 +1290,7 @@ _phl_mrc_module_dbcc_disable(void *dispr,
 
 _exit:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	phl_fun_monitor_end(phl_info->phl_com, &start_t, __FUNCTION__);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return ret;
 }
@@ -1299,7 +1316,7 @@ phl_mr_dbcc_proto_hdl_ex(struct phl_info_t *phl_info,
 	dbcc_proto.dbcc_cmd_direct = true;
 	ret = mr_ctl->mr_ops.dbcc_protocol_hdl(phl_com->drv_priv, band_idx, &dbcc_proto);
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	phl_fun_monitor_end(phl_info->phl_com, &start_t, __FUNCTION__);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return (ret == _SUCCESS) ? RTW_PHL_STATUS_SUCCESS
 				 : RTW_PHL_STATUS_FAILURE;
@@ -1690,6 +1707,8 @@ _phl_mrc_module_ap_started_hdlr(struct phl_info_t *phl_info,
 {
 	enum rtw_phl_status psts = RTW_PHL_STATUS_FAILURE;
 	struct rtw_wifi_role_link_t *rlink = NULL;
+	struct rtw_phl_stainfo_t *sta = NULL;
+	enum phl_upd_mode mode;
 	u8 idx = 0;
 
 	PHL_TRACE(COMP_PHL_MCC, _PHL_INFO_, "%s: wrole->id(%d)\n",
@@ -1700,14 +1719,25 @@ _phl_mrc_module_ap_started_hdlr(struct phl_info_t *phl_info,
 		goto _exit;
 	}
 
+	wrole->mstate = MLME_LINKED;
 	for (idx = 0; idx < wrole->rlink_num; idx++) {
 		rlink = get_rlink(wrole, idx);
+		sta = rtw_phl_get_stainfo_self(phl_info, rlink);
 
+		rlink->mstate = MLME_LINKED;
 		psts = phl_mr_info_upt(phl_info, rlink);
 		if (psts != RTW_PHL_STATUS_SUCCESS) {
 			PHL_ERR("%s mr info upt failed\n", __func__);
 			goto _exit;
 		}
+
+		mode = PHL_UPD_ROLE_TYPE_CHANGE;
+		psts = phl_change_stainfo(phl_info, sta, mode);
+		if (psts != RTW_PHL_STATUS_SUCCESS) {
+			PHL_ERR("%s change_stainfo failed\n", __func__);
+			goto _exit;
+		}
+
 		psts = rtw_phl_mr_rx_filter_opt(phl_info, rlink);
 		if (psts != RTW_PHL_STATUS_SUCCESS) {
 			PHL_ERR("%s set mr_rx_filter_opt failed\n", __func__);
@@ -1794,7 +1824,7 @@ _phl_mrc_module_swch_start_hdlr(void *dispr,
 	struct rtw_phl_evt_ops *ops = &phl_com->evt_ops;
 	u8 idx = 0xff, hw_band = 0;
 	struct rtw_wifi_role_link_t *rlink = NULL;
-	bool (*core_issue_null_data)(void *, u8, u8, bool) = NULL;
+	bool (*core_issue_null_data)(void *, u8, u8, bool, u8) = NULL;
 
 	phl_dispr_get_idx(dispr, &idx);
 	/*
@@ -1869,6 +1899,7 @@ _phl_mrc_module_swch_start_hdlr(void *dispr,
 	                 rlink,
 	                 true,
 	                 phl_com->drv_priv,
+	                 module_id,
 	                 core_issue_null_data);
 
 	ret = MDL_RET_SUCCESS;
@@ -1889,7 +1920,7 @@ _phl_mrc_module_swch_done_hdlr(void *dispr,
 	struct phl_scan_channel scan_ch = {0};
 	struct rtw_phl_evt_ops *ops = &phl_info->phl_com->evt_ops;
 	struct rtw_wifi_role_link_t *rlink = NULL;
-	bool (*core_issue_null_data)(void *, u8, u8, bool) = NULL;
+	bool (*core_issue_null_data)(void *, u8, u8, bool, u8) = NULL;
 
 	/*
 	* Handle mr offchan after switching channel to op channel
@@ -1919,6 +1950,7 @@ _phl_mrc_module_swch_done_hdlr(void *dispr,
 	                 rlink,
 	                 false,
 	                 phl_com->drv_priv,
+	                 module_id,
 	                 core_issue_null_data);
 
 	ret = MDL_RET_SUCCESS;
@@ -1934,8 +1966,8 @@ _mrc_module_chg_op_chdef_end_pre_hdlr(u8 *param)
 	struct chg_opch_param *ch_param = (struct chg_opch_param *)param;
 	struct rtw_wifi_role_t *wrole = ch_param->wrole;
 	struct phl_info_t *phl = wrole->phl_com->phl_priv;
-	struct rtw_phl_evt_ops *ops = ops = &phl->phl_com->evt_ops;
-	bool (*core_issue_null)(void *, u8, u8, bool) = NULL;
+	struct rtw_phl_evt_ops *ops = &phl->phl_com->evt_ops;
+	bool (*core_issue_null)(void *, u8, u8, bool, u8) = NULL;
 
 	PHL_TRACE(COMP_PHL_MCC, _PHL_INFO_, "%s: wrole->id(%d)\n",
 		  __func__, wrole->id);
@@ -1958,6 +1990,7 @@ _mrc_module_chg_op_chdef_end_pre_hdlr(u8 *param)
 	                                               ch_param->rlink,
 	                                               false,
 	                                               phl->phl_com->drv_priv,
+	                                               PHL_MDL_MRC,
 	                                               core_issue_null)) {
 		PHL_TRACE(COMP_PHL_DBG, _PHL_WARNING_, "%s: Fail to offch\n",
 			__func__);
@@ -1979,7 +2012,7 @@ _mrc_module_chg_op_chdef_start_hdlr(void *dispr, void *priv,
 	struct rtw_phl_evt_ops *ops = &phl->phl_com->evt_ops;
 	struct chg_opch_param *ch_param = NULL;
 	struct rtw_wifi_role_t *wrole = NULL;
-	bool (*core_issue_null)(void *, u8, u8, bool) = NULL;
+	bool (*core_issue_null)(void *, u8, u8, bool, u8) = NULL;
 	u8 *cmd = NULL;
 	u32 cmd_len;
 
@@ -2015,6 +2048,7 @@ _mrc_module_chg_op_chdef_start_hdlr(void *dispr, void *priv,
 	                                               ch_param->rlink,
 	                                               true,
 	                                               phl->phl_com->drv_priv,
+	                                               MSG_MDL_ID_FIELD(msg->msg_id),
 	                                               core_issue_null)) {
 		PHL_TRACE(COMP_PHL_DBG, _PHL_WARNING_, "%s: Fail to offch\n",
 			__func__);
@@ -2086,7 +2120,8 @@ _mrc_module_msg_post_hdl(void *dispr,
 	u8 idx = 0xff, hw_band = 0;
 	struct rtw_phl_stainfo_t *sta = NULL;
 	struct rtw_wifi_role_link_t *rlink = NULL;
-	bool (*core_issue_null_data)(void *, u8, u8, bool) = NULL;
+	bool (*core_issue_null_data)(void *, u8, u8, bool, u8) = NULL;
+
 	u8 *cmd = NULL;
 	u32 cmd_len;
 
@@ -2141,6 +2176,7 @@ _mrc_module_msg_post_hdl(void *dispr,
 					  rlink,
 					  false,
 					  phl_com->drv_priv,
+					  MSG_MDL_ID_FIELD(msg->msg_id),
 					  core_issue_null_data);
 			ret = MDL_RET_SUCCESS;
 			break;
@@ -2261,6 +2297,7 @@ _mrc_module_msg_post_hdl(void *dispr,
 			                 rlink,
 			                 false,
 			                 phl_com->drv_priv,
+			                 MSG_MDL_ID_FIELD(msg->msg_id),
 			                 core_issue_null_data);
 
 			ret = MDL_RET_SUCCESS;
@@ -2820,6 +2857,7 @@ phl_mr_ctrl_init(struct phl_info_t *phl_info)
 	for (ridx = 0; ridx < MAX_WIFI_ROLE_NUMBER; ridx++) {
 		role = &(phl_com->wifi_roles[ridx]);
 		pq_init(drv, &role->assoc_mld_queue);
+		pq_init(drv, &role->ext_mld_queue);
 		role->phl_com = phl_com;
 		role->id = ridx;
 		role->active = false;
@@ -2827,6 +2865,7 @@ phl_mr_ctrl_init(struct phl_info_t *phl_info)
 		for (lidx = 0; lidx < RTW_RLINK_MAX; lidx++) {
 			rlink = get_rlink(role, lidx);
 			pq_init(drv, &rlink->assoc_sta_queue);
+			pq_init(drv, &rlink->ext_sta_queue);
 			rlink->wrole = role;
 			rlink->id = lidx;
 			rlink->chanctx = NULL;
@@ -2878,9 +2917,11 @@ phl_mr_ctrl_deinit(struct phl_info_t *phl_info)
 		role = &(phl_com->wifi_roles[ridx]);
 
 		pq_deinit(drv, &role->assoc_mld_queue);
+		pq_deinit(drv, &role->ext_mld_queue);
 		for (lidx = 0; lidx < RTW_RLINK_MAX; lidx++) {
 			rlink = get_rlink(role, lidx);
 			pq_deinit(drv, &rlink->assoc_sta_queue);
+			pq_deinit(drv, &rlink->ext_sta_queue);
 		}
 	}
 
@@ -2921,7 +2962,11 @@ phl_mr_chandef_sync(struct phl_info_t *phl_info, struct hw_band_ctl_t *band_ctrl
 				_os_warn_on(1);
 				continue;
 			}
-
+			if (wrole->rlink_num == 0) {
+				PHL_ERR("ridx :%d wrole->rlink_num == 0\n", ridx);
+				_os_warn_on(1);
+				continue;
+			}
 			for (idx = 0; idx < wrole->rlink_num; idx++) {
 				rlink = get_rlink(wrole, idx);
 				if (rlink->hw_band == band_ctrl->id)
@@ -3938,18 +3983,10 @@ void phl_mr_stop_all_beacon(struct phl_info_t *phl_info,
 			   (wr->type == PHL_RTYPE_MESH)){
 				for (idx = 0; idx < wr->rlink_num; idx++) {
 					rlink = get_rlink(wr, idx);
-					if (rlink->hw_band == band_idx) {
-						if(((TEST_STATUS_FLAG(rlink->status, RLINK_STATUS_BCN_STOP)) && stop) ||
-				                   ((!TEST_STATUS_FLAG(rlink->status, RLINK_STATUS_BCN_STOP)) && !stop))
-							continue;
-
-						rtw_hal_beacon_stop(phl_info->hal, rlink, stop);
-
-						if(stop)
-							SET_STATUS_FLAG(rlink->status, RLINK_STATUS_BCN_STOP);
-						else
-							CLEAR_STATUS_FLAG(rlink->status, RLINK_STATUS_BCN_STOP);
-					}
+					if (rlink->hw_band != band_idx)
+						continue;
+					rtw_hal_beacon_stop(phl_info->hal, rlink,
+						RLINK_BCN_STOP_RSON_DEFAULT, stop);
 				}
 			}
 		}
@@ -4413,6 +4450,10 @@ phl_mr_check_ecsa(struct phl_info_t *phl_info,
 			}
 		}
 	}
+
+	if (!sta_rlink || !ap_rlink)
+		return;
+
 	if(sta_band_type == BAND_ON_24G){
 		if(ap_band_type == BAND_ON_24G)
 			reason = ECSA_START_MCC_24G_TO_24G;

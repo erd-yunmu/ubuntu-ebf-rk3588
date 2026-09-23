@@ -163,8 +163,7 @@ u16 halbb_get_plurality_rx_rate_mu(struct bb_info *bb)
 
 	ofst_ss = idx / HE_VHT_NUM_MCS;
 
-	if (ofst_ss >= 0) /*>=2SS*/
-		idx -= (ofst_ss * HE_VHT_NUM_MCS);
+	idx -= (ofst_ss * HE_VHT_NUM_MCS);
 
 	//BB_DBG(bb, DBG_CMN, "ofst_ss= (%d), idx=%d\n", ofst_ss, idx);
 
@@ -187,14 +186,9 @@ void halbb_mu_rate_idx_generate(struct bb_info *bb, struct physts_rxd *desc, str
 		return;
 	}
 
-	if (desc->user_num > MU_USER_MAX || desc->user_num == 0) {
+	if (desc->user_num == 0) {
 		BB_WARNING("[%s][2] user_num = %d\n", __func__, desc->user_num);
 		return;
-	}
-
-	if (desc->user_num >= 2) {
-		BB_WARNING("[%s][3] user_num = %d\n", __func__, desc->user_num);
-		return; /*TBD*/
 	}
 
 	user_idx = desc->user_num - 1;
@@ -365,6 +359,71 @@ void halbb_show_rssi_and_rate_distribution_mu(struct bb_info *bb)
 					  pkt_cnt->pkt_cnt_he[ss_ofst + 9],
 					  pkt_cnt->pkt_cnt_he[ss_ofst + 10],
 					  pkt_cnt->pkt_cnt_he[ss_ofst + 11]);
+
+			pkt_cnt_ss = 0;
+		}
+
+	}
+
+	/*@======EHT==========================================================*/
+	if (pkt_cnt->eht_pkt_not_zero) {
+		for (i = 0; i < rate_num; i++) {
+			ss_ofst = EHT_NUM_MCS * i;
+
+			for (j = 0; j < EHT_NUM_MCS ; j++) {
+				pkt_cnt_ss += pkt_cnt->pkt_cnt_eht[ss_ofst + j];
+			}
+
+			if (pkt_cnt_ss == 0) {
+				rssi_avg_tmp = 0;
+				rssi_tmp[0] = 0;
+				rssi_tmp[1] = 0;
+			} else {
+				rssi_avg_tmp = avg->rssi_t_avg >> 1;
+				rssi_tmp[0] = avg->rssi_t[0] >> 1;
+				rssi_tmp[1] = avg->rssi_t[1] >> 1;
+			}
+
+			if (bb->num_rf_path >= 2)
+				BB_DBG(bb, DBG_CMN,
+					  "*[MU] EHT %d-SS RSSI:{%02d| %02d,%02d} cnt:{%03d| %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}\n",
+					  (i + 1),
+					  rssi_avg_tmp, rssi_tmp[0], rssi_tmp[1],
+					  pkt_cnt_ss,
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 0],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 1],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 2],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 3],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 4],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 5],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 6],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 7],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 8],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 9],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 10],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 11],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 12],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 13]);
+			else
+				BB_DBG(bb, DBG_CMN,
+					  "*[MU] EHT %d-SS RSSI:{%02d| %02d} cnt:{%03d| %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}\n",
+					  (i + 1),
+					  rssi_avg_tmp, rssi_tmp[0],
+					  pkt_cnt_ss,
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 0],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 1],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 2],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 3],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 4],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 5],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 6],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 7],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 8],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 9],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 10],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 11],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 12],
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 13]);
 
 			pkt_cnt_ss = 0;
 		}
@@ -593,21 +652,21 @@ void halbb_basic_dbg_07_hist_su(struct bb_info *bb)
 			       HALBB_SNPRINT_SIZE);
 	BB_DBG(bb, DBG_CMN, "  %-8s %-9s  %s\n", "[TH]", "(Avg)", bb->dbg_buf);
 	/*val*/
-	avg->evm_1ss = (u8)HALBB_DIV(acc->evm_1ss, (pkt_cnt->pkt_cnt_1ss + pkt_cnt->pkt_cnt_ofdm));
+	//avg->evm_1ss = (u8)HALBB_DIV(acc->evm_1ss, (pkt_cnt->pkt_cnt_1ss + pkt_cnt->pkt_cnt_ofdm));
 	halbb_print_hist_2_buf(bb, hist->evm_1ss, BB_HIST_SIZE, bb->dbg_buf,
 			       HALBB_SNPRINT_SIZE);
 	BB_DBG(bb, DBG_CMN, "%-9s (%02d.%03d)  %s\n", "[EVM_1ss]",
 	       (avg->evm_1ss >> 2),
 	       halbb_show_fraction_num(avg->evm_1ss & 0x3, 2), bb->dbg_buf);
 
-	avg->evm_max = (u8)HALBB_DIV(acc->evm_max_acc, pkt_cnt->pkt_cnt_2ss);
+	//avg->evm_max = (u8)HALBB_DIV(acc->evm_max_acc, pkt_cnt->pkt_cnt_2ss);
 	halbb_print_hist_2_buf(bb, hist->evm_max_hist, BB_HIST_SIZE, bb->dbg_buf,
 			       HALBB_SNPRINT_SIZE);
 	BB_DBG(bb, DBG_CMN, "%-9s (%02d.%03d)  %s\n", "[EVM_max]",
 	       (avg->evm_max >> 2),
 	       halbb_show_fraction_num(avg->evm_max & 0x3, 2), bb->dbg_buf);
 	
-	avg->evm_min = (u8)HALBB_DIV(acc->evm_min_acc, pkt_cnt->pkt_cnt_2ss);
+	//avg->evm_min = (u8)HALBB_DIV(acc->evm_min_acc, pkt_cnt->pkt_cnt_2ss);
 	halbb_print_hist_2_buf(bb, hist->evm_min_hist, BB_HIST_SIZE, bb->dbg_buf,
 			       HALBB_SNPRINT_SIZE);
 	BB_DBG(bb, DBG_CMN, "%-9s (%02d.%03d)  %s\n", "[EVM_min]",
@@ -615,7 +674,7 @@ void halbb_basic_dbg_07_hist_su(struct bb_info *bb)
 	       halbb_show_fraction_num(avg->evm_min & 0x3, 2), bb->dbg_buf);
 	
 
-	avg->snr_avg = (u8)HALBB_DIV(acc->snr_avg_acc, valid_cnt);
+	//avg->snr_avg = (u8)HALBB_DIV(acc->snr_avg_acc, valid_cnt);
 	halbb_print_hist_2_buf(bb, hist->snr_avg_hist, BB_HIST_SIZE, bb->dbg_buf,
 			       HALBB_SNPRINT_SIZE);
 	BB_DBG(bb, DBG_CMN, "%-9s (%02d.000)  %s\n", "[SNR_avg]",
@@ -627,7 +686,7 @@ void halbb_basic_dbg_07_hist_su(struct bb_info *bb)
 			       HALBB_SNPRINT_SIZE);
 	BB_DBG(bb, DBG_CMN, "  %-8s %-9s  %s\n", "[TH]", "(Avg)", bb->dbg_buf);
 	/*val*/
-	avg->cn_avg = (u8)HALBB_DIV(acc->cn_avg_acc, acc->pkt_cnt_cn_valid);
+	//avg->cn_avg = (u8)HALBB_DIV(acc->cn_avg_acc, acc->pkt_cnt_cn_valid);
 	halbb_print_hist_2_buf(bb, hist->cn_avg_hist, BB_HIST_SIZE, bb->dbg_buf,
 			       HALBB_SNPRINT_SIZE);
 	BB_DBG(bb, DBG_CMN, "%-9s (%02d.%03d)  %s\n", "[CN_avg]",
@@ -640,7 +699,7 @@ void halbb_basic_dbg_07_hist_su(struct bb_info *bb)
 			       HALBB_SNPRINT_SIZE);
 	BB_DBG(bb, DBG_CMN, "  %-8s %-9s  %s\n", "[TH]", "(Avg)", bb->dbg_buf);
 	/*val*/
-	avg->cfo_avg = (s16)HALBB_DIV(acc->cfo_avg_acc, valid_cnt);
+	//avg->cfo_avg = (s16)HALBB_DIV(acc->cfo_avg_acc, valid_cnt);
 
 	halbb_print_sign_frac_digit(bb, avg->cfo_avg, 16, 2, buf, HALBB_SNPRINT_SIZE);
 	halbb_print_hist_2_buf(bb, hist->cfo_avg_hist, BB_HIST_SIZE, bb->dbg_buf,
@@ -1009,7 +1068,7 @@ void halbb_show_rssi_and_rate_distribution_su(struct bb_info *bb)
 			}
 			if (bb->num_rf_path >= 2)
 				BB_DBG(bb, DBG_CMN,
-					  "*EHT %d-SS RSSI:{%02d| %02d,%02d} cnt:{%03d| %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}\n",
+					  "*EHT %d-SS RSSI:{%02d| %02d,%02d} cnt:{%03d| %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}\n",
 					  (i + 1),
 					  rssi_avg_tmp, rssi_tmp[0], rssi_tmp[1],
 					  pkt_cnt_ss,
@@ -1026,12 +1085,10 @@ void halbb_show_rssi_and_rate_distribution_su(struct bb_info *bb)
 					  pkt_cnt->pkt_cnt_eht[ss_ofst + 10],
 					  pkt_cnt->pkt_cnt_eht[ss_ofst + 11],
 					  pkt_cnt->pkt_cnt_eht[ss_ofst + 12],
-					  pkt_cnt->pkt_cnt_eht[ss_ofst + 13],
-					  pkt_cnt->pkt_cnt_eht[ss_ofst + 14],
-					  pkt_cnt->pkt_cnt_eht[ss_ofst + 15]);
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 13]);
 			else
 				BB_DBG(bb, DBG_CMN,
-					  "*EHT %d-SS RSSI:{%02d| %02d} cnt:{%03d| %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}\n",
+					  "*EHT %d-SS RSSI:{%02d| %02d} cnt:{%03d| %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}\n",
 					  (i + 1),
 					  rssi_avg_tmp, rssi_tmp[0],
 					  pkt_cnt_ss,
@@ -1048,9 +1105,7 @@ void halbb_show_rssi_and_rate_distribution_su(struct bb_info *bb)
 					  pkt_cnt->pkt_cnt_eht[ss_ofst + 10],
 					  pkt_cnt->pkt_cnt_eht[ss_ofst + 11],
 					  pkt_cnt->pkt_cnt_eht[ss_ofst + 12],
-					  pkt_cnt->pkt_cnt_eht[ss_ofst + 13],
-					  pkt_cnt->pkt_cnt_eht[ss_ofst + 14],
-					  pkt_cnt->pkt_cnt_eht[ss_ofst + 15]);
+					  pkt_cnt->pkt_cnt_eht[ss_ofst + 13]);
 
 			pkt_cnt_ss = 0;
 		}
@@ -1258,22 +1313,27 @@ void halbb_rx_pkt_su_phy_hist_per_path(struct bb_info *bb, u32 physts_bitmap)
 		acc->snr_per_path_acc[0] += psts_r->snr_lgy;
 		//BB_DBG(bb, BIT14, "snr_acc[0](%d) += %d\n", acc->snr_per_path_acc[0], psts_r->snr_lgy);
 	}
-
+#if (defined(HALBB_COMPILE_ABOVE_2SS))
 	if (physts_bitmap & BIT(IE05_CMN_EXT_PATH_B)) {
 		psts_r = &physts->bb_physts_rslt_5_i;
 		acc->snr_per_path_acc[1] += psts_r->snr_lgy;
 		//BB_DBG(bb, BIT14, "snr_acc[1](%d) += %d\n", acc->snr_per_path_acc[1], psts_r->snr_lgy);
 	}
+#endif
 
+#if (defined(HALBB_COMPILE_ABOVE_3SS))
 	if (physts_bitmap & BIT(IE06_CMN_EXT_PATH_C)) {
 		psts_r = &physts->bb_physts_rslt_6_i;
 		acc->snr_per_path_acc[2] += psts_r->snr_lgy;
 	}
+#endif
 
+#if (defined(HALBB_COMPILE_ABOVE_4SS))
 	if (physts_bitmap & BIT(IE07_CMN_EXT_PATH_D)) {
 		psts_r = &physts->bb_physts_rslt_7_i;
 		acc->snr_per_path_acc[3] += psts_r->snr_lgy;
 	}
+#endif
 }
 
 void halbb_rx_pkt_su_phy_hist(struct bb_info *bb)
@@ -1392,13 +1452,17 @@ void halbb_rx_pkt_su_store_in_sta_info(struct bb_info *bb, struct physts_rxd *de
 	u16 bb_macid = 0;
 	u8 i = 0;
 
-	if (desc->macid_su > PHL_MAX_STA_NUM)
+	if (desc->macid_su >= PHL_MAX_STA_NUM) {
 		BB_WARNING("[%s] macid_su=%d\n", __func__, desc->macid_su);
+		return;
+	}
 
 	bb_macid = *(bb->phl2bb_macid_table + desc->macid_su);
 
-	if (bb_macid > PHL_MAX_STA_NUM)
+	if (bb_macid >= PHL_MAX_STA_NUM) {
 		BB_WARNING("[%s] bb_macid=%d\n", __func__, bb_macid);
+		return;
+	}
 
 	phl_sta = *(bb->phl_sta_info + bb_macid);
 
@@ -1503,6 +1567,39 @@ void halbb_get_rx_pkt_cnt_rpt_su(struct bb_info *bb_0, struct bb_pkt_cnt_su_info
 }
 #endif
 
+void halbb_cmn_rpt_export_physts_avg_rpt(struct bb_info * bb, struct bb_physts_avg_info *info)
+{
+	halbb_mem_cpy(bb, info, &bb->bb_cmn_rpt_i.bb_physts_avg_i, sizeof(struct bb_physts_avg_info));
+}
+
+void halbb_cmn_rpt_get_avg_val(struct bb_info *bb)
+{
+	struct bb_cmn_rpt_info	*cmn_rpt = &bb->bb_cmn_rpt_i;
+	struct bb_pkt_cnt_su_info *pkt_cnt = &cmn_rpt->bb_pkt_cnt_su_i;
+	struct bb_physts_acc_info *acc = &cmn_rpt->bb_physts_acc_i;
+	struct bb_physts_avg_info *avg = &cmn_rpt->bb_physts_avg_i;
+	u16 valid_cnt = pkt_cnt->pkt_cnt_t + pkt_cnt->pkt_cnt_ofdm;
+	u8 i = 0;
+
+	avg->evm_1ss = (u8)HALBB_DIV(acc->evm_1ss, (pkt_cnt->pkt_cnt_1ss + pkt_cnt->pkt_cnt_ofdm));
+	avg->evm_max = (u8)HALBB_DIV(acc->evm_max_acc, pkt_cnt->pkt_cnt_2ss);
+	avg->evm_min = (u8)HALBB_DIV(acc->evm_min_acc, pkt_cnt->pkt_cnt_2ss);
+	avg->snr_avg = (u8)HALBB_DIV(acc->snr_avg_acc, valid_cnt);
+	avg->cn_avg = (u8)HALBB_DIV(acc->cn_avg_acc, acc->pkt_cnt_cn_valid);
+	avg->cfo_avg = (s16)HALBB_DIV(acc->cfo_avg_acc, valid_cnt);
+
+	for (i = 0; i < HALBB_MAX_PATH; i++) {
+		if (acc->snr_per_path_acc[i] == 0)
+			continue;
+
+		avg->snr_per_path_avg[i] = (u8)HALBB_DIV(acc->snr_per_path_acc[i], valid_cnt);
+	}
+
+	//BB_DBG(bb, DBG_CMN, "evm_1ss=%d, evm_max=%d, evm_min=%d, snr_avg=%d, cn_avg=%d, cfo_avg=%d, snr={%d, %d}\n",
+	//       avg->evm_1ss, avg->evm_max, avg->evm_min, avg->snr_avg, avg->cn_avg, avg->cfo_avg,
+	//       avg->snr_per_path_avg[0], avg->snr_per_path_avg[1]);
+}
+
 void halbb_cmn_info_rpt_store_data(struct bb_info *bb)
 {
 	struct bb_cmn_rpt_info	*cmn_rpt = &bb->bb_cmn_rpt_i;
@@ -1527,6 +1624,74 @@ void halbb_cmn_info_rpt_reset(struct bb_info *bb)
 	bb->bb_ch_i.rxsc_80 = 0xff;
 
 	halbb_rx_pkt_cnt_rpt_reset(bb);
+}
+
+void halbb_cmn_rpt_watchdog(struct bb_info *bb)
+{
+	struct bb_cmn_rpt_info	*cmn_rpt = &bb->bb_cmn_rpt_i;
+	struct bb_pkt_cnt_su_info *pkt_cnt = &cmn_rpt->bb_pkt_cnt_su_i;
+	struct bb_link_info *link = &bb->bb_link_i;
+	struct rtw_phl_stainfo_t *sta;
+	struct rtw_ra_sta_info *ra;
+	struct rtw_rate_info *rate_info;
+	enum bb_mode_type rx_mode = BB_LEGACY_MODE, tx_mode = BB_LEGACY_MODE;
+	u32 macid  = link->first_entry_macid;
+
+	if (!link->is_linked)
+		return;
+
+	halbb_cmn_rpt_get_avg_val(bb);
+	/*Link Info Update*/
+	// rx_mode
+	if (pkt_cnt->eht_pkt_not_zero)
+		rx_mode = BB_EHT_MODE;
+	else if (pkt_cnt->he_pkt_not_zero)
+		rx_mode = BB_HE_MODE;
+	else if (pkt_cnt->vht_pkt_not_zero)
+		rx_mode = BB_VHT_MODE;
+	else if (pkt_cnt->ht_pkt_not_zero)
+		rx_mode = BB_HT_MODE;
+	else
+		rx_mode = BB_LEGACY_MODE;
+	// tx_mode
+	if (bb->bb_cmn_hooker->wlan_mode_max == WLAN_MD_11AX)
+		tx_mode = BB_HE_MODE;
+	else if (bb->bb_cmn_hooker->wlan_mode_max == WLAN_MD_11AC)
+		tx_mode = BB_VHT_MODE;
+	else if (bb->bb_cmn_hooker->wlan_mode_max == WLAN_MD_11N)
+		tx_mode = BB_HT_MODE;
+	else
+		tx_mode = BB_LEGACY_MODE;
+
+	link->rx_rate_plurality = halbb_get_plurality_rx_rate_su(bb);
+	link->rx_rate_plurality_mu = halbb_get_plurality_rx_rate_mu(bb);
+	link->avg_phy_rate = halbb_rx_avg_phy_rate(bb);
+	link->rx_utility = halbb_trx_utility(bb, rx_mode, link->avg_phy_rate, bb->num_rf_path, bb->hal_com->band[bb->bb_phy_idx].cur_chandef.bw);
+	link->tx_avg_phy_rate = halbb_tx_avg_phy_rate(bb);
+	link->tx_utility = halbb_trx_utility(bb, tx_mode, bb->bb_link_i.tx_avg_phy_rate, bb->num_rf_path, bb->hal_com->band[0].cur_chandef.bw);
+
+	/*First STA Info for debug*/
+	if (bb->sta_exist[macid]) {
+		sta = bb->phl_sta_info[macid];
+
+		if (!is_sta_active(sta))
+			return;
+
+		ra = &sta->hal_sta->ra_info;
+	
+		if (bb->bb_cmn_hooker->bb_ra_drv_i.is_fw_fix_rate[macid])
+			rate_info = &ra->fixed_rt_i;
+		else
+			rate_info = &ra->rpt_rt_i;
+	
+		if (bb->ic_type & BB_IC_AX_SERIES)
+			link->tx_rate = (u16)(rate_info->mcs_ss_idx & 0x7f) | ((u16)(rate_info->mode & 0x3) << 7); /*store for debug*/ 
+		else
+			link->tx_rate = (u16)(rate_info->mcs_ss_idx & 0xff) | ((u16)(rate_info->mode & 0xf) << 8); /*store for debug*/
+	}
+
+	//BB_DBG(bb, DBG_CMN, "tx_rate=0x%x, rx_rate_plurality=0x%x, rx_rate_plurality_mu=0x%x, avg_phy_rate=%d, rx_utility=%d\n",
+	//       link->tx_rate, link->rx_rate_plurality, link->rx_rate_plurality_mu, link->avg_phy_rate, link->rx_utility);
 }
 
 void halbb_cmn_rpt(struct bb_info *bb, struct physts_rxd *desc, u32 physts_bitmap)

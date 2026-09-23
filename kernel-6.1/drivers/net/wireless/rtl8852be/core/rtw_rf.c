@@ -890,13 +890,13 @@ static u8 rtw_get_center_ch_6g(u8 ch, u8 bw, u8 offset)
 	};
 	u8 cch = ch;
 
-	if (bw < CHANNEL_WIDTH_20 || bw > CHANNEL_WIDTH_160) {
+	if (bw == CHANNEL_WIDTH_20 || bw == CHANNEL_WIDTH_10 || bw == CHANNEL_WIDTH_5)
+		goto exit;
+
+	if (bw > CHANNEL_WIDTH_160) {
 		rtw_warn_on(1);
 		goto exit;
 	}
-
-	if (bw == CHANNEL_WIDTH_20)
-		goto exit;
 
 	cch = (((ch - 1) >> shift[bw]) << shift[bw]) + start[bw];
 
@@ -1665,11 +1665,11 @@ int alink_get_supported_op_class(struct _ADAPTER_LINK *padapter_link, u8 *op_set
 		ch = cl->len_ch_attr;
 
 		for (j = 0; j < ch[0]; j++) {
-			if ((match = rtw_chset_search_ch(chset, ch[j+1])) == -1)
+			if ((match = rtw_chset_search_bch(chset, cl->band, ch[j+1])) == -1) //
 				break;
 		}
 
-		if (match != -1 && cl->class_id != cur_op_class && k < len)
+		if (match != -1 && k < len)
 			op_set[k++] = cl->class_id;
 	}
 	return (k > len ? len : k);
@@ -1731,12 +1731,12 @@ enum band_type rtw_get_band_by_op_class(u8 op_class)
 		RTW_ERR("Invalid opc pointer:%p (global_op_class:%p, sizeof(struct op_class_t):%zu, %zu)\n"
 			, opc, global_op_class, sizeof(struct op_class_t),
 			(((u8 *)opc) - ((u8 *)global_op_class)) % sizeof(struct op_class_t));
-		return BAND_ON_24G;
+		return BAND_MAX;
 	}
 
 	array_idx = (((u8 *)opc) - ((u8 *)global_op_class)) / sizeof(struct op_class_t);
 
-	return  global_op_class[array_idx].band;
+	return global_op_class[array_idx].band;
 }
 
 int rtw_rfctl_op_class_pref_init(struct rf_ctl_t *rfctl, u8 band_bmp, u8 bw_bmp[])
@@ -2175,78 +2175,6 @@ u8 rtw_restrict_trx_path_bmp_by_rftype(u8 trx_path_bmp, enum rf_type type, u8 *t
 
 exit:
 	return RF_TYPE_VALID(ret_type) ? ((bmp_tx << 4) | bmp_rx) : 0x00;
-}
-
-/*
-* input with txpwr value in unit of txpwr index
-* return string in length 6 at least (for -xx.xx)
-*/
-void txpwr_idx_get_dbm_str(s8 idx, u8 txgi_max, s8 txgi_ww, u8 txgi_pdbm, SIZE_T cwidth, char dbm_str[], u8 dbm_str_len)
-{
-	char fmt[16];
-
-	if (idx == txgi_max) {
-		snprintf(fmt, 16, "%%%zus", cwidth >= 6 ? cwidth + 1 : 6);
-		snprintf(dbm_str, dbm_str_len, fmt, "NA");
-	} else if (idx == txgi_ww) {
-		snprintf(fmt, 16, "%%%zus", cwidth >= 6 ? cwidth + 1 : 6);
-		snprintf(dbm_str, dbm_str_len, fmt, "WW");
-	} else if (idx > -txgi_pdbm && idx < 0) { /* -0.xx */
-		snprintf(fmt, 16, "%%%zus-0.%%02d", cwidth >= 6 ? cwidth - 4 : 1);
-		snprintf(dbm_str, dbm_str_len, fmt, "", (rtw_abs(idx) % txgi_pdbm) * 100 / txgi_pdbm);
-	} else if (idx % txgi_pdbm) { /* d.xx */
-		snprintf(fmt, 16, "%%%zud.%%02d", cwidth >= 6 ? cwidth - 2 : 3);
-		snprintf(dbm_str, dbm_str_len, fmt, idx / txgi_pdbm, (rtw_abs(idx) % txgi_pdbm) * 100 / txgi_pdbm);
-	} else { /* d */
-		snprintf(fmt, 16, "%%%zud", cwidth >= 6 ? cwidth + 1 : 6);
-		snprintf(dbm_str, dbm_str_len, fmt, idx / txgi_pdbm);
-	}
-}
-
-/*
-* input with txpwr value in unit of mbm
-* return string in length 6 at least (for -xx.xx)
-*/
-void txpwr_mbm_get_dbm_str(s16 mbm, SIZE_T cwidth, char dbm_str[], u8 dbm_str_len)
-{
-	char fmt[16];
-
-	if (mbm == UNSPECIFIED_MBM) {
-		snprintf(fmt, 16, "%%%zus", cwidth >= 6 ? cwidth + 1 : 6);
-		snprintf(dbm_str, dbm_str_len, fmt, "NA");
-	} else if (mbm > -MBM_PDBM && mbm < 0) { /* -0.xx */
-		snprintf(fmt, 16, "%%%zus-0.%%02d", cwidth >= 6 ? cwidth - 4 : 1);
-		snprintf(dbm_str, dbm_str_len, fmt, "", (rtw_abs(mbm) % MBM_PDBM) * 100 / MBM_PDBM);
-	} else if (mbm % MBM_PDBM) { /* d.xx */
-		snprintf(fmt, 16, "%%%zud.%%02d", cwidth >= 6 ? cwidth - 2 : 3);
-		snprintf(dbm_str, dbm_str_len, fmt, mbm / MBM_PDBM, (rtw_abs(mbm) % MBM_PDBM) * 100 / MBM_PDBM);
-	} else { /* d */
-		snprintf(fmt, 16, "%%%zud", cwidth >= 6 ? cwidth + 1 : 6);
-		snprintf(dbm_str, dbm_str_len, fmt, mbm / MBM_PDBM);
-	}
-}
-
-static const s16 _mb_of_ntx[] = {
-	0,		/* 1TX */
-	301,	/* 2TX */
-	477,	/* 3TX */
-	602,	/* 4TX */
-	699,	/* 5TX */
-	778,	/* 6TX */
-	845,	/* 7TX */
-	903,	/* 8TX */
-};
-
-/* get mB(100 *dB) for specifc TX count relative to 1TX */
-s16 mb_of_ntx(u8 ntx)
-{
-	if (ntx == 0 || ntx > 8) {
-		RTW_ERR("ntx=%u, out of range\n", ntx);
-		rtw_warn_on(1);
-		return 0;
-	}
-
-	return _mb_of_ntx[ntx - 1];
 }
 
 #if CONFIG_TXPWR_LIMIT

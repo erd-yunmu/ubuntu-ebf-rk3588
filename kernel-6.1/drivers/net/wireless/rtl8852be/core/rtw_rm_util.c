@@ -63,6 +63,9 @@ u8 rm_get_ch_set_from_bcn_req_opt(struct bcn_req_opt *opt,
 
 		ap_ch_rpt = opt->ap_ch_rpt[i];
 		band = rtw_get_band_by_op_class(ap_ch_rpt->global_op_class);
+		/* error handling */
+		if (band == BAND_MAX)
+			band = BAND_ON_24G;
 
 		if ((k + ap_ch_rpt->Len) > pch_num) {
 			RTW_ERR("RM: ch num exceed %d > %d\n", (k + ap_ch_rpt->Len), pch_num);

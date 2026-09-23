@@ -16,26 +16,28 @@
 #include "addr_cam.h"
 
 struct mac_ax_mc_table {
-	u8 valid;
 	struct mac_ax_multicast_info mc;
 	struct mac_ax_role_info role;
+	u8 valid;
 };
 
-#define MAC_AX_MAX_MC_ENTRY 32
 static struct mac_ax_mc_table mc_role[MAC_AX_MAX_MC_ENTRY];
 
-#define MAC_AX_NO_HIT_IDX 0xFF
-
-static u8 get_set_bits_of_msk(u8 msk)
+static void get_set_bits_of_msk(u8 msk, u8 *maddr_cmp_len)
 {
 	u8 set_bits;
 
-	if (msk == 0)
-		return 0;
+	if (msk == 0) {
+		*maddr_cmp_len = 0;
+		return;
+	}
 	set_bits = msk & (msk - 1);
-	if (set_bits == 0)
-		return 1;
-	return get_set_bits_of_msk(set_bits) + 1;
+	if (set_bits == 0) {
+		*maddr_cmp_len = 1;
+		return;
+	}
+	get_set_bits_of_msk(set_bits, maddr_cmp_len);
+	(*maddr_cmp_len)++;
 }
 
 u32 find_avail_addr_cam_entry(struct mac_ax_adapter *adapter,
@@ -65,7 +67,7 @@ u32 find_avail_bssid_cam_entry(struct mac_ax_adapter *adapter,
 	info->b_info.bssid_cam_idx = adapter->hw_info->bssid_num;
 
 	if (info->a_info.mask_sel == MAC_AX_BSSID_MSK)
-		maddr_cmp_len = get_set_bits_of_msk(info->a_info.addr_mask);
+		get_set_bits_of_msk(info->a_info.addr_mask, &maddr_cmp_len);
 
 	for (i = 0; i < adapter->hw_info->bssid_num; i++) {
 		role = mac_role_srch_by_bssid(adapter, i);
@@ -142,7 +144,7 @@ u32 fill_addr_cam_info(struct mac_ax_adapter *adapter,
 	u8 tma_hash = 0x00;
 	u8 maddr_cmp_len;
 
-	maddr_cmp_len = get_set_bits_of_msk(info->a_info.addr_mask);
+	get_set_bits_of_msk(info->a_info.addr_mask, &maddr_cmp_len);
 
 	switch (info->a_info.mask_sel) {
 	case MAC_AX_SMA_MSK:
@@ -296,12 +298,14 @@ u32 mac_upd_addr_cam(struct mac_ax_adapter *adapter,
 {
 	u32 tbl[21];
 	u32 ret = MACSUCCESS;
-	u32 offset, val32;
+#if MAC_AX_FEATURE_DBGPKG
 	u32 i;
+#endif
 	struct h2c_info h2c_info = {0};
 	struct fwcmd_addrcam_info *fwcmd_tbl;
-	//struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-	u8 ctlinfo_aidx_off;
+	struct mac_ax_ops *mops = adapter_to_mac_ops(adapter);
+	struct rtw_hal_mac_ax_cctl_info cctl_info_ax;
+	struct rtw_hal_mac_ax_cctl_info cctl_mask_ax;
 
 	h2c_info.agg_en = 1;
 	h2c_info.content_len = sizeof(struct fwcmd_addrcam_info);
@@ -346,6 +350,7 @@ FWOFLD_END:
 					 tbl);
 	if (ret)
 		return ret;
+#if MAC_AX_FEATURE_DBGPKG
 	// Indirect write addr cam
 	for (i = 0; i < (u32)((info->a_info.len)) / 4; i++) {
 		ret = mac_sram_dbg_write(adapter, (info->a_info.addr_cam_idx *
@@ -363,29 +368,21 @@ FWOFLD_END:
 		if (ret != MACSUCCESS)
 			return ret;
 	}
+#else
+	PLTFM_MSG_WARN("%s: FW should be ready\n", __func__);
+#endif
+	// Update cmac table addr cam idx
+	PLTFM_MSG_WARN("%s update cmac tbl start\n", __func__);
 
-	// Indirect write cmac table addr cam idx
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A))
-		ctlinfo_aidx_off = 0x18;
-	else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-		 is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-		 is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT))
-		ctlinfo_aidx_off = 0x18;
-	else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
-		 is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		 is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
-		 is_chip_id(adapter, MAC_AX_CHIP_ID_8852D))
-		ctlinfo_aidx_off = 0x17;
-	else
-		ctlinfo_aidx_off = 0xFF;
-	PLTFM_MSG_WARN("%s ind access cmac tbl start\n", __func__);
-	offset = info->macid * CCTL_INFO_SIZE + ctlinfo_aidx_off;
-	val32 = mac_sram_dbg_read(adapter, offset, CMAC_TBL_SEL);
-	val32 = SET_CLR_WORD(val32, info->a_info.addr_cam_idx, CCTRL_INFO_ADDR_CAM_IDX);
-	ret = mac_sram_dbg_write(adapter, offset, val32, CMAC_TBL_SEL);
+	PLTFM_MEMSET(&cctl_info_ax, 0, sizeof(struct rtw_hal_mac_ax_cctl_info));
+	PLTFM_MEMSET(&cctl_mask_ax, 0, sizeof(struct rtw_hal_mac_ax_cctl_info));
+
+	cctl_info_ax.addr_cam_index = info->a_info.addr_cam_idx;
+	cctl_mask_ax.addr_cam_index = FWCMD_H2C_CCTRL_ADDR_CAM_INDEX_MSK;
+	ret = mops->upd_cctl_info(adapter, &cctl_info_ax, &cctl_mask_ax,
+				  info->macid, TBL_WRITE_OP);
 	if (ret != MACSUCCESS)
 		return ret;
-	PLTFM_MSG_WARN("%s ind access cmac tbl end\n", __func__);
 
 	return MACSUCCESS;
 }
@@ -734,8 +731,6 @@ u32 set_mac_resp_ack(struct mac_ax_adapter *adapter, u32 *ack)
 
 u32 get_mac_resp_ack(struct mac_ax_adapter *adapter, u32 *ack)
 {
-#define MAC_AX_ACK_CMAC1_SH 1
-#define MAC_AX_ACK_CMAC0_SH 0
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 	u8 cmac0 = 0, cmac1 = 0;
 

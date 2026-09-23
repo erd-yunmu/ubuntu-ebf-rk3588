@@ -13,7 +13,7 @@
  *
  ******************************************************************************/
 #include "nan.h"
-
+#if MAC_FEAT_NAN
 u32 mac_get_act_schedule_id(struct mac_ax_adapter *adapter,
 			    struct mac_ax_act_ack_info *act_ack_info)
 {
@@ -72,7 +72,10 @@ u32 mac_nan_act_schedule_req(struct mac_ax_adapter *adapter, struct mac_ax_nan_s
 		cpu_to_le32(SET_WORD(info->tsf_idx, FWCMD_H2C_ACT_SCHEDULE_REQ_TSF_IDX) |
 			SET_WORD(info->channel, FWCMD_H2C_ACT_SCHEDULE_REQ_CHANNEL) |
 			SET_WORD(info->bw, FWCMD_H2C_ACT_SCHEDULE_REQ_BW) |
-			SET_WORD(info->primary_ch_idx, FWCMD_H2C_ACT_SCHEDULE_REQ_PRIMARY_CH_IDX));
+			SET_WORD(info->primary_ch, FWCMD_H2C_ACT_SCHEDULE_REQ_PRIMARY_CH));
+
+	content->dword5 =
+		cpu_to_le32(SET_WORD(info->ch_band_type, FWCMD_H2C_ACT_SCHEDULE_REQ_CH_BAND_TYPE));
 
 	ret = mac_h2c_common(adapter, &h2c_info, (u32 *)content);
 
@@ -96,7 +99,7 @@ u32 mac_nan_bcn_req(struct mac_ax_adapter *adapter, struct mac_ax_nan_bcn *info)
 	h2c_info.h2c_class = FWCMD_H2C_CL_NAN;
 	h2c_info.h2c_func = FWCMD_H2C_FUNC_BCN_REQ;
 	h2c_info.rec_ack = 0;
-	h2c_info.done_ack = 1;
+	h2c_info.done_ack = 0;
 	h2c_info.agg_en = 0;
 	h2c_info.content_len = sizeof(struct fwcmd_bcn_req);
 
@@ -148,7 +151,7 @@ u32 mac_nan_func_ctrl(struct mac_ax_adapter *adapter, struct mac_ax_nan_func_inf
 	h2c_info.h2c_class = FWCMD_H2C_CL_NAN;
 	h2c_info.h2c_func = FWCMD_H2C_FUNC_NAN_FUNC_CTRL;
 	h2c_info.rec_ack = 0;
-	h2c_info.done_ack = 1;
+	h2c_info.done_ack = 0;
 	h2c_info.agg_en = 0;
 	h2c_info.content_len = sizeof(struct fwcmd_nan_func_ctrl);
 
@@ -208,7 +211,7 @@ u32 mac_nan_de_info(struct mac_ax_adapter *adapter, u8 status, u8 loc_bcast_sdf)
 	h2c_info.h2c_class = FWCMD_H2C_CL_NAN;
 	h2c_info.h2c_func = FWCMD_H2C_FUNC_NAN_DE_INFO;
 	h2c_info.rec_ack = 0;
-	h2c_info.done_ack = 1;
+	h2c_info.done_ack = 0;
 	h2c_info.agg_en = 0;
 	h2c_info.content_len = sizeof(struct fwcmd_nan_de_info);
 
@@ -244,7 +247,7 @@ u32 mac_nan_join_cluster(struct mac_ax_adapter *adapter, u8 is_allow)
 	h2c_info.h2c_class = FWCMD_H2C_CL_NAN;
 	h2c_info.h2c_func = FWCMD_H2C_FUNC_NAN_JOIN_CLUSTER;
 	h2c_info.rec_ack = 0;
-	h2c_info.done_ack = 1;
+	h2c_info.done_ack = 0;
 	h2c_info.agg_en = 0;
 	h2c_info.content_len = sizeof(struct fwcmd_nan_join_cluster);
 
@@ -278,7 +281,7 @@ u32 mac_nan_pause_faw_tx(struct mac_ax_adapter *adapter, u32 id_map)
 	h2c_info.h2c_class = FWCMD_H2C_CL_NAN;
 	h2c_info.h2c_func = FWCMD_H2C_FUNC_PAUSE_FAW_TX;
 	h2c_info.rec_ack = 0;
-	h2c_info.done_ack = 1;
+	h2c_info.done_ack = 0;
 	h2c_info.agg_en = 0;
 	h2c_info.content_len = sizeof(struct fwcmd_pause_faw_tx);
 
@@ -313,7 +316,7 @@ u32 mac_nan_get_cluster_info(struct mac_ax_adapter *adapter,
 	h2c_info.h2c_class = FWCMD_H2C_CL_NAN;
 	h2c_info.h2c_func = FWCMD_H2C_FUNC_NAN_GET_CLUSTER_INFO;
 	h2c_info.rec_ack = 0;
-	h2c_info.done_ack = 1;
+	h2c_info.done_ack = 0;
 	h2c_info.agg_en = 0;
 	h2c_info.content_len = sizeof(struct fwcmd_nan_get_cluster_info);
 
@@ -346,7 +349,7 @@ u32 mac_nan_avail_t_bitmap(struct mac_ax_adapter *adapter,
 	h2c_info.h2c_class = FWCMD_H2C_CL_NAN;
 	h2c_info.h2c_func = FWCMD_H2C_FUNC_NAN_AVAIL_T_BITMAP;
 	h2c_info.rec_ack = 0;
-	h2c_info.done_ack = 1;
+	h2c_info.done_ack = 0;
 	h2c_info.agg_en = 0;
 	h2c_info.content_len = sizeof(struct fwcmd_nan_avail_t_bitmap);
 
@@ -392,12 +395,16 @@ u32 mac_nan_avail_t_bitmap(struct mac_ax_adapter *adapter,
 				     FWCMD_H2C_NAN_AVAIL_T_BITMAP_CHANNEL) |
 			    SET_WORD(info->bw,
 				     FWCMD_H2C_NAN_AVAIL_T_BITMAP_BW) |
-			    SET_WORD(info->primary_ch_idx,
-				     FWCMD_H2C_NAN_AVAIL_T_BITMAP_PRIMARY_CH_IDX));
+			    SET_WORD(info->primary_ch,
+				     FWCMD_H2C_NAN_AVAIL_T_BITMAP_PRIMARY_CH) |
+			    SET_WORD(info->ch_band_type,
+				     FWCMD_H2C_NAN_AVAIL_T_BITMAP_CH_BAND_TYPE));
 
 	content->dword7 =
 		cpu_to_le32(SET_WORD(info->mac_id,
-				     FWCMD_H2C_NAN_AVAIL_T_BITMAP_MAC_ID));
+				     FWCMD_H2C_NAN_AVAIL_T_BITMAP_MAC_ID) |
+			    SET_WORD(info->priority,
+				     FWCMD_H2C_NAN_AVAIL_T_BITMAP_PRIORITY));
 
 	ret = mac_h2c_common(adapter, &h2c_info, (u32 *)content);
 	if (ret != MACSUCCESS) {
@@ -409,3 +416,4 @@ u32 mac_nan_avail_t_bitmap(struct mac_ax_adapter *adapter,
 	PLTFM_FREE(content, h2c_info.content_len);
 	return MACSUCCESS;
 }
+#endif

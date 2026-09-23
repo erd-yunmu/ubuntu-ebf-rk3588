@@ -27,25 +27,7 @@
 //#include "halbb_plcp_tx.h"
 //#include "halbb_he_sigb_gen.h"
 #ifdef HALBB_PMAC_TX_SUPPORT
-#if 0 // BE_IC_TYPE
-const u8 ru_alloc_b1_7_tbl[RU_SIZE_NUM][2] = {{0, 37}, //RU26
-					      {0, 16}, //RU52
-					      {0, 8},  //RU106
-					      {0, 4},  //RU242
-					      {0, 2},  //RU484
-					      {0, 1},  //RU996
-					      {1, 1},  //RU996x2
-					      {0, 0},  //HESIGB
-					      {2, 0},  //RU996x4
-					      {0, 12}, //RU52+26
-					      {0, 8},  //RU106_26
-					      {0, 4},  //RU484_242
-					      {1, 4},  //RU996_484
-					      {1, 8},  //RU996_484_242
-					      {2, 0},  //RU996x2_484
-					      {2, 0},  //RU996x3
-					      {2, 0}}; //RU996x3_484
-#endif
+
 u8 halbb_set_crc8(struct bb_info *bb, unsigned char in[], u8 len)
 {
 	u16 i = 0;
@@ -152,7 +134,7 @@ void halbb_ic_cfg(struct bb_info *bb, struct halbb_plcp_info *in,
 				pw_b_cr += 0x4;
 			}
 		}
-	} else if (bb->ic_type == BB_RTL8852C) {
+	} else if (bb->ic_sub_type == BB_IC_SUB_TYPE_8852C_8852C) {
 		pw_a_cr = 0x5428;
 		pw_b_cr = 0x7428;
 		table_len = sizeof(pwr_comp_1ss_8852c)/sizeof(u32);
@@ -191,805 +173,137 @@ void halbb_ic_cfg(struct bb_info *bb, struct halbb_plcp_info *in,
 		}
 	}
 }
-#if 0 // BE_IC_TYPE
-void halbb_ppdu_var_type_cfg(struct bb_info *bb_0, struct halbb_plcp_info *in,
-			     enum phl_phy_idx phy_idx)
-{
-	struct bb_info *bb = bb_0;
-	u8 ppdu_type = 0, ppdu_var = 0;
 
-#ifdef HALBB_DBCC_SUPPORT
-	HALBB_GET_PHY_PTR(bb_0, bb, phy_idx);
-#endif
-
-	switch (in->ppdu_type) {
-	case B_MODE_FMT:
-		ppdu_type = in->long_preamble_en ? 0 : 1;
-		ppdu_var = 0;
-		break;
-	case LEGACY_FMT: // Not support (Duplication + puncture)
-		ppdu_type = 2;
-		ppdu_var = bb->bb_api_i.bw >= in->dbw ? 1 : 0;
-		break;
-	case HT_MF_FMT:
-		ppdu_type = 3;
-		ppdu_var = in->ndp_en ? 1 : 0;
-		break;
-	case VHT_FMT:
-		ppdu_type = 5;
-		ppdu_var = in->ndp_en ? 1 : 0;
-		break;
-	case HE_SU_FMT: // Not support (NDP + puncture) & (ranging NDP)
-		ppdu_type = 7;
-		ppdu_var = in->ndp_en ? 1 : 0;
-		break;
-	case HE_ER_SU_FMT:
-		ppdu_type = 8;
-		ppdu_var = 0;
-		break;
-	case HE_TB_FMT: // Not support (ranging NDP)
-		ppdu_type = 10;
-		ppdu_var = in->ndp_en ? 1 : 0;
-		break;
-	case EHT_MU_SU_FMT:
-		ppdu_type = 11;
-		if ((in->punc_pattern != 0xff) || (in->punc_pattern != 0xf)) // With puncture
-			ppdu_var = in->ndp_en ? 7 : 5;
-		else
-			ppdu_var = in->ndp_en ? 4 : 0;
-		break;
-	case EHT_MU_ERSU_FMT:
-		ppdu_type = 11;
-		ppdu_var = 1;
-		break;
-	case EHT_TB_FMT:
-		ppdu_type = 12;
-		ppdu_var = 0;
-		break;
-	default:
-		BB_DBG(bb, DBG_BIT14, "[%s] Invalid/Unsupported PPDU type = %d\n",
-		       __func__, in->ppdu_type);
-		break;
-	}
-	BB_DBG(bb, DBG_BIT14, "[%s] PPDU type=%d, {type, var}={%d, %d}\n",
-	       __func__,  in->ppdu_type, ppdu_type, ppdu_var);
-}
-
-u32 halbb_ru_occupied_sub20_he(struct bb_info *bb, struct halbb_plcp_info *in)
-{
-	u32 out = 0;
-
-	switch (in->usr[0].ru_size) {
-	case RU26:
-		if (in->usr[0].ru_idx <= 9)
-			out = 0x1;
-		else if (in->usr[0].ru_idx == 10)
-			out = in->dbw >= DBW80 ? 0x3 : 0x2;
-		else if (in->usr[0].ru_idx <= 18)
-			out = 0x2;
-		else if (in->usr[0].ru_idx == 19)
-			out = 0x6;
-		else if (in->usr[0].ru_idx <= 27)
-			out = 0x4;
-		else if (in->usr[0].ru_idx == 28)
-			out = 0xc;
-		else if (in->usr[0].ru_idx <= 37)
-			out = 0x8;
-		else if (in->usr[0].ru_idx <= 46)
-			out = 0x10;
-		else if (in->usr[0].ru_idx == 47)
-			out = 0x30;
-		else if (in->usr[0].ru_idx <= 55)
-			out = 0x20;
-		else if (in->usr[0].ru_idx == 56)
-			out = 0x60;
-		else if (in->usr[0].ru_idx <= 64)
-			out = 0x40;
-		else if (in->usr[0].ru_idx == 65)
-			out = 0xc0;
-		else
-			out = 0x80;
-		break;
-	case RU52:
-		if (in->usr[0].ru_idx <= 4)
-			out = 0x1;
-		else if (in->usr[0].ru_idx == 5)
-			out = in->dbw >= DBW80 ? 0x3 : 0x2;
-		else if (in->usr[0].ru_idx <= 8)
-			out = 0x2;
-		else if (in->usr[0].ru_idx <= 11)
-			out = 0x4;
-		else if (in->usr[0].ru_idx == 12)
-			out = 0xc;
-		else if (in->usr[0].ru_idx <= 16)
-			out = 0x8;
-		else if (in->usr[0].ru_idx <= 20)
-			out = 0x10;
-		else if (in->usr[0].ru_idx == 21)
-			out = 0x30;
-		else if (in->usr[0].ru_idx <= 24)
-			out = 0x20;
-		else if (in->usr[0].ru_idx <= 27)
-			out = 0x40;
-		else if (in->usr[0].ru_idx == 28)
-			out = 0xc0;
-		else
-			out = 0x80;
-		break;
-	case RU106:
-		if (in->usr[0].ru_idx <= 2)
-			out = 0x1;
-		else if (in->usr[0].ru_idx == 3)
-			out = in->dbw >= DBW80 ? 0x3 : 0x2;
-		else if (in->usr[0].ru_idx == 4)
-			out = 0x2;
-		else if (in->usr[0].ru_idx == 5)
-			out = 0x4;
-		else if (in->usr[0].ru_idx == 6)
-			out = 0xc;
-		else if (in->usr[0].ru_idx <= 8)
-			out = 0x8;
-		else if (in->usr[0].ru_idx <= 10)
-			out = 0x10;
-		else if (in->usr[0].ru_idx == 11)
-			out = 0x30;
-		else if (in->usr[0].ru_idx == 12)
-			out = 0x20;
-		else if (in->usr[0].ru_idx == 13)
-			out = 0x40;
-		else if (in->usr[0].ru_idx == 14)
-			out = 0xc0;
-		else
-			out = 0x80;
-		break;
-	case RU242:
-		if (in->usr[0].ru_idx == 1)
-			out = 0x1;
-		else if (in->usr[0].ru_idx == 2)
-			out = in->dbw >= DBW80 ? 0x3 : 0x2;
-		else if (in->usr[0].ru_idx == 3)
-			out = 0xc;
-		else if (in->usr[0].ru_idx == 4)
-			out = 0x8;
-		else if (in->usr[0].ru_idx == 5)
-			out = 0x10;
-		else if (in->usr[0].ru_idx == 6)
-			out = 0x30;
-		else if (in->usr[0].ru_idx == 7)
-			out = 0xc0;
-		else
-			out = 0x80;
-		break;
-	case RU484:
-		if (in->usr[0].ru_idx == 1)
-			out = 0x3;
-		else if (in->usr[0].ru_idx == 2)
-			out = 0xc;
-		else if (in->usr[0].ru_idx == 3)
-			out = 0x30;
-		else
-			out = 0xc0;
-		break;
-	case RU996:
-		out = in->usr[0].ru_idx == 1 ? 0xf : 0xf0;
-		break;
-	case RU996X2:
-		out = 0xff;
-		break;
-	default:
-		break;
-	}
-	return out;
-}
-
-u32 halbb_ru_occupied_sub20_eht(struct bb_info *bb, struct halbb_plcp_info *in)
-{
-	u32 output = 0;
-	u8 ch20_with_data_dbw80 = 0, ch20_with_data_dbw160 = 0, nsub_80 = 4, mru_idx = 0, n_x1_flag = 0, n_x1 = 0;
-	u8 size_idx = 0, num_b1_7 = 0;
-	u8 ru_484_242_tbl[4] = {0xE, 0xD, 0xB, 0x7}; // {4b'1110, 4b'1101, 4b'1011, 4b'0111}
-	u8 ru_996_484_tbl[4] = {0xFC, 0xF3, 0xCF, 0x3F}; // {8b'11111100, 8b'11110011, 8b'11001111, 8b'00111111}
-	u16 ru_996x2_484_tbl[12] = {0xFFC, 0xFF3, 0xFCF, 0xF3F, 0xCFF, 0x3FF,
-				    0xFFC0, 0xFF30, 0xFCF0, 0xF3F0, 0xCFF0, 0x3FF0};
-
-	size_idx = ru_alloc_b1_7_tbl[in->usr[0].ru_size][0];
-	num_b1_7 = ru_alloc_b1_7_tbl[in->usr[0].ru_size][1];
-
-	n_x1_flag = size_idx;
-	mru_idx = size_idx == 2 ? (u8)in->usr[0].ru_idx : (u8)(halbb_mod(in->usr[0].ru_idx -1, num_b1_7) + 1);
-	n_x1 = size_idx == 2 ? 0 : (u8)(in->usr[0].ru_idx -1) / num_b1_7;
-
-	if (n_x1_flag == 0) {
-		switch (in->usr[0].ru_size) {
-		case RU26:
-			if (mru_idx <= 9)
-				ch20_with_data_dbw80 = 0x1;
-			else if (mru_idx == 10)
-				ch20_with_data_dbw80 = in->dbw >= DBW80 ? 0x3 : 0x2;
-			else if (mru_idx <= 18)
-				ch20_with_data_dbw80 = 0x2;
-			else if (mru_idx == 19)
-				ch20_with_data_dbw80 = 0x6;
-			else if (mru_idx <= 27)
-				ch20_with_data_dbw80 = 0x4;
-			else if (mru_idx == 28)
-				ch20_with_data_dbw80 = 0xc;
-			else if (mru_idx <= 37)
-				ch20_with_data_dbw80 = 0x8;
-			else if (mru_idx <= 46)
-				ch20_with_data_dbw80 = 0x10;
-			else if (mru_idx == 47)
-				ch20_with_data_dbw80 = 0x30;
-			else if (mru_idx <= 55)
-				ch20_with_data_dbw80 = 0x20;
-			else if (mru_idx == 56)
-				ch20_with_data_dbw80 = 0x60;
-			else if (mru_idx <= 64)
-				ch20_with_data_dbw80 = 0x40;
-			else if (mru_idx == 65)
-				ch20_with_data_dbw80 = 0xc0;
-			else
-				ch20_with_data_dbw80 = 0x80;
-			break;
-		case RU52:
-			ch20_with_data_dbw80 = 1 << ((mru_idx - 1) / 4);
-			break;
-		case RU106:
-			ch20_with_data_dbw80 = 1 << ((mru_idx - 1) / 2);
-			break;
-		case RU242:
-			ch20_with_data_dbw80 = 1 << (mru_idx - 1);
-			break;
-		case RU484:
-			ch20_with_data_dbw80 = 0x3 << ((mru_idx - 1) * 2);
-			break;
-		case RU996:
-			ch20_with_data_dbw80 = 0xf;
-			break;
-		case RU52_26:
-			ch20_with_data_dbw80 = 1 << ((mru_idx - 1) / 3);
-			break;
-		case RU106_26:
-			ch20_with_data_dbw80 = 1 << ((mru_idx - 1) / 2);
-			break;
-		case RU484_242:
-			ch20_with_data_dbw80 = ru_484_242_tbl[mru_idx - 1];
-			break;
-		default:
-			break;
-		}
-		output = ch20_with_data_dbw80 << (nsub_80 * n_x1);
-	} else if (n_x1_flag == 1) {
-		switch (in->usr[0].ru_size) {
-		case RU996X2:
-			ch20_with_data_dbw160 = 0xff;
-			break;
-		case RU996_484:
-			ch20_with_data_dbw160 = ru_996_484_tbl[mru_idx - 1];
-			break;
-		case RU996_484_242:
-			ch20_with_data_dbw160 = 0xff ^ (1 << (mru_idx - 1));
-			break;
-		default:
-			break;
-		}
-		output = ch20_with_data_dbw160 << (nsub_80 * n_x1 * 2);
-	} else if (n_x1_flag == 2) {
-		switch (in->usr[0].ru_size) {
-		case RU996X2_484:
-			output = ru_996x2_484_tbl[mru_idx - 1];
-			break;
-		case RU996X3:
-			output = 0xffff ^ (0xf << (4 * (mru_idx - 1)));
-			break;
-		case RU996X3_484:
-			output = 0xffff ^ (0x3 << (2 * (mru_idx - 1)));
-			break;
-		case RU996X4:
-			output = 0xffff;
-			break;
-		default:
-			break;
-		}
-	}
-	return output;
-}
-
-u8 halbb_eht_sig_gi_ltf_tbl(struct bb_info *bb, u8 gi, u8 ltf)
-{
-	u8 out = 0xff;
-
-	BB_DBG(bb, DBG_BIT14, "[EHT SIG] gi=%d, ltf=%d\n", gi, ltf);
-
-	if (gi == 1 && ltf == 1) // 2x_0.8
-		out = 0;
-	else if (gi == 1 && ltf == 2) //2x_1.6
-		out = 1;
-	else if (gi == 2 && ltf == 1) //4x_0.8
-		out = 2;
-	else if (gi == 2 && ltf == 3) //4x_3.2
-		out = 3;
-	else
-		BB_WARNING("Invalid GI_LTF for EHT-SIG!!\n");
-
-	return out;
-}
-#endif
 u32 halbb_cfg_ch20_with_data(struct bb_info *bb, struct halbb_plcp_info *in)
 {
 	u32 ch20_with_data = 0;
-#if 0 // BE_IC_TYPE
-	if (bb->ic_type >= BB_RLE1115) { // [BE]
-		if (in->ppdu_type == HE_TB_FMT)
-			ch20_with_data = halbb_ru_occupied_sub20_he(bb, in);
-		else if ((in->ppdu_type == EHT_MU_RU_FMT) || (in->ppdu_type == EHT_TB_FMT))
-			ch20_with_data = halbb_ru_occupied_sub20_eht(bb, in);
-		else {
-			switch (in->dbw) {
-				case 0:
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x80 : 0x1;
-					break;
-				case 1:
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xc0 : 0x3;
-					break;
-				case 2:
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xf0 : 0xf;
-					break;
-				case 3:
-					ch20_with_data = 0xff;
-					break;
-				default:
-					break;
-			}
-		}
-	} else { //[AX]
-#endif
-		if (in->ppdu_type == HE_TB_FMT) {
-			switch (in->dbw) {
-			case 0:
+
+	if (in->ppdu_type == HE_TB_FMT) {
+		switch (in->dbw) {
+		case 0:
+			if (((in->usr[0].ru_alloc >> 1) <= 8) || ((in->usr[0].ru_alloc >> 1) >= 37 && (in->usr[0].ru_alloc >> 1) <= 40)
+				|| (in->usr[0].ru_alloc >> 1) == 53 || (in->usr[0].ru_alloc >> 1) == 54 || (in->usr[0].ru_alloc >> 1) == 61)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x80 : 0x1;
+			break;
+
+		case 1:
+			if (((in->usr[0].ru_alloc >> 1) <= 8) || ((in->usr[0].ru_alloc >> 1) >= 37 && (in->usr[0].ru_alloc >> 1) <= 40)
+				|| (in->usr[0].ru_alloc >> 1) == 53 || (in->usr[0].ru_alloc >> 1) == 54 || (in->usr[0].ru_alloc >> 1) == 61)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x80 : 0x1;
+
+			else if (((in->usr[0].ru_alloc >> 1) >= 9 && (in->usr[0].ru_alloc >> 1) <= 17) || ((in->usr[0].ru_alloc >> 1) >= 41 && (in->usr[0].ru_alloc >> 1) <= 44)
+				|| (in->usr[0].ru_alloc >> 1) == 55 || (in->usr[0].ru_alloc >> 1) == 56 || (in->usr[0].ru_alloc >> 1) == 62)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x40 : 0x2;
+
+			else if ((in->usr[0].ru_alloc >> 1) == 65)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xc0 : 0x3;
+
+			break;
+
+		case 2:
+			if (((in->usr[0].ru_alloc >> 1) <= 8) || ((in->usr[0].ru_alloc >> 1) >= 37 && (in->usr[0].ru_alloc >> 1) <= 40)
+				|| (in->usr[0].ru_alloc >> 1) == 53 || (in->usr[0].ru_alloc >> 1) == 54 || (in->usr[0].ru_alloc >> 1) == 61)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x80 : 0x1;
+
+			else if (((in->usr[0].ru_alloc >> 1) >= 10 && (in->usr[0].ru_alloc >> 1) <= 17) || ((in->usr[0].ru_alloc >> 1) >= 42 && (in->usr[0].ru_alloc >> 1) <= 44)
+				|| (in->usr[0].ru_alloc >> 1) == 56)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x40 : 0x2;
+
+			else if ((in->usr[0].ru_alloc >> 1) == 9 || (in->usr[0].ru_alloc >> 1) == 41 || (in->usr[0].ru_alloc >> 1) == 55 || (in->usr[0].ru_alloc >> 1) == 62 || (in->usr[0].ru_alloc >> 1) == 65)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xc0 : 0x3;
+
+			else if (((in->usr[0].ru_alloc >> 1) >= 19 && (in->usr[0].ru_alloc >> 1) <= 26) || ((in->usr[0].ru_alloc >> 1) >= 45 && (in->usr[0].ru_alloc >> 1) <= 47)
+				|| (in->usr[0].ru_alloc >> 1) == 57)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x20 : 0x4;
+
+			else if (((in->usr[0].ru_alloc >> 1) >= 28 && (in->usr[0].ru_alloc >> 1) <= 36) || ((in->usr[0].ru_alloc >> 1) >= 49 && (in->usr[0].ru_alloc >> 1) <= 52)
+				|| (in->usr[0].ru_alloc >> 1) == 59 || (in->usr[0].ru_alloc >> 1) == 60 || (in->usr[0].ru_alloc >> 1) == 64)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x10 : 0x8;
+
+			else if ((in->usr[0].ru_alloc >> 1) == 27 || (in->usr[0].ru_alloc >> 1) == 48 || (in->usr[0].ru_alloc >> 1) == 58 || (in->usr[0].ru_alloc >> 1) == 63 || (in->usr[0].ru_alloc >> 1) == 66)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x30 : 0xc;
+
+			else if ((in->usr[0].ru_alloc >> 1) == 18)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x60 : 0x6;
+
+			else if ((in->usr[0].ru_alloc >> 1) == 67)
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xf0 : 0xf;
+
+			break;
+		case 3:
+			if (in->usr[0].ru_alloc & BIT(0)) {
 				if (((in->usr[0].ru_alloc >> 1) <= 8) || ((in->usr[0].ru_alloc >> 1) >= 37 && (in->usr[0].ru_alloc >> 1) <= 40)
 					|| (in->usr[0].ru_alloc >> 1) == 53 || (in->usr[0].ru_alloc >> 1) == 54 || (in->usr[0].ru_alloc >> 1) == 61)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x80 : 0x1;
-				break;
-
-			case 1:
-				if (((in->usr[0].ru_alloc >> 1) <= 8) || ((in->usr[0].ru_alloc >> 1) >= 37 && (in->usr[0].ru_alloc >> 1) <= 40)
-					|| (in->usr[0].ru_alloc >> 1) == 53 || (in->usr[0].ru_alloc >> 1) == 54 || (in->usr[0].ru_alloc >> 1) == 61)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x80 : 0x1;
-
-				else if (((in->usr[0].ru_alloc >> 1) >= 9 && (in->usr[0].ru_alloc >> 1) <= 17) || ((in->usr[0].ru_alloc >> 1) >= 41 && (in->usr[0].ru_alloc >> 1) <= 44)
-					|| (in->usr[0].ru_alloc >> 1) == 55 || (in->usr[0].ru_alloc >> 1) == 56 || (in->usr[0].ru_alloc >> 1) == 62)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x40 : 0x2;
-
-				else if ((in->usr[0].ru_alloc >> 1) == 65)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xc0 : 0x3;
-
-				break;
-
-			case 2:
-				if (((in->usr[0].ru_alloc >> 1) <= 8) || ((in->usr[0].ru_alloc >> 1) >= 37 && (in->usr[0].ru_alloc >> 1) <= 40)
-					|| (in->usr[0].ru_alloc >> 1) == 53 || (in->usr[0].ru_alloc >> 1) == 54 || (in->usr[0].ru_alloc >> 1) == 61)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x80 : 0x1;
-
+					ch20_with_data = 0x10;
 				else if (((in->usr[0].ru_alloc >> 1) >= 10 && (in->usr[0].ru_alloc >> 1) <= 17) || ((in->usr[0].ru_alloc >> 1) >= 42 && (in->usr[0].ru_alloc >> 1) <= 44)
 					|| (in->usr[0].ru_alloc >> 1) == 56)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x40 : 0x2;
-
+					ch20_with_data = 0x20;
 				else if ((in->usr[0].ru_alloc >> 1) == 9 || (in->usr[0].ru_alloc >> 1) == 41 || (in->usr[0].ru_alloc >> 1) == 55 || (in->usr[0].ru_alloc >> 1) == 62 || (in->usr[0].ru_alloc >> 1) == 65)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xc0 : 0x3;
-
+					ch20_with_data = 0x30;
 				else if (((in->usr[0].ru_alloc >> 1) >= 19 && (in->usr[0].ru_alloc >> 1) <= 26) || ((in->usr[0].ru_alloc >> 1) >= 45 && (in->usr[0].ru_alloc >> 1) <= 47)
 					|| (in->usr[0].ru_alloc >> 1) == 57)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x20 : 0x4;
-
+					ch20_with_data = 0x40;
+				else if ((in->usr[0].ru_alloc >> 1) == 18)
+					ch20_with_data = 0x60;
 				else if (((in->usr[0].ru_alloc >> 1) >= 28 && (in->usr[0].ru_alloc >> 1) <= 36) || ((in->usr[0].ru_alloc >> 1) >= 49 && (in->usr[0].ru_alloc >> 1) <= 52)
 					|| (in->usr[0].ru_alloc >> 1) == 59 || (in->usr[0].ru_alloc >> 1) == 60 || (in->usr[0].ru_alloc >> 1) == 64)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x10 : 0x8;
-
+					ch20_with_data = 0x80;
 				else if ((in->usr[0].ru_alloc >> 1) == 27 || (in->usr[0].ru_alloc >> 1) == 48 || (in->usr[0].ru_alloc >> 1) == 58 || (in->usr[0].ru_alloc >> 1) == 63 || (in->usr[0].ru_alloc >> 1) == 66)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x30 : 0xc;
-
-				else if ((in->usr[0].ru_alloc >> 1) == 18)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x60 : 0x6;
-
+					ch20_with_data = 0xc0;
 				else if ((in->usr[0].ru_alloc >> 1) == 67)
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xf0 : 0xf;
-
-				break;
-			case 3:
-				if (in->usr[0].ru_alloc & BIT(0)) {
-					if (((in->usr[0].ru_alloc >> 1) <= 8) || ((in->usr[0].ru_alloc >> 1) >= 37 && (in->usr[0].ru_alloc >> 1) <= 40)
-						|| (in->usr[0].ru_alloc >> 1) == 53 || (in->usr[0].ru_alloc >> 1) == 54 || (in->usr[0].ru_alloc >> 1) == 61)
-						ch20_with_data = 0x10;
-					else if (((in->usr[0].ru_alloc >> 1) >= 10 && (in->usr[0].ru_alloc >> 1) <= 17) || ((in->usr[0].ru_alloc >> 1) >= 42 && (in->usr[0].ru_alloc >> 1) <= 44)
-						|| (in->usr[0].ru_alloc >> 1) == 56)
-						ch20_with_data = 0x20;
-					else if ((in->usr[0].ru_alloc >> 1) == 9 || (in->usr[0].ru_alloc >> 1) == 41 || (in->usr[0].ru_alloc >> 1) == 55 || (in->usr[0].ru_alloc >> 1) == 62 || (in->usr[0].ru_alloc >> 1) == 65)
-						ch20_with_data = 0x30;
-					else if (((in->usr[0].ru_alloc >> 1) >= 19 && (in->usr[0].ru_alloc >> 1) <= 26) || ((in->usr[0].ru_alloc >> 1) >= 45 && (in->usr[0].ru_alloc >> 1) <= 47)
-						|| (in->usr[0].ru_alloc >> 1) == 57)
-						ch20_with_data = 0x40;
-					else if ((in->usr[0].ru_alloc >> 1) == 18)
-						ch20_with_data = 0x60;
-					else if (((in->usr[0].ru_alloc >> 1) >= 28 && (in->usr[0].ru_alloc >> 1) <= 36) || ((in->usr[0].ru_alloc >> 1) >= 49 && (in->usr[0].ru_alloc >> 1) <= 52)
-						|| (in->usr[0].ru_alloc >> 1) == 59 || (in->usr[0].ru_alloc >> 1) == 60 || (in->usr[0].ru_alloc >> 1) == 64)
-						ch20_with_data = 0x80;
-					else if ((in->usr[0].ru_alloc >> 1) == 27 || (in->usr[0].ru_alloc >> 1) == 48 || (in->usr[0].ru_alloc >> 1) == 58 || (in->usr[0].ru_alloc >> 1) == 63 || (in->usr[0].ru_alloc >> 1) == 66)
-						ch20_with_data = 0xc0;
-					else if ((in->usr[0].ru_alloc >> 1) == 67)
-						ch20_with_data = 0xf0;
-					else if ((in->usr[0].ru_alloc >> 1) == 68)
-						ch20_with_data = 0xff;
-				} else {
-					if (((in->usr[0].ru_alloc >> 1) <= 8) || ((in->usr[0].ru_alloc >> 1) >= 37 && (in->usr[0].ru_alloc >> 1) <= 40)
-						|| (in->usr[0].ru_alloc >> 1) == 53 || (in->usr[0].ru_alloc >> 1) == 54 || (in->usr[0].ru_alloc >> 1) == 61)
-						ch20_with_data = 0x1;
-					else if (((in->usr[0].ru_alloc >> 1) >= 10 && (in->usr[0].ru_alloc >> 1) <= 17) || ((in->usr[0].ru_alloc >> 1) >= 42 && (in->usr[0].ru_alloc >> 1) <= 44)
-						|| (in->usr[0].ru_alloc >> 1) == 56)
-						ch20_with_data = 0x2;
-					else if ((in->usr[0].ru_alloc >> 1) == 9 || (in->usr[0].ru_alloc >> 1) == 41 || (in->usr[0].ru_alloc >> 1) == 55 || (in->usr[0].ru_alloc >> 1) == 62 || (in->usr[0].ru_alloc >> 1) == 65)
-						ch20_with_data = 0x3;
-					else if (((in->usr[0].ru_alloc >> 1) >= 19 && (in->usr[0].ru_alloc >> 1) <= 26) || ((in->usr[0].ru_alloc >> 1) >= 45 && (in->usr[0].ru_alloc >> 1) <= 47)
-						|| (in->usr[0].ru_alloc >> 1) == 57)
-						ch20_with_data = 0x4;
-					else if ((in->usr[0].ru_alloc >> 1) == 18)
-						ch20_with_data = 0x6;
-					else if (((in->usr[0].ru_alloc >> 1) >= 28 && (in->usr[0].ru_alloc >> 1) <= 36) || ((in->usr[0].ru_alloc >> 1) >= 49 && (in->usr[0].ru_alloc >> 1) <= 52)
-						|| (in->usr[0].ru_alloc >> 1) == 59 || (in->usr[0].ru_alloc >> 1) == 60 || (in->usr[0].ru_alloc >> 1) == 64)
-						ch20_with_data = 0x8;
-					else if ((in->usr[0].ru_alloc >> 1) == 27 || (in->usr[0].ru_alloc >> 1) == 48 || (in->usr[0].ru_alloc >> 1) == 58 || (in->usr[0].ru_alloc >> 1) == 63 || (in->usr[0].ru_alloc >> 1) == 66)
-						ch20_with_data = 0xc;
-					else if ((in->usr[0].ru_alloc >> 1) == 67)
-						ch20_with_data = 0xf;
-					else if ((in->usr[0].ru_alloc >> 1) == 68)
-						ch20_with_data = 0xff;
-				}
-				break;
-			default:
-				break;
-			}
-		} else {
-			switch (in->dbw) {
-				case 0:
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x80 : 0x1;
-					break;
-				case 1:
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xc0 : 0x3;
-					break;
-				case 2:
-					ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xf0 : 0xf;
-					break;
-				case 3:
+					ch20_with_data = 0xf0;
+				else if ((in->usr[0].ru_alloc >> 1) == 68)
 					ch20_with_data = 0xff;
-					break;
-				default:
-					break;
-			}
-		}
-#if 0 // BE_IC_TYPE
-	}
-#endif
-	return ch20_with_data;
-}
-#if 0 // BE_IC_TYPE
-void halbb_ppdu_type_comp_mode_trans(struct bb_info *bb, bool ul_dl_flag,
-				     enum packet_format_t ppdu_type,
-				     struct plcp_tx_pre_fec_padding_setting_out_t *out_plcp)
-{
-	if (ul_dl_flag == 0)
-		out_plcp->ppdu_type_comp_mode = ppdu_type == EHT_MU_RU_FMT ? 0 : 2;
-	else
-		out_plcp->ppdu_type_comp_mode = ppdu_type == EHT_TB_FMT ? 0 : 1;
-}
-
-bool halbb_punc_ch_info_2_ru_size_idx(struct bb_info *bb, enum plcp_dbw dbw,
-				      u8 ppdu_type_comp_mode, u8 punc_pattern,
-				      struct plcp_tx_pre_fec_padding_setting_out_t *out_plcp)
-{
-	// This is for EHT_MU_SU
-	u8 i = 0;
-	bool pattern_chk = false;
-	const u8 dbw80_punc_pattern[5] = {0xf, 0x7, 0xb, 0xd, 0xe};
-	const u8 dbw160_punc_pattern[13] = {0xff, 0x7f, 0xbf, 0xdf, 0xef, 0xf7, 0xfb, 0xfd, 0xfe,
-					    0x3f, 0xcf, 0xf3, 0xfc};
-	const u8 dbw320_punc_pattern[25] = {0xff, 0x7f, 0xbf, 0xdf, 0xef, 0xf7, 0xfb, 0xfd, 0xfe,
-					    0x3f, 0xcf, 0xf3, 0xfc,
-					    0x1f, 0x2f, 0x37, 0x3b, 0x3d, 0x3e, 0x7c, 0xbc, 0xdc, 0xec, 0xf4, 0xf8};
-
-	BB_DBG(bb, DBG_BIT14,
-	       "[EHT punc_ch_info] dbw=%d, ppdu_type_comp_mode=%d, punc_pattern=%d\n",
-	       dbw, ppdu_type_comp_mode, punc_pattern);
-
-	switch (ppdu_type_comp_mode){
-	case  0:
-		break;
-	case 1:
-	case 2:
-		switch (dbw) {
-		case DBW20:
-			out_plcp->usr[0].ru_idx = 1;
-			out_plcp->usr[0].ru_size = RU242;
-			out_plcp->punc_ch_info = 0;
-			break;
-		case DBW40:
-			out_plcp->usr[0].ru_idx = 1;
-			out_plcp->usr[0].ru_size = RU484;
-			out_plcp->punc_ch_info = 0;
-			break;
-		case DBW80:
-			for (i = 0; i < 5; i++) {
-				if (punc_pattern == dbw80_punc_pattern[i]) {
-					out_plcp->punc_ch_info = i;
-					pattern_chk = true;
-				}
-			}
-			out_plcp->usr[0].ru_idx = out_plcp->punc_ch_info == 0 ? 1 : out_plcp->punc_ch_info;
-			out_plcp->usr[0].ru_size = out_plcp->punc_ch_info == 0 ? RU996 : RU484_242;
-			break;
-		case DBW160:
-			for (i = 0; i < 13; i++) {
-				if (punc_pattern == dbw160_punc_pattern[i]) {
-					out_plcp->punc_ch_info = i;
-					pattern_chk = true;
-				}
-			}
-			if (out_plcp->punc_ch_info == 0) {
-				out_plcp->usr[0].ru_idx = 1;
-				out_plcp->usr[0].ru_size = RU996X2;
-			} else if (out_plcp->punc_ch_info <= 8) {
-				out_plcp->usr[0].ru_idx = out_plcp->punc_ch_info;
-				out_plcp->usr[0].ru_size = RU996_484_242;
-			} else if (out_plcp->punc_ch_info <= 12) {
-				out_plcp->usr[0].ru_idx = out_plcp->punc_ch_info - 8;
-				out_plcp->usr[0].ru_size = RU996_484;
 			} else {
-				BB_DBG(bb, DBG_BIT14, "[EHT punc_ch_info] Invalid puncturing pattern for BW160!\n");
-			}
-			break;
-		case DBW320:
-			for (i = 0; i < 13; i++) {
-				if (punc_pattern == dbw160_punc_pattern[i]) {
-					out_plcp->punc_ch_info = i;
-					pattern_chk = true;
-				}
-			}
-			if (out_plcp->punc_ch_info == 0) {
-				out_plcp->usr[0].ru_idx = 1;
-				out_plcp->usr[0].ru_size = RU996X2;
-			} else if (out_plcp->punc_ch_info <= 8) {
-				out_plcp->usr[0].ru_idx = out_plcp->punc_ch_info;
-				out_plcp->usr[0].ru_size = RU996X3_484;
-			} else if (out_plcp->punc_ch_info <= 12) {
-				out_plcp->usr[0].ru_idx = out_plcp->punc_ch_info - 8;
-				out_plcp->usr[0].ru_size = RU996X3;
-			} else if (out_plcp->punc_ch_info <= 18) {
-				out_plcp->usr[0].ru_idx = out_plcp->punc_ch_info - 6;
-				out_plcp->usr[0].ru_size = RU996X2_484;
-			} else if (out_plcp->punc_ch_info <= 24) {
-				out_plcp->usr[0].ru_idx = out_plcp->punc_ch_info - 18;
-				out_plcp->usr[0].ru_size = RU996X2_484;
-			} else {
-				BB_DBG(bb, DBG_BIT14, "[EHT punc_ch_info] Invalid puncturing pattern for BW320!\n");
+				if (((in->usr[0].ru_alloc >> 1) <= 8) || ((in->usr[0].ru_alloc >> 1) >= 37 && (in->usr[0].ru_alloc >> 1) <= 40)
+					|| (in->usr[0].ru_alloc >> 1) == 53 || (in->usr[0].ru_alloc >> 1) == 54 || (in->usr[0].ru_alloc >> 1) == 61)
+					ch20_with_data = 0x1;
+				else if (((in->usr[0].ru_alloc >> 1) >= 10 && (in->usr[0].ru_alloc >> 1) <= 17) || ((in->usr[0].ru_alloc >> 1) >= 42 && (in->usr[0].ru_alloc >> 1) <= 44)
+					|| (in->usr[0].ru_alloc >> 1) == 56)
+					ch20_with_data = 0x2;
+				else if ((in->usr[0].ru_alloc >> 1) == 9 || (in->usr[0].ru_alloc >> 1) == 41 || (in->usr[0].ru_alloc >> 1) == 55 || (in->usr[0].ru_alloc >> 1) == 62 || (in->usr[0].ru_alloc >> 1) == 65)
+					ch20_with_data = 0x3;
+				else if (((in->usr[0].ru_alloc >> 1) >= 19 && (in->usr[0].ru_alloc >> 1) <= 26) || ((in->usr[0].ru_alloc >> 1) >= 45 && (in->usr[0].ru_alloc >> 1) <= 47)
+					|| (in->usr[0].ru_alloc >> 1) == 57)
+					ch20_with_data = 0x4;
+				else if ((in->usr[0].ru_alloc >> 1) == 18)
+					ch20_with_data = 0x6;
+				else if (((in->usr[0].ru_alloc >> 1) >= 28 && (in->usr[0].ru_alloc >> 1) <= 36) || ((in->usr[0].ru_alloc >> 1) >= 49 && (in->usr[0].ru_alloc >> 1) <= 52)
+					|| (in->usr[0].ru_alloc >> 1) == 59 || (in->usr[0].ru_alloc >> 1) == 60 || (in->usr[0].ru_alloc >> 1) == 64)
+					ch20_with_data = 0x8;
+				else if ((in->usr[0].ru_alloc >> 1) == 27 || (in->usr[0].ru_alloc >> 1) == 48 || (in->usr[0].ru_alloc >> 1) == 58 || (in->usr[0].ru_alloc >> 1) == 63 || (in->usr[0].ru_alloc >> 1) == 66)
+					ch20_with_data = 0xc;
+				else if ((in->usr[0].ru_alloc >> 1) == 67)
+					ch20_with_data = 0xf;
+				else if ((in->usr[0].ru_alloc >> 1) == 68)
+					ch20_with_data = 0xff;
 			}
 			break;
 		default:
 			break;
 		}
-		break;
-	default:
-		break;
-	}
-
-	BB_DBG(bb, DBG_BIT14, "[EHT punc_ch_info] ru_idx=%d, ru_size=%d\n",
-	       out_plcp->usr[0].ru_idx, out_plcp->usr[0].ru_size);
-
-	return pattern_chk;
-}
-
-u32 halbb_ru_size_id_2_ru_alloc(struct bb_info *bb, u8 ru_id, u8 ru_size, u8 prim_sb, enum plcp_dbw dbw)
-{
-	u32 ru_alloc = 0;
-//	out_plcp->usr[0].ru_idx = 1;
-//	out_plcp->usr[0].ru_size = RU242;
-	const u8 BW80_RU_id_max_table[12] = {37, 16, 8, 4, 2, 1, 0, 0, 0, 12, 8, 4};
-	const u8 RU_allocation_offset_table[17] = {0, 37, 53, 61, 65, 67, 68, 0, 69, 70, 82, 90, 94, 96, 100, 104, 105};
-	const u8 RU996x2_484_allocation_offset_table_specific[12] = {0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3};
-	u8 seg_p160_p80, seg_p160_s80, seg_s160_l80, seg_s160_u80;
-	bool B_0, PS160;
-	u8 loc_80, BW80_RU_id;
-	bool B0_RU996_484[8] = {0, 0, 1, 1, 0, 0, 1, 1};
-	bool B0_RU996_484_242[16] = {0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1};
-	bool PS160_RU996x2[2] = {0, 1};
-	bool B0_RU996x2_484[12] = {0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1};
-	bool PS160_RU996x2_484[12] = {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1};
-	bool B0_RU996x3[4] = {0, 1, 0, 1};
-	bool PS160_RU996x3[4] = {0, 0, 1, 1};
-	bool B0_RU996x3_484[8] = {0, 0, 1, 1, 0, 0, 1, 1};
-	bool PS160_RU996x3_484[8] = {0, 0, 0, 0, 1, 1, 1, 1};
-
-	if (dbw <= DBW80) {
-		if ((ru_size <= RU996) || (ru_size >= RU52_26 && ru_size <= RU484_242))
-			BB_WARNING("Illegal ru_size in BW80 !!");
-		PS160 = 0;
-		B_0 = 0;
-		ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + ru_id - 1) * 2 + B_0;
-	} else if (dbw == DBW160) {
-		PS160 = 0;
-
-		if (ru_size == RU996_484) {
-			if (ru_id > 0 && ru_id <= 4)
-				BB_WARNING("Illegal ru_id when ru_size = RU996_484 in BW160 !!");
-			B_0 = B0_RU996_484[ru_id - 1];
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id % 2 == 0 ? 1 : 0)) * 2 + B_0;
-		} else if (ru_size == RU996_484_242) {
-			if (ru_id > 0 && ru_id <= 8)
-				BB_WARNING("Illegal ru_id when ru_size = RU996_484_242 in BW160 !!");
-			B_0 = B0_RU996_484_242[ru_id - 1];
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id > 4 ? ru_id - 4 : ru_id) - 1) * 2 + B_0;
-		} else if (ru_size == RU996X2) {
-			if (ru_id == 1)
-				BB_WARNING("Illegal ru_id when ru_size = RU996x2 in BW160 !!");
-			B_0 = 1;
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + ru_id - 1) * 2 + B_0;
-		} else { // RU_size <= RU996
-			if (prim_sb < 4) {
-				seg_p160_p80 = 0;
-				seg_p160_s80 = 1;
-			} else if (prim_sb < 8) {
-				seg_p160_p80 = 1;
-				seg_p160_s80 = 0;
-			} else {
-				BB_WARNING("prim_sb is illegal !!");
-			}
-
-			// Determine which 80 it lacates
-			if (ru_size <= RU484_242)
-				BB_WARNING("Illegal ru_size in BW160 !!");
-
-			loc_80 = (ru_id % BW80_RU_id_max_table[ru_size] == 0) ? (ru_id / BW80_RU_id_max_table[ru_size] - 1) : (ru_id / BW80_RU_id_max_table[ru_size]);
-
-			if (loc_80 >= 0 && loc_80 <= 1)
-				BB_WARNING("loc_80 is illegal in BW160 !!");
-
-			if (loc_80 == seg_p160_s80)
-				B_0 = 1;
-			else
-				B_0 = 0;
-
-			BW80_RU_id = ru_id - loc_80 * BW80_RU_id_max_table[ru_size];
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + BW80_RU_id - 1) * 2 + B_0;
-		}
-	} else if (dbw == DBW320) {
-		if (ru_size == RU996_484) {
-			if (ru_id > 0 && ru_id <= 8)
-				BB_WARNING("Illegal ru_id when ru_size = RU996_484 in BW320 !!");
-
-			B_0 = B0_RU996_484[ru_id - 1];
-
-			if (prim_sb >= 8) { //[S160][P160]
-				if (ru_id >= 5)
-					PS160 = 0;
-				else
-					PS160 = 1;
-			} else {//[P160][S160]
-				if (ru_id >= 5)
-					PS160 = 1;
-				else
-					PS160 = 0;
-			}
-
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + ((ru_id % 2) == 0 ? 1 : 0)) * 2 + B_0;
-		} else if (ru_size == RU996_484_242) {
-			if (ru_id > 0 && ru_id <= 16)
-				BB_WARNING("Illegal ru_id when ru_size = RU996_484_242 in BW320 !!");
-
-			B_0 = B0_RU996_484_242[ru_id - 1];
-
-			if (prim_sb >= 8) { //[S160][P160]
-				if (ru_id >= 9)
-					PS160 = 0;
-				else
-					PS160 = 1;
-			} else { //[P160][S160]
-				if (ru_id >= 9)
-					PS160 = 1;
-				else
-					PS160 = 0;
-			}
-
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id > 4 ? ru_id - 4 : ru_id) - 1) * 2 + B_0;
-		} else if (ru_size == RU996X2) {
-			if (ru_id > 0 && ru_id <= 2)
-				BB_WARNING("Illegal ru_id when ru_size = RU996x2 in BW320 !!");
-
-			B_0 = 1;
-			PS160 = PS160_RU996x2[ru_id - 1];
-
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size]) * 2 + B_0;
-		} else if (ru_size == RU996X2_484) {
-			if (ru_id > 0 && ru_id <= 12)
-				BB_WARNING("Illegal ru_id when ru_size = RU996x2_484 in BW320 !!");
-
-			B_0 = B0_RU996x2_484[ru_id - 1];
-			PS160 = PS160_RU996x2_484[ru_id - 1];
-
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + RU996x2_484_allocation_offset_table_specific[ru_id - 1]) * 2 + B_0;
-		} else if (ru_size == RU996X3) {
-			if (ru_id >0 && ru_id <= 4)
-				BB_WARNING("Illegal ru_id when ru_size = RU996x3 in BW320 !!");
-
-			B_0 = B0_RU996x3[ru_id - 1];
-			PS160 = PS160_RU996x3[ru_id - 1];
-
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size]) * 2 + B_0;
-		} else if (ru_size == RU996X3_484) {
-			if (ru_id > 0 && ru_id <= 8)
-				BB_WARNING("Illegal ru_id when ru_size = RU996x3_484 in BW320 !!");
-
-			B_0 = B0_RU996x3_484[ru_id - 1];
-			PS160 = PS160_RU996x3_484[ru_id - 1];
-
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id % 2 == 0 ? 1 : 0)) * 2 + B_0;
-		} else if (ru_size == RU996X4) {
-			if (ru_id == 1)
-				BB_WARNING("Illegal ru_id when ru_size = RU996x4 in BW320 !!");
-
-			B_0 = 1;
-			PS160 = 1;
-
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id % 2 == 0 ? 1 : 0)) * 2 + B_0;
-		} else {// ru_size <= RU996
-			// Determine seg_p160_p80, seg_p160_s80. seg_s160_l80, seg_s160_u80 by prim_sb
-			if (prim_sb < 4) {
-				seg_p160_p80 = 0;
-				seg_p160_s80 = 1;
-				seg_s160_l80 = 2;
-				seg_s160_u80 = 3;
-			} else if (prim_sb < 8) {
-				seg_p160_p80 = 1;
-				seg_p160_s80 = 0;
-				seg_s160_l80 = 2;
-				seg_s160_u80 = 3;
-			} else if (prim_sb < 12) {
-				seg_p160_p80 = 2;
-				seg_p160_s80 = 3;
-				seg_s160_l80 = 0;
-				seg_s160_u80 = 1;
-			} else if (prim_sb < 16) {
-				seg_p160_p80 = 3;
-				seg_p160_s80 = 2;
-				seg_s160_l80 = 0;
-				seg_s160_u80 = 1;
-			} else {
-				BB_WARNING("prim_sb is illegal !!");
-			}
-
-			if (ru_size <= RU484_242)
-				BB_WARNING("Illegal ru_size in BW320 !!");
-
-			loc_80 = ru_id % BW80_RU_id_max_table[ru_size] == 0 ? (ru_id / BW80_RU_id_max_table[ru_size] - 1) : (ru_id / BW80_RU_id_max_table[ru_size]);
-
-			if (loc_80 >= 0 && loc_80 <= 3)
-				BB_WARNING("loc_80 is illegal in BW320 !!");
-
-			if (loc_80 == seg_p160_p80 || loc_80 == seg_p160_s80)
-				PS160 = 0;
-			else
-				PS160 = 1;
-
-			if (loc_80 == seg_p160_s80 || loc_80 == seg_s160_u80)
-				B_0 = 1;
-			else
-				B_0 = 0;
-
-			BW80_RU_id = ru_id - loc_80 * BW80_RU_id_max_table[ru_size];
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + BW80_RU_id - 1) * 2 + B_0;
+	} else {
+		switch (in->dbw) {
+			case 0:
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0x80 : 0x1;
+				break;
+			case 1:
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xc0 : 0x3;
+				break;
+			case 2:
+				ch20_with_data = ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) || (bb->ic_type == BB_RTL8851B)) ? 0xf0 : 0xf;
+				break;
+			case 3:
+				ch20_with_data = 0xff;
+				break;
+			default:
+				break;
 		}
 	}
 
-	return ru_alloc;
+	return ch20_with_data;
 }
-#endif
+
 void halbb_he_sigb(struct bb_info *bb, struct halbb_plcp_info *in,
 		   struct plcp_tx_pre_fec_padding_setting_in_t *in_plcp,
 		   enum phl_phy_idx phy_idx)
@@ -1003,7 +317,7 @@ void halbb_he_sigb(struct bb_info *bb, struct halbb_plcp_info *in,
 	bool he_sigb_pol = false;
 	u16 he_n_sigb_sym = 0;
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	u32 n_sym_sigb_ch1_phy0[16] = {cr->he_sigb_ch1_0, cr->he_sigb_ch1_1,
 				       cr->he_sigb_ch1_2, cr->he_sigb_ch1_3,
@@ -1095,50 +409,41 @@ bool halbb_ru_info_init(struct bb_info *bb, struct halbb_plcp_info *in,
 {
 	u8 i = 0;
 	bool invalid_chk = false;
-#if 0 // BE_IC_TYPE
-	if (bb->ic_type >= BB_RLE1115) { // [BE]
-		halbb_ppdu_type_comp_mode_trans(bb, (bool)in->ul_flag, in->ppdu_type, out);
-		invalid_chk = halbb_punc_ch_info_2_ru_size_idx(bb, in->dbw, (u8)out->ppdu_type_comp_mode, (u8)in->punc_pattern, out);
-		for (i = 0; i < in->n_user; i++)
-			in_plcp->usr[i].ru_size_idx = in->ppdu_type >= EHT_MU_SU_FMT ? (enum ru_sizes_list) out->usr[i].ru_size : (enum ru_sizes_list) in->usr[i].ru_size;
-	} else { // [AX]
-#endif
-		if (in->ppdu_type == HE_SU_FMT) { //HE_SU
-			if (in->dbw == 0)
-				in->usr[0].ru_alloc = 122;
-			else if (in->dbw == 1)
-				in->usr[0].ru_alloc = 130;
-			else if (in->dbw == 2)
-				in->usr[0].ru_alloc = 134;
-			else
-				in->usr[0].ru_alloc = 137;
-		} else if (in->ppdu_type == HE_ER_SU_FMT) { //HE_ER_SU
-			if (in->he_er_u106ru_en)
-				in->usr[0].ru_alloc = 108;
-			else
-				in->usr[0].ru_alloc = 122;
-		}
 
-		if (in->ppdu_type == HE_TB_FMT) {
-			in->n_user = 1;
-			// === Set ru_size_idx === //
-			if((in->usr[0].ru_alloc >> 1) < 37)
-				in_plcp->usr[0].ru_size_idx = 0;
-			else if((in->usr[0].ru_alloc >> 1) < 53)
-				in_plcp->usr[0].ru_size_idx = 1;
-			else if((in->usr[0].ru_alloc >> 1) < 61)
-				in_plcp->usr[0].ru_size_idx = 2;
-			else if((in->usr[0].ru_alloc >> 1) < 65)
-				in_plcp->usr[0].ru_size_idx = 3;
-			else if((in->usr[0].ru_alloc >> 1) < 67)
-				in_plcp->usr[0].ru_size_idx = 4;
-			else
-				in_plcp->usr[0].ru_size_idx = 5;
-		}
-		invalid_chk = true;
-#if 0 // BE_IC_TYPE
+	if (in->ppdu_type == HE_SU_FMT) { //HE_SU
+		if (in->dbw == 0)
+			in->usr[0].ru_alloc = 122;
+		else if (in->dbw == 1)
+			in->usr[0].ru_alloc = 130;
+		else if (in->dbw == 2)
+			in->usr[0].ru_alloc = 134;
+		else
+			in->usr[0].ru_alloc = 137;
+	} else if (in->ppdu_type == HE_ER_SU_FMT) { //HE_ER_SU
+		if (in->he_er_u106ru_en)
+			in->usr[0].ru_alloc = 108;
+		else
+			in->usr[0].ru_alloc = 122;
 	}
-#endif
+
+	if (in->ppdu_type == HE_TB_FMT) {
+		in->n_user = 1;
+		// === Set ru_size_idx === //
+		if((in->usr[0].ru_alloc >> 1) < 37)
+			in_plcp->usr[0].ru_size_idx = 0;
+		else if((in->usr[0].ru_alloc >> 1) < 53)
+			in_plcp->usr[0].ru_size_idx = 1;
+		else if((in->usr[0].ru_alloc >> 1) < 61)
+			in_plcp->usr[0].ru_size_idx = 2;
+		else if((in->usr[0].ru_alloc >> 1) < 65)
+			in_plcp->usr[0].ru_size_idx = 3;
+		else if((in->usr[0].ru_alloc >> 1) < 67)
+			in_plcp->usr[0].ru_size_idx = 4;
+		else
+			in_plcp->usr[0].ru_size_idx = 5;
+	}
+	invalid_chk = true;
+
 	// HE SIG-B
 	if (in->ppdu_type == HE_MU_FMT) {
 		halbb_he_sigb(bb, in, in_plcp, phy_idx);
@@ -1243,7 +548,7 @@ void halbb_plcp_lsig(struct bb_info *bb, struct halbb_plcp_info *in,
 	u32 lsig_bits = 0;
 	u32 lsig = 0;
 	u8 i = 0;
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	BB_DBG(bb, DBG_BIT14, "<====== %s ======>\n", __func__);
 
@@ -1303,91 +608,11 @@ void halbb_plcp_siga(struct bb_info *bb, struct halbb_plcp_info *in,
 	u8 crc4_out = 0;
 	u8 i = 0;
 	u8 n_he_ltf[8] = { 0, 1, 1, 2, 2, 3, 3, 4 };
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	BB_DBG(bb, DBG_BIT14, "<====== %s ======>\n", __func__);
-#if 0 // BE_IC_TYPE
-	if ((in->ppdu_type >= EHT_MU_SU_FMT) && (in->ppdu_type <= EHT_MU_RU_FMT)) {
-		/*=== U-SIG-1 ===*/
-		halbb_set_bit(0, 3, 0, &siga1);
-		halbb_set_bit(3, 3, in->dbw, &siga1);
-		halbb_set_bit(6, 1, in->ul_flag, &siga1);
-		halbb_set_bit(7, 6, in->bss_color, &siga1);
-		halbb_set_bit(13, 7, in->txop, &siga1);
-		halbb_set_bit(20, 5, 0x1f, &siga1);
-		halbb_set_bit(25, 1, 1, &siga1);
-		/*=== U-SIG-2 ===*/
-		halbb_set_bit(0, 2, out_plcp->ppdu_type_comp_mode, &siga2);
-		halbb_set_bit(2, 1, 1, &siga2);
-		halbb_set_bit(3, 5, out_plcp->punc_ch_info, &siga2);
-		halbb_set_bit(8, 1, 1, &siga2);
-		halbb_set_bit(9, 2, in->eht_sig_mcs, &siga2);
-		halbb_set_bit(11, 5, out_plcp->n_sym_ehtsig, &siga2);
-		//CRC4//
-		//--- Set U-SIG-1 ---
-		for(i = 0; i < 26; i++)
-			siga_bits[i] = (siga1 >> i) & 0x1 ;
-		//--- Set U-SIG-2 ---
-		for(i = 0; i < 16; i++)
-			siga_bits[i + 26] = (siga2 >> i) & 0x1 ;
-		crc8_out = halbb_set_crc8(bb, siga_bits, 42);
-		crc4_out = crc8_out & 0xf;
-		halbb_set_bit(16, 4, crc4_out, &siga2);
-		halbb_set_bit(20, 6, 0, &siga2);
-	} else if (in->ppdu_type >= EHT_TB_FMT) {
-		/*=== U-SIG-1 ===*/
-		halbb_set_bit(0, 3, 0, &siga1);
-		halbb_set_bit(3, 3, in->dbw, &siga1);
-		halbb_set_bit(6, 1, in->ul_flag, &siga1);
-		halbb_set_bit(7, 6, in->bss_color, &siga1);
-		halbb_set_bit(13, 7, in->txop, &siga1);
-		halbb_set_bit(20, 6, 0, &siga1);
-		/*=== U-SIG-2 ===*/
-		halbb_set_bit(0, 2, out_plcp->ppdu_type_comp_mode, &siga2);
-		halbb_set_bit(2, 1, 0, &siga2);
-		halbb_set_bit(3, 4, in->ul_srp1, &siga2);
-		halbb_set_bit(7, 4, in->ul_srp2, &siga2);
-		halbb_set_bit(11, 5, 0, &siga2);
-		//CRC4//
-		//--- Set U-SIG-1 ---
-		for(i = 0; i < 26; i++)
-			siga_bits[i] = (siga1 >> i) & 0x1 ;
-		//--- Set U-SIG-2 ---
-		for(i = 0; i < 16; i++)
-			siga_bits[i + 26] = (siga2 >> i) & 0x1 ;
-		crc8_out = halbb_set_crc8(bb, siga_bits, 42);
-		crc4_out = crc8_out & 0xf;
-		halbb_set_bit(16, 4, crc4_out, &siga2);
-		halbb_set_bit(20, 6, 0, &siga2);
-	} else if (in->ppdu_type == EHT_MU_ERSU_FMT) {
-		/*=== U-SIG-1 ===*/
-		halbb_set_bit(0, 3, 0, &siga1);
-		halbb_set_bit(3, 3, in->dbw, &siga1);
-		halbb_set_bit(6, 1, in->ul_flag, &siga1);
-		halbb_set_bit(7, 6, in->bss_color, &siga1);
-		halbb_set_bit(13, 7, in->txop, &siga1);
-		halbb_set_bit(20, 6, 0x3f, &siga1);
-		/*=== U-SIG-2 ===*/
-		halbb_set_bit(0, 16, 0xffff, &siga2);
-		halbb_set_bit(2, 1, 0, &siga2);
-		halbb_set_bit(3, 4, in->ul_srp1, &siga2);
-		halbb_set_bit(7, 4, in->ul_srp2, &siga2);
-		halbb_set_bit(11, 5, 0, &siga2);
-		//CRC4//
-		//--- Set U-SIG-1 ---
-		for(i = 0; i < 26; i++)
-			siga_bits[i] = (siga1 >> i) & 0x1 ;
-		//--- Set U-SIG-2 ---
-		for(i = 0; i < 16; i++)
-			siga_bits[i + 26] = (siga2 >> i) & 0x1 ;
-		crc8_out = halbb_set_crc8(bb, siga_bits, 42);
-		crc4_out = crc8_out & 0xf;
-		halbb_set_bit(16, 4, crc4_out, &siga2);
-		halbb_set_bit(20, 6, 0, &siga2);
-	} else if ((in->ppdu_type == HE_SU_FMT) || (in->ppdu_type == HE_ER_SU_FMT)) { // HE_SU SIG-A //
-#else
-		if ((in->ppdu_type == HE_SU_FMT) || (in->ppdu_type == HE_ER_SU_FMT)) { // HE_SU SIG-A //
-#endif
+
+	if ((in->ppdu_type == HE_SU_FMT) || (in->ppdu_type == HE_ER_SU_FMT)) { // HE_SU SIG-A //
 		/*=== SIG-A1 ===*/
 		halbb_set_bit(0, 1, 1, &siga1);
 		halbb_set_bit(1, 1, in->beamchange_en, &siga1);
@@ -1444,8 +669,7 @@ void halbb_plcp_siga(struct bb_info *bb, struct halbb_plcp_info *in,
 		crc4_out = crc8_out & 0xf;
 		halbb_set_bit(16, 4, crc4_out, &siga2);
 		halbb_set_bit(20, 6, 0, &siga2);
-	}
-	else if (in->ppdu_type == HE_MU_FMT) { // HE MU SIG-A //
+	} else if (in->ppdu_type == HE_MU_FMT) { // HE MU SIG-A //
 		/*=== SIG-A1 ===*/
 		halbb_set_bit(0, 1, in->ul_flag, &siga1);
 		halbb_set_bit(1, 3, in->he_mcs_sigb, &siga1);
@@ -1484,8 +708,7 @@ void halbb_plcp_siga(struct bb_info *bb, struct halbb_plcp_info *in,
 		halbb_set_bit(16, 4, crc4_out, &siga2);
 		halbb_set_bit(20, 6, 0, &siga2);
 		halbb_set_bit(20, 6, 0, &siga2);
-	}
-	else if (in->ppdu_type == HE_TB_FMT) { // HE_TB SIG-A //
+	} else if (in->ppdu_type == HE_TB_FMT) { // HE_TB SIG-A //
 		/*=== SIG-A1 ===*/
 		halbb_set_bit(0, 1, 0, &siga1);
 		halbb_set_bit(1, 6, in->bss_color, &siga1);
@@ -1509,8 +732,7 @@ void halbb_plcp_siga(struct bb_info *bb, struct halbb_plcp_info *in,
 		crc4_out = crc8_out & 0xf;
 		halbb_set_bit(16, 4, crc4_out, &siga2);
 		halbb_set_bit(20, 6, 0, &siga2);
-	}
-	else if (in->ppdu_type == VHT_FMT) {// VHT SIG-A //
+	} else if (in->ppdu_type == VHT_FMT) {// VHT SIG-A //
 		/*=== SIG-A1 ===*/
 		halbb_set_bit(0, 2, in->dbw, &siga1);
 		halbb_set_bit(2, 1, 1, &siga1); // rsvd //
@@ -1541,8 +763,7 @@ void halbb_plcp_siga(struct bb_info *bb, struct halbb_plcp_info *in,
 		crc8_out = halbb_set_crc8(bb, siga_bits, 34);
 		halbb_set_bit(10, 8, crc8_out, &siga2);
 		halbb_set_bit(18, 6, 0, &siga2);
-	}
-	else if (in->ppdu_type == HT_MF_FMT) {// HT_MF SIG-A //
+	} else if (in->ppdu_type == HT_MF_FMT) {// HT_MF SIG-A //
 		/*=== SIG-A1 ===*/
 		halbb_set_bit(0, 7, in->usr[0].mcs, &siga1);
 		halbb_set_bit(7, 1, in->dbw, &siga1);
@@ -1585,7 +806,7 @@ void halbb_cfg_txinfo(struct bb_info *bb, struct halbb_plcp_info *in,
 	u8 i = 0;
 	u32 max_mcs = 0;
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	BB_DBG(bb, DBG_BIT14, "<====== %s ======>\n", __func__);
 
@@ -1669,7 +890,7 @@ void halbb_cfg_txctrl(struct bb_info *bb, struct halbb_plcp_info *in,
 {
 	u8 i = 0;
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	u32 pw_boost_fac[4] = {cr->usr0_pw_boost_fctr_db, cr->usr1_pw_boost_fctr_db,
 						   cr->usr2_pw_boost_fctr_db, cr->usr3_pw_boost_fctr_db};
@@ -1873,7 +1094,7 @@ void halbb_plcp_delimiter(struct bb_info *bb, struct halbb_plcp_info *in,
 	u8 i = 0;
 	u8 j = 0;
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	u32 delmter[4] = {cr->usr0_delmter, cr->usr1_delmter, cr->usr2_delmter,
 					  cr->usr3_delmter};
@@ -1939,7 +1160,7 @@ void halbb_plcp_delimiter(struct bb_info *bb, struct halbb_plcp_info *in,
 
 void halbb_cfg_cck(struct bb_info *bb, struct halbb_plcp_info *in, enum phl_phy_idx phy_idx)
 {
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 
 	if ((bb->ic_type == BB_RTL8852A) || (bb->ic_type == BB_RTL8852B) ||
@@ -1990,7 +1211,7 @@ void halbb_vht_sigb(struct bb_info *bb, struct halbb_plcp_info *in,
 	unsigned char sigb[32] = {0};
 	u8 i = 0;
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	u32 vht_sigb_cr[4] = {cr->vht_sigb0, cr->vht_sigb1, cr->vht_sigb2,
 						  cr->vht_sigb3};
@@ -2051,7 +1272,7 @@ void halbb_service(struct bb_info *bb, struct halbb_plcp_info *in,
 	u8 i = 0;
 	u32 scrambler_seed[4] = {0};
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	u32 service[4] = {cr->usr0_service, cr->usr1_service, cr->usr2_service,
 					  cr->usr3_service};
@@ -2070,13 +1291,13 @@ void halbb_service(struct bb_info *bb, struct halbb_plcp_info *in,
 	}
 }
 
-enum plcp_sts halbb_plcp_gen_6(struct bb_info *bb, struct halbb_plcp_info *in,
+enum plcp_sts halbb_plcp_gen_ax(struct bb_info *bb, struct halbb_plcp_info *in,
 		    struct usr_plcp_gen_in *user, enum phl_phy_idx phy_idx)
 {
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 	enum plcp_sts tmp = PLCP_SUCCESS;
-	struct plcp_tx_pre_fec_padding_setting_in_t in_plcp;
-	struct plcp_tx_pre_fec_padding_setting_out_t out;
+	struct plcp_tx_pre_fec_padding_setting_in_t in_plcp = {0};
+	struct plcp_tx_pre_fec_padding_setting_out_t out = {0};
 	//struct _bb_result he_result;
 
 #ifdef HALBB_FW_OFLD_SUPPORT
@@ -2091,30 +1312,16 @@ enum plcp_sts halbb_plcp_gen_6(struct bb_info *bb, struct halbb_plcp_info *in,
 
 	if (!halbb_ru_info_init(bb, in, &in_plcp, &out, phy_idx))
 		return SPEC_INVALID;
-#if 0 // BE_IC_TYPE
-	if (bb->ic_type >= BB_RLE1115)
-		halbb_ppdu_var_type_cfg(bb, in, phy_idx);
-#endif
+
 	// CCK
 	if (in->ppdu_type == B_MODE_FMT) {
 		halbb_cfg_cck(bb, in, phy_idx);
 		if ((in->usr[0].mcs == 0) && (in->long_preamble_en == 0))
 			tmp = CCK_INVALID;
 	} else {
-#if 0 // BE_IC_TYPE
-		if (in->ppdu_type >= EHT_MU_SU_FMT) {
-			// Calculate user specific field & EHT_SIG_Nsym (with incorrect common field para.)
-			halbb_eht_sig(bb, in, &in_plcp, &out, phy_idx);
-			// Calculate PLCP header with EHT_SIG_Nsym
-			tmp = halbb_tx_plcp_cal(bb, &in_plcp, &out);
-			// Overwrite common field & CRC with correct para. such as pre_fec_padding...
-			halbb_eht_sig(bb, in, &in_plcp, &out, phy_idx);
-		} else {
-#endif			// PLCP calculation
-			tmp = halbb_tx_plcp_cal(bb, &in_plcp, &out);
-#if 0 // BE_IC_TYPE
-		}
-#endif		// VHT SIG-B
+		// PLCP calculation
+		tmp = halbb_tx_plcp_cal(bb, &in_plcp, &out);
+		// VHT SIG-B
 		if (in->ppdu_type == VHT_FMT)
 			halbb_vht_sigb(bb, in, &out, phy_idx);
 		else
@@ -2150,10 +1357,10 @@ enum plcp_sts halbb_plcp_gen(struct bb_info *bb, struct halbb_plcp_info *in,
 
 	switch (bb->bb_80211spec) {
 	case BB_AX_IC:
-		rpt = halbb_plcp_gen_6(bb, in, user, phy_idx);
+		rpt = halbb_plcp_gen_ax(bb, in, user, phy_idx);
 		break;
 	case BB_BE_IC:
-		rpt = halbb_plcp_gen_7(bb, in, user, phy_idx);
+		rpt = halbb_plcp_gen_be(bb, in, user, phy_idx);
 		break;
 	default:
 		break;
@@ -2164,8 +1371,7 @@ enum plcp_sts halbb_plcp_gen(struct bb_info *bb, struct halbb_plcp_info *in,
 
 void halbb_cr_cfg_plcp_init(struct bb_info *bb)
 {
-	struct bb_plcp_info *plcp_info = &bb->bb_plcp_i;
-	struct bb_plcp_cr_info *cr = &plcp_info->bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	switch (bb->cr_type) {
 
@@ -3123,6 +2329,98 @@ void halbb_cr_cfg_plcp_init(struct bb_info *bb)
 		BB_TRACE("[%s] BBCR Hook dump\n", __func__);
 		halbb_cr_hook_init_dump(bb, (u32 *)cr, (sizeof(struct bb_plcp_cr_info) >> 2));
 	}
+}
+
+void halbb_plcp_ofdm_6m(struct bb_info *bb, struct halbb_plcp_info *in,
+			struct usr_plcp_gen_in *user, char input[][16], u32 *_used,
+			char *output, u32 *_out_len)
+{
+	in->source_gen_mode=2;
+	in->locked_clk=1;
+	in->dyn_bw=0;
+	in->ndp_en=0;
+	in->long_preamble_en=1;
+	in->stbc=0;
+	in->gi=0;
+	in->tb_l_len=0;
+	in->tb_ru_tot_sts_max=0;
+	in->vht_txop_not_allowed=0;
+	in->tb_disam=0;
+	in->doppler=0;
+	in->he_ltf_type=0;
+	in->ht_l_len=0;
+	in->preamble_puncture=0;
+	in->he_mcs_sigb=0;
+	in->he_dcm_sigb=0;
+	in->he_sigb_compress_en=1;
+	in->max_tx_time_0p4us=0;
+	in->ul_flag=0;
+	in->tb_ldpc_extra=0;
+	in->bss_color=10;
+	in->sr=0;
+	in->beamchange_en=1;
+	in->he_er_u106ru_en=0;
+	in->ul_srp1=0;
+	in->ul_srp2=0;
+	in->ul_srp3=0;
+	in->ul_srp4=0;
+	in->mode=0;
+	in->group_id=63;
+	in->ppdu_type=1;
+	in->txop=127;
+	in->tb_strt_sts=0;
+	in->tb_pre_fec_padding_factor=0;
+	in->cbw=0;
+	in->txsc=0;
+	in->tb_mumimo_mode_en=0;
+	in->dbw=0;
+	in->nominal_t_pe=2;
+	in->ness=0;
+	in->n_user=1;
+	in->tb_rsvd=0;
+	in->punc_pattern=15;
+	in->eht_mcs_sig=0;
+	in->txsb=0;
+
+	in->usr[0].mcs=0;
+	in->usr[0].mpdu_len=0;
+	in->usr[0].n_mpdu=0;
+	in->usr[0].fec=0;
+	in->usr[0].dcm=0;
+	in->usr[0].aid=0;
+	in->usr[0].scrambler_seed=92;
+	in->usr[0].random_init_seed=20;
+	in->usr[0].apep=100;
+	in->usr[0].ru_alloc=0;
+	in->usr[0].nss=1;
+	in->usr[0].txbf=0;
+	in->usr[0].pwr_boost_db=0;
+	in->usr[0].ru_size=0;
+	in->usr[0].ru_idx=0;
+}
+
+void halbb_plcp_cmd_dbg(struct bb_info *bb, enum phl_phy_idx phy_idx,
+		    char input[][16], u32 *_used, char *output, u32 *_out_len)
+{
+	struct halbb_plcp_info *in = &bb->plcp_in;
+	if (_os_strcmp(input[1], "-h") == 0) {
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "set : set input argument\n");
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "show : show parameters setting\n");
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "default : set parameters as default value\n");
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "gen : plcp gen\n");
+		return;
+	}
+
+	if (_os_strcmp(input[1], "default") == 0){
+		halbb_mp_plcp_hdr_init(bb);
+	} else if (_os_strcmp(input[1], "gen") == 0){
+		halbb_plcp_gen(bb, in, in->usr, phy_idx);
+	}
+
 }
 
 void halbb_plcp_init(struct bb_info *bb)

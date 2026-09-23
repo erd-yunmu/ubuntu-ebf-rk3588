@@ -92,9 +92,20 @@ enum rtw_hal_status rtw_hal_fw_log_cfg(void *halcom, u8 op, u8 type, u32 value)
 {
 	struct rtw_hal_com_t *hal_com = (struct rtw_hal_com_t *)halcom;
 	static struct rtw_hal_fw_log_cfg fl_cfg = {0};
+	struct hal_info_t *hal_info = NULL;
 
 	switch(op) {
 	case FL_CFG_OP_SET:
+		if (type == FL_CFG_TYPE_LEVEL) {
+			hal_info = (struct hal_info_t *)hal_com->hal_priv;
+			if (hal_info && !IS_FW_LOG_DUMP_ALLOWED(hal_info->phl_com)) {
+				value = FL_LV_OFF;
+				PHL_INFO("%s(): force log level to (%d) due to IS_FW_LOG_DUMP_ALLOWED(%d)\n",
+						__func__,
+						value,
+						(IS_FW_LOG_DUMP_ALLOWED(hal_info->phl_com) > 0));
+			}
+		}
 		_hal_fw_log_set(&fl_cfg, type, value);
 		break;
 	case FL_CFG_OP_CLR:
@@ -110,6 +121,14 @@ enum rtw_hal_status rtw_hal_fw_log_cfg(void *halcom, u8 op, u8 type, u32 value)
 	return rtw_hal_mac_fw_log_cfg(hal_com, &fl_cfg);
 }
 
+void rtw_hal_fw_recover_log_cfg(void *hal)
+{
+	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
+	struct rtw_hal_com_t *hal_com = hal_info->hal_com;
+
+	rtw_hal_fw_log_cfg(hal_com, FL_CFG_OP_INFO, 0, 0);
+}
+
 void hal_fw_en_basic_log(struct rtw_hal_com_t *hal_com,
                          struct mac_ax_fw_log* fw_log_info)
 {
@@ -123,7 +142,7 @@ void hal_fw_en_basic_log(struct rtw_hal_com_t *hal_com,
 				fw_log_info->comp_ext);
 }
 
-enum rtw_hal_status rtw_hal_en_fw_log(void *hal, u32 comp, bool en)
+enum rtw_hal_status rtw_hal_en_fw_log_comp(void *hal, u32 comp, bool en)
 {
 	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
 	enum rtw_hal_status status = RTW_HAL_STATUS_FAILURE;
@@ -134,7 +153,20 @@ enum rtw_hal_status rtw_hal_en_fw_log(void *hal, u32 comp, bool en)
 	else
 		status = rtw_hal_fw_log_cfg(hal_info->hal_com, FL_CFG_OP_CLR,
 						FL_CFG_TYPE_COMP, comp);
-	PHL_INFO("rtw_hal_en_fw_log(): status(%d), en(%d)\n", status, en);
+	PHL_INFO("rtw_hal_en_fw_log_comp(): status(%d), en(%d)\n", status, en);
+	return status;
+}
+
+enum rtw_hal_status rtw_hal_set_fw_log_lvl(void *hal, u32 lvl)
+{
+	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
+	enum rtw_hal_status status = RTW_HAL_STATUS_FAILURE;
+
+	status = rtw_hal_fw_log_cfg(hal_info->hal_com, FL_CFG_OP_SET,
+				    FL_CFG_TYPE_LEVEL, lvl);
+
+	PHL_INFO("%s(): status(%d), level(%d)\n",
+			 __func__, status, lvl);
 	return status;
 }
 
@@ -233,7 +265,7 @@ rtw_hal_redownload_fw(struct rtw_phl_com_t *phl_com, void *hal)
 	}
 
 #ifdef CONFIG_POWER_SAVE
-	if (fw_info->fw_type == RTW_FW_WOWLAN)
+	if (fw_info->fw_type == RTW_FW_WOWLAN || fw_info->fw_type == RTW_FW_WOWLAN_CE)
 		rtw_hal_ps_fw_cap_decision(phl_com, true);
 	else
 		rtw_hal_ps_fw_cap_decision(phl_com, false);
@@ -241,6 +273,7 @@ rtw_hal_redownload_fw(struct rtw_phl_com_t *phl_com, void *hal)
 
 	rtw_hal_rf_config_radio_to_fw(hal_info);
 
+#ifdef CONFIG_PHL_PKTOFLD
 	/**
 	 * Should reset packet offload related information
 	 * 1. phl packet offload module
@@ -249,7 +282,7 @@ rtw_hal_redownload_fw(struct rtw_phl_com_t *phl_com, void *hal)
 	rtw_phl_pkt_ofld_del_all_entry_req(phl_com);
 	if (RTW_HAL_STATUS_SUCCESS != rtw_hal_mac_reset_pkt_ofld_state(hal_info))
 		PHL_ERR("%s: reset pkt ofld state fail!\n", __func__);
-
+#endif
 	_hal_send_fwdl_hub_msg(phl_com, (!hal_status) ? true : false);
 	#ifdef CONFIG_BTCOEX
 	rtw_hal_btc_redownload_fw_ntfy(hal_info);
@@ -270,6 +303,9 @@ rtw_hal_pg_redownload_fw(struct rtw_phl_com_t *phl_com, void *hal)
 
 	FUNCIN_WSTS(hal_status);
 
+	if (!rtw_hal_mac_fwredl_needed(hal_info))
+		goto out;
+
 	if (fw_info->fw_src == RTW_FW_SRC_EXTNAL) {
 		fw_buff = fw_info->ram_buff;
 		fw_size = fw_info->ram_size;
@@ -283,6 +319,7 @@ rtw_hal_pg_redownload_fw(struct rtw_phl_com_t *phl_com, void *hal)
 
 	hal_status = rtw_hal_mac_fwredl(hal_info, fw_buff, fw_size);
 
+out:
 	FUNCOUT_WSTS(hal_status);
 
 	return hal_status;
@@ -294,10 +331,11 @@ void rtw_hal_fw_dbg_dump(void *hal)
 
 	rtw_hal_mac_fw_dbg_dump(hal_info);
 }
-
+#ifdef CONFIG_HAL_MAC_DBG
 enum rtw_fw_status rtw_hal_get_fw_status(void *h)
 {
 	struct hal_info_t *hal = (struct hal_info_t *)h;
 
 	return rtw_hal_mac_get_fw_status(hal);
 }
+#endif

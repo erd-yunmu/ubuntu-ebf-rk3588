@@ -151,6 +151,19 @@ do { \
 	(_cat_6g_) = (_cntry_tbl_)[idx].category_6g; \
 } while (0)
 
+#define PHL_GET_RG_FUNC_CERT_BY_COUNTRY(_cntry_, _cntry_tbl_, _rg_cert_) \
+do { \
+	u8 idx = INVALID_CNTRY_IDX; \
+	PHL_GET_CNTRY_INDEX((_cntry_), idx, (_cntry_tbl_)); \
+	if (INVALID_CNTRY_IDX == idx) {\
+		(_rg_cert_)->valid = false; \
+		break; \
+	} \
+	(_rg_cert_)->regu_func_cert = (_cntry_tbl_)[idx].regu_func_cert; \
+	(_rg_cert_)->regu_func_prsnt = (_cntry_tbl_)[idx].regu_func_prsnt; \
+	(_rg_cert_)->valid = true; \
+} while (0)
+
 #define INVALID_DOMAIN_CODE 0xff
 #define INVALID_CH_IDX 0xff
 #define INVALID_REGU_NUM 0xff
@@ -211,8 +224,8 @@ do { \
 	|| (CH_6GHZ_UNII6(ch_a) && CH_6GHZ_UNII6(ch_b)) \
 	|| (CH_6GHZ_UNII5(ch_a) && CH_6GHZ_UNII5(ch_b)))
 
-#define SUPPORT_11A BIT(0)
-#define SUPPORT_11B BIT(1)
+#define SUPPORT_11B BIT(0)
+#define SUPPORT_11A BIT(1)
 #define SUPPORT_11G BIT(2)
 #define SUPPORT_11N BIT(3)
 #define SUPPORT_11AC BIT(4)
@@ -339,11 +352,20 @@ enum rtw_power_limit_6g_info {
 	PWR_LMT_6G_MAX,
 };
 
+struct rtw_cntry_code_hdl {
+	char char2[2];
+};
+
 struct rtw_regu_policy_info {
 	u8 valid_6g_bp;
 	u8 cp_6g_bp; /* country property - 6g band policy */
 	u8 valid_5g_bp;
 	u8 cp_5g_bp; /* country property - 5g band policy */
+};
+
+enum rtw_regu_func {
+	RF_TAS = BIT(0), /* TAS (Time Average SAR) */
+	RF_DAG = BIT(1), /* DAG (Dynamic Antenna Gain) */
 };
 
 struct rtw_regulation_info {
@@ -361,6 +383,9 @@ struct rtw_regulation_info {
 	u8 chplan_ver;
 	u8 country_ver;
 	u16 capability;
+
+	/* Final enable status for specific regulatory function, bit: 1:enable, 0:disable */
+	u32 regu_func_en;
 
 	/* Regulation table source:
 	 * 0 for common tbl
@@ -499,6 +524,11 @@ struct country_domain_mapping {
     u8 support;
     u8 country_property;
 
+	/* bit: 1:regulatory function certification is completed, 0:otherwise */
+	u32 regu_func_cert;
+	/* bit: 1:regulatory function is present in the RF documents, 0:otherwise */
+	u32 regu_func_prsnt;
+
     /*
      * bit0: support LPI
      * bit1: support SP
@@ -506,6 +536,14 @@ struct country_domain_mapping {
      */
     u8 category_6g;
     u8 others_module_rf_approval;
+};
+
+struct rtw_regu_func_cert_info {
+	/* bit: 1:regulatory function certification is completed, 0:otherwise */
+	u32 regu_func_cert;
+	/* bit: 1:regulatory function is present in the RF documents, 0:otherwise */
+	u32 regu_func_prsnt;
+	bool valid;
 };
 
 /*
@@ -583,7 +621,8 @@ enum TP_OVERWRITE {
     TPO_QATAR = 2,
     TPO_UKRAINE = 3,
     TPO_CN = 4,
-    TPO_NA = 5
+    TPO_THAILAND = 5,
+    TPO_NA = 6
 };
 
 enum REGULATION {
