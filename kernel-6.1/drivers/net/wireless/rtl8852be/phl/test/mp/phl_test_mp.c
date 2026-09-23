@@ -274,6 +274,25 @@ u8 mp_start(void *priv)
 	return (u8)phl_status;
 }
 
+void _mp_check_fg_cmd_empty(struct mp_context *mp_ctx)
+{
+	struct phl_info_t *phl_info = mp_ctx->phl;
+	void *drv = phl_to_drvpriv(phl_info);
+	u16 cnt = 0;
+	u16 timeout = 500;
+	u16 sleep_step = 10;
+
+	do {
+		if (phl_disp_eng_is_fg_empty(phl_info, HW_BAND_MAX))
+			break;
+		_os_sleep_ms(drv, sleep_step);
+		cnt++;
+	} while (cnt < timeout);
+	PHL_INFO("%s : fg cmd is %s\n", __FUNCTION__,
+		phl_disp_eng_is_fg_empty(phl_info, HW_BAND_MAX) ? "completed" : "not completed");
+	PHL_INFO("%s : wait for fg cmd %d ms\n", __FUNCTION__, cnt*sleep_step);
+}
+
 void mp_change_mode(struct mp_context *mp_ctx, enum rtw_drv_mode driver_mode)
 {
 	struct phl_info_t *phl_info = mp_ctx->phl;
@@ -292,6 +311,7 @@ void mp_change_mode(struct mp_context *mp_ctx, enum rtw_drv_mode driver_mode)
 #endif
 
 	if(true == phl_is_mp_mode(phl_info->phl_com)) {
+		_mp_check_fg_cmd_empty(mp_ctx);
 
 		/* Load bt map to shadow map */
 		rtw_hal_mp_efuse_bt_shadow_reload(mp_ctx);
@@ -331,6 +351,10 @@ enum rtw_phl_status phl_test_mp_alloc(struct phl_info_t *phl_info, void *hal, vo
 	mp_ctx->phl_com = phl_com;
 	mp_ctx->hal = hal;
 	mp_ctx->status = MP_STATUS_INIT;
+#ifdef CONFIG_POWER_SAVE
+	mp_ctx->cur_pwr_lvl = PS_PWR_LVL_PWRON;
+	mp_ctx->ps_macid = PS_MACID_NONE;
+#endif
 	*mp = mp_ctx;
 	phl_status = RTW_PHL_STATUS_SUCCESS;
 
@@ -415,7 +439,12 @@ void phl_test_mp_start(void *mp, u8 tm_mode)
 	mp_change_mode(mp_ctx, tm_mode);
 
 	/* stop phl watchdog */
-	rtw_phl_watchdog_stop(mp_ctx->phl);
+	if (tm_mode == RTW_DRV_MODE_MP) {
+		rtw_phl_watchdog_stop(mp_ctx->phl);
+		mp_ctx->is_phl_wdog_start = false;
+	} else {
+		mp_ctx->is_phl_wdog_start = true;
+	}
 }
 
 void phl_test_mp_stop(void *mp, u8 tm_mode)
@@ -433,7 +462,12 @@ void phl_test_mp_stop(void *mp, u8 tm_mode)
 	/* stop mp watchdog timer */
 	rtw_phl_mp_watchdog_stop(mp_ctx);
 	/* start phl watchdog */
-	rtw_phl_watchdog_start(mp_ctx->phl);
+	if (tm_mode == RTW_DRV_MODE_MP) {
+		rtw_phl_watchdog_start(mp_ctx->phl);
+		mp_ctx->is_phl_wdog_start = true;
+	}else {
+		mp_ctx->is_phl_wdog_start = false;
+	}
 }
 
 
@@ -459,6 +493,10 @@ void phl_test_mp_cmd_process(void *mp, void *buf, u32 buf_len, u8 submdid)
 	if(mp_ctx->status == MP_STATUS_WAIT_CMD) {
 		mp_ctx->buf_len = buf_len;
 		mp_ctx->buf = _os_kmem_alloc(phl_com->drv_priv, buf_len);
+		if (mp_ctx->buf == NULL) {
+			PHL_WARN("%s: Allocate mp_ctx->buf fail!\n", __func__);
+			return;
+		}
 		_os_mem_cpy(phl_com->drv_priv, mp_ctx->buf, buf, buf_len);
 		_os_mem_set(phl_com->drv_priv, &bp_info, 0, sizeof(struct test_bp_info));
 		bp_info.type = BP_INFO_TYPE_MP_CMD_EVENT;

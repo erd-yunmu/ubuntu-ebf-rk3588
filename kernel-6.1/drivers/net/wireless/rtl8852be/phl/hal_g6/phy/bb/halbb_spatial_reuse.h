@@ -51,7 +51,6 @@ struct bb_spatial_reuse_cr_info {
 
 struct bb_spatial_reuse_info {
 	struct rtw_mac_ax_sr_info ax_sr_info;
-	struct bb_spatial_reuse_cr_info bb_spatial_reuse_cr_i;
 	bool need_update;
 	u8 txpwr_ref;
 };

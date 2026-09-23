@@ -22,10 +22,12 @@
 #include "pwr_seq_func_8852b.h"
 #include "../hw.h"
 #include "../security_cam.h"
+#include "../ftm.h"
 #include "../trx_desc.h"
 #include "../../feature_cfg.h"
 #include "../fwcmd.h"
 #include "../fwdl.h"
+#include "../fwdx.h"
 #include "../fwofld.h"
 #include "../role.h"
 #include "../tblupd.h"
@@ -63,7 +65,11 @@
 #include "hdr_conv_rx_8852b.h"
 #include "dle_8852b.h"
 #include "../secure_boot.h"
+#include "../outsrc.h"
 #include "../nan.h"
+#include "../tx_statistic.h"
+#include "../sta_diag.h"
+#include "../../include/mac_top.h"
 
 #if MAC_AX_SDIO_SUPPORT
 #include "../_sdio.h"
@@ -92,15 +98,18 @@ static struct mac_ax_intf_ops mac8852b_sdio_ops = {
 	reg_write32_sdio, /* reg_write32 */
 	tx_allow_sdio, /* tx_allow_sdio */
 	tx_cmd_addr_sdio, /* tx_cmd_addr_sdio */
-	sdio_pre_init_8852b, /* intf_pre_init */
+	sdio_pre_init, /* intf_pre_init */
 	sdio_init, /* intf_init */
-	sdio_deinit, /* intf_init */
+	sdio_deinit, /* intf_deinit */
 	reg_read_n_sdio, /* reg_read_n_sdio */
 	NULL, /*get_bulkout_id*/
 	ltr_set_sdio, /* ltr_set_pcie */
 	NULL, /*u2u3_switch*/
 	NULL, /*get_usb_mode*/
 	NULL, /*get_usb_support_ability*/
+	NULL,/*set_usb_support_ability*/
+	NULL,/*get_u3_perf_mode*/
+	NULL,/*get_usb_mode_status*/
 	NULL, /*usb_tx_agg_cfg*/
 	NULL, /*usb_rx_agg_cfg*/
 	set_sdio_wowlan, /*set_wowlan*/
@@ -149,6 +158,9 @@ static struct mac_ax_intf_ops mac8852b_usb_ops = {
 	u2u3_switch_8852b, /*u2u3_switch*/
 	get_usb_mode, /*get_usb_mode*/
 	get_usb_support_ability_8852b,/*get_usb_support_ability*/
+	set_usb_support_ability,/*set_usb_support_ability*/
+	get_u3_perf_mode_8852b,/*get_u3_perf_mode*/
+	get_usb_mode_status,/*get_usb_mode_status*/
 	usb_tx_agg_cfg_8852b, /*usb_tx_agg_cfg*/
 	usb_rx_agg_cfg_8852b, /*usb_rx_agg_cfg*/
 	set_usb_wowlan_8852b, /*set_wowlan*/
@@ -197,6 +209,9 @@ static struct mac_ax_intf_ops mac8852b_pcie_ops = {
 	NULL, /*u2u3_switch*/
 	NULL, /*get_usb_mode*/
 	NULL,/*get_usb_support_ability*/
+	NULL,/*set_usb_support_ability*/
+	NULL,/*get_u3_perf_mode*/
+	NULL,/*get_usb_mode_status*/
 	NULL, /*usb_tx_agg_cfg*/
 	NULL, /*usb_rx_agg_cfg*/
 	set_pcie_wowlan, /*set_wowlan*/
@@ -244,16 +259,33 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_enable_cpu, /* enable_cpu */
 	mac_disable_cpu, /* disable_cpu */
 	mac_fwredl, /* fwredl */
+	mac_fwredl_needed, /* fwredl_needed */
 	mac_fwdl, /* fwdl */
 	mac_query_fw_buff, /* query_fw_buff */
 	mac_enable_fw, /* enable_fw */
 	mac_get_dynamic_hdr_ax, /* get_dynamic_hdr */
+	/*fw cap related*/
+	mac_get_wlanfw_cap,
+#if MAC_SELF_DIAG_INFO
+	/* Self-diagnostic related*/
+	mac_fwdx_init, /* fwdx_init */
+	mac_fwdx_deinit, /* fwdx_deinit */
+	mac_fwdx_start, /* fwdx_start */
+	mac_fwdx_stop, /* fwdx_stop */
+	mac_fwdx_c2h_handler, /* fwdx_c2h_handler */
+	mac_fwdx_detect_error, /* fwdx_detect_error */
+	mac_req_sta_diag_rpt, /* req_sta_diag_rpt */
+	mac_req_wow_diag_rpt, /* req_wow_diag_rpt */
+	mac_req_wow_tri_evt, /* req_wow_tri_evt */
+	mac_req_sta_diagnosis, /* req_sta_diagnosis*/
+#endif
 	mac_lv1_rcvy, /* lv1_rcvy */
 	mac_get_macaddr,
 	mac_build_txdesc_8852b, /* build_txdesc */
 	mac_refill_txdesc_8852b, /*refill txdesc*/
 	mac_parse_rxdesc_8852b, /* parse_rxdesc */
 	mac_watchdog, /* watchdog */
+#if MAC_FEAT_FWOFLD
 	/*FW offload related*/
 	mac_reset_fwofld_state,
 	mac_check_fwofld_done,
@@ -261,41 +293,71 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_del_pkt_ofld,
 	mac_add_pkt_ofld,
 	mac_pkt_ofld_packet,
-	mac_dump_efuse_ofld,
-	mac_efuse_ofld_map,
+	mac_ccxrpt_parsing,
+	mac_host_efuse_rec,
+	mac_cfg_sensing_csi,
+	mac_chk_sensing_csi_done,
+	mac_general_pkt_ids, /*general_pkt_ids */
+#if MAC_USB_IO_ACC_ON
+	mac_add_cmd_ofld, /* add_cmd_ofld */
+	mac_add_cmd_ofld_v1, /* add_cmd_ofld_v1 */
+	mac_cmd_ofld, /* cmd_ofld */
+#endif /* MAC_USB_IO_ACC_ON */
+	mac_add_scanofld_ch,
+	mac_scanofld,
+	mac_scanofld_fw_busy,
+	mac_scanofld_chlist_busy,
+	mac_scanofld_hst_ctrl,
+	mac_ch_switch_ofld,
+	mac_get_ch_switch_rpt,
+	mac_cfg_bcn_filter,
+	mac_bcn_filter_rssi,
+	mac_bcn_filter_tp,
+	mac_cfg_bcn_early_rpt,
+	/* sta csa */
+	mac_cfg_sta_csa,
+	mac_check_sta_csa_cfg,
+#endif
 	mac_upd_dctl_info, /*update dmac ctrl info*/
 	mac_upd_cctl_info, /*update cmac ctrl info*/
-	mac_ie_cam_upd, /* ie_cam_upd */
+#if MAC_FEAT_TWT_STA || MAC_FEAT_TWTAP
 	mac_twt_info_upd_h2c, /* twt info update h2c */
 	mac_twt_act_h2c, /* twt act h2c */
+#endif
+#if MAC_FEAT_TWTAP
 	mac_twt_staanno_h2c, /* twt anno h2c */
 	mac_twt_wait_anno,
+#endif
+#if MAC_FEAT_PSAP
 	mac_host_getpkt_h2c,
+#endif
+#if MAC_FEAT_P2P
 	mac_p2p_act_h2c, /* p2p_act_h2c */
 	mac_p2p_macid_ctrl_h2c, /* p2p_macid_ctrl_h2c */
 	mac_get_p2p_stat, /* get_p2p_stat */
 	mac_tsf32_togl_h2c, /* tsf32_togl_h2c */
 	mac_get_t32_togl_rpt, /* get_t32_togl_rpt */
-	mac_ccxrpt_parsing,
-	mac_host_efuse_rec,
-	mac_cfg_sensing_csi,
-	mac_chk_sensing_csi_done,
+#endif
+#if MAC_FEAT_RX_BCN_OFLD
+	mac_ie_cam_upd, /* ie_cam_upd */
 	mac_calc_crc, /* calc_crc */
 	mac_bcn_ofld_ctrl, /* bcn_ofld_ctrl */
+#endif
+#if	MAC_FEAT_BCN_CNT
+	mac_bcn_cnt_gpio, /* bcn_cnt_gpio */
+	mac_bcn_sync_rpt, /* bcn_sync_rpt */
+#endif
 	/*Association, de-association related*/
 	mac_sta_add_key, /* add station key */
 	mac_sta_del_key, /* del station key */
 	mac_sta_search_key_idx, /* search station key index */
 	mac_sta_hw_security_support, /* control hw security support */
-	mac_set_mu_table, /*set mu score table*/
-	mac_ss_dl_grp_upd, /* update SS dl group info*/
-	mac_ss_ul_grp_upd, /* update SS ul group info*/
-	mac_ss_ul_sta_upd, /* add sta into SS ul link*/
 	mac_bacam_avl_std_entry_idx, /*search available std entry idx in BA CAM*/
 	mac_bacam_info, /*update BA CAM info*/
 	/*TRX related*/
 	mac_txdesc_len_8852b, /* txdesc_len */
 	mac_upd_shcut_mhdr,/*update short cut mac header*/
+#if MAC_FEAT_HWAMSDU
 	mac_enable_hwamsdu, /* enable_hwmasdu */
 	mac_hwamsdu_fwd_search_en,
 	mac_hwamsdu_macid_en,
@@ -304,6 +366,8 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_hwamsdu_get_max_len,
 	mac_enable_cut_hwamsdu_8852b, /* enable_cut_hwamsdu */
 	mac_cut_hwamsdu_chk_mpdu_len_en_8852b, /* enable cut-amsdu chk mpdu size*/
+#endif
+#if MAC_FEAT_HDR_CONV
 	mac_hdr_conv_en, /* enable mac hdr conv */
 	mac_hdr_conv_tx_set_eth_type, /* set eth type */
 	mac_hdr_conv_tx_get_eth_type, /* get eth type */
@@ -319,16 +383,31 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_hdr_conv_tx_get_target_wlan_hdr_len, /* get target header length */
 	mac_hdr_conv_rx_en_8852b, /* enable rx mac hdr conversion*/
 	mac_hdr_conv_rx_en_driv_info_hdr_8852b, /*en rx hdr conv driver info*/
+#endif
+#if MAC_FEAT_HWSSN
 	mac_set_hwseq_reg, /* set hw seq by reg */
 	mac_set_hwseq_extend_macid,
 	mac_set_hwseq_dctl_seq_val,
 	mac_set_hwseq_dctrl, /*for set hw seq content*/
 	mac_get_hwseq_cfg, /*for get hw seq content*/
+#endif
 	mac_process_c2h, /* process_c2h */
-	mac_parse_dfs, /* parse_dfs */
-	mac_parse_ppdu, /* parse_ppdu */
+#if MAC_FEAT_PHY_RPT
 	mac_cfg_phy_rpt, /* cfg_phy_rpt */
-	mac_set_rx_forwarding, /*rx_forwarding */
+	mac_cfg_per_pkt_phy_rpt_8852b, /* cfg_per_pkt_phy_rpt */
+	mac_get_phy_rpt_cfg, /* get_phy_rpt_cfg */
+#if MAC_FEAT_DFS
+	mac_parse_dfs, /* parse_dfs */
+#endif
+#if MAC_FEAT_PPDU_STS
+	mac_parse_ppdu, /* parse_ppdu */
+#endif
+#endif
+	mac_process_txrpt, /* process_txrpt */
+	mac_get_sta_tx_dbg_info, /* get tx debug info */
+	mac_clr_sta_tx_dbg_info, /* clear tx debug info */
+	mac_enable_tx_statistic, /* enable tx statistic feature */
+	mac_set_rx_forwarding, /* rx_forwarding */
 	mac_get_rx_fltr_opt, /* set rx fltr mac, pclp header opt */
 	mac_set_rx_fltr_opt, /* get rx fltr mac, pclp header opt */
 	mac_set_typ_fltr_opt, /* set machdr type fltr opt */
@@ -339,9 +418,12 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_cfg_addr_cam, /* config addrcam setting */
 	mac_cfg_addr_cam_dis, /* config addrcam disable default setting */
 	mac_sr_update, /* set sr parameter */
+	mac_sr_update_with_msk, /* set sr parameter */
 	mac_two_nav_cfg,  /* config 2NAV hw setting */
 	mac_wde_pkt_drop, /* pkt_drop */
+#if MAC_FEAT_TX_BCN
 	mac_send_bcn_h2c, /* send beacon h2c */
+#endif
 	mac_tx_mode_sel, /*tx mode sel*/
 	mac_tcpip_chksum_ofd, /* tcpip_chksum_ofd */
 	mac_chk_rx_tcpip_chksum_ofd, /* chk_rx_tcpip_chksum_ofd */
@@ -354,9 +436,24 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_patch_rx_rate_8852b, /*for patch rx rate*/
 	mac_get_wp_offset_8852b, /* wd offload for wp_offset, called while forming metadata */
 	/*frame exchange related*/
+#if MAC_FEAT_MUMIMO
 	mac_upd_mudecision_para, /* upd_ba_infotbl */
 	mac_mu_sta_upd, /* upd_mu_sta */
+	mac_set_mu_table, /*set mu score table*/
+#endif
+#if (MAC_FEAT_DLOFDMA || MAC_FEAT_MUMIMO)
+	mac_ss_dl_grp_upd, /* update SS dl group info*/
+#endif
+#if MAC_FEAT_ULOFDMA
+	mac_ss_ul_grp_upd, /* update SS ul group info*/
+	mac_ss_ul_sta_upd, /* add sta into SS ul link*/
 	mac_upd_ul_fixinfo, /* upd_ul_fixinfo */
+#endif
+#if (MAC_FEAT_DLOFDMA || MAC_FEAT_ULOFDMA)
+	mac_fwc2h_ofdma_sts_parse, /* parse c2h fw sts */
+	mac_fw_ofdma_sts_en, /* send fw sts en to fw */
+#endif
+#if MAC_FEAT_F2PCMD
 	mac_f2p_test_cmd, /*f2p test cmd para*/
 	NULL,
 	mac_snd_test_cmd, /* f2p test cmd para */
@@ -364,14 +461,21 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_dumpwlanc,
 	mac_dumpwlans,
 	mac_dumpwland,
+#endif
 	mac_ss_dl_rpt_cfg,
+#if MAC_FEAT_TX_BCN_DM_IGNORE_EDCCA
 	mac_set_bcn_ignore_edcca, /*set bcn ignore edcca*/
+#endif
+#if MAC_FEAT_TX_BCN_DM_TBTT_SHIFT
 	mac_set_bcn_dynamic_mech, /* set bcn dynamic mechaniasm */
+#endif
 	/*outsrcing related */
 	mac_outsrc_h2c_common, /* outsrc common h2c */
 	mac_read_pwr_reg, /* for read tx power reg*/
 	mac_write_pwr_reg, /* for write tx power reg*/
 	mac_write_msk_pwr_reg, /* for write tx power reg*/
+	mac_write_txpwr_reg, /* for write tx power reg for io ofld*/
+	mac_write_msk_txpwr_reg, /* for write tx power reg for io ofld*/
 	mac_write_pwr_ofst_mode, /* for write tx power mode offset reg*/
 	mac_write_pwr_ofst_bw, /* for write tx power BW offset reg*/
 	mac_write_pwr_ref_reg, /* for write tx power ref reg*/
@@ -381,6 +485,7 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_write_pwr_by_rate_reg, /* for write tx power by rate reg*/
 	mac_lamode_cfg, /*cfg la mode para*/
 	mac_lamode_trigger, /*trigger la mode start*/
+	mac_query_lamode_buf, /*query la buffer size*/
 	mac_lamode_buf_cfg, /*la mode buf size cfg */
 	mac_get_lamode_st, /*get la mode status*/
 	mac_read_xcap_reg_dav, /*read xcap xo/xi reg*/
@@ -388,23 +493,34 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_write_bbrst_reg, /*write bb rst reg*/
 	mac_tx_path_map_cfg, /*for BB control TX PATH*/
 	/*sounding related*/
+#if MAC_FEAT_BFMER
 	mac_get_csi_buffer_index, /* get CSI buffer index */
 	mac_set_csi_buffer_index, /* set CSI buffer index */
 	mac_get_snd_sts_index, /* get MACID SND status */
 	mac_set_snd_sts_index, /* set SND status MACID */
 	mac_init_snd_mer,/* init SND MER */
+#endif
+#if MAC_FEAT_BFMER_F2PSND
+	mac_set_snd_para, /*set sound parameter*/
+#endif
+#if MAC_FEAT_BFMER
+	mac_hw_snd_pause_release, /*HW SND pause release*/
+	mac_bypass_snd_sts, /*bypass SND status*/
+#endif
+#if MAC_FEAT_BFMER
+	mac_snd_sup, /*bf entry num and SU MU buffer num*/
+#endif
+#if MAC_FEAT_BFMEE
 	mac_init_snd_mee,/* init SND MEE */
 	mac_csi_force_rate, /*CSI fix rate reg*/
 	mac_csi_rrsc, /*CSI RRSC*/
-	mac_set_snd_para, /*set sound parameter*/
 	mac_set_csi_para_reg, /*set reg csi para*/
 	mac_set_csi_para_cctl, /*set csi para in cmac ctrl info*/
-	mac_hw_snd_pause_release, /*HW SND pause release*/
-	mac_bypass_snd_sts, /*bypass SND status*/
 	mac_deinit_mee, /*deinit mee*/
-	mac_snd_sup, /*bf entry num and SU MU buffer num*/
+#endif
 	mac_gidpos, /*VHT MU GID position setting*/
 	/*ps related*/
+#if MAC_FEAT_LPS
 	mac_cfg_lps, /*config LPS*/
 	mac_ps_pwr_state, /*set or check lps power state*/
 	mac_chk_leave_lps, /*check already leave protocol ps*/
@@ -416,7 +532,10 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_req_pwr_state_cfg, /*config request power state*/
 	mac_req_pwr_lvl_cfg, /*config request power level*/
 	mac_lps_option_cfg, /*config request lps option*/
+	mac_chk_mac_pwr_state, /*chk_mac_pwr_state*/
+#endif
 	mac_tbtt_tuning_cfg, /*config tbtt tuning*/
+#if MAC_FEAT_WOWLAN
 	/* Wowlan related*/
 	mac_cfg_wow_wake, /*config wowlan wake*/
 	mac_cfg_disconnect_det, /*config disconnect det*/
@@ -425,7 +544,9 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_cfg_arp_ofld, /*config arp ofld*/
 	mac_cfg_ndp_ofld, /*config ndp ofld*/
 	mac_cfg_realwow, /*config realwow*/
+#if MAC_FEAT_NLO
 	mac_cfg_nlo, /*config nlo*/
+#endif
 	mac_cfg_dev2hst_gpio, /*config dev2hst gpio*/
 	mac_cfg_hst2dev_ctrl, /*config hst2dev ctrl*/
 	mac_cfg_wowcam_upd, /*config wowcam update*/
@@ -439,44 +560,58 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_cfg_wow_auto_test, /* cfg_wow_auto_test */
 	mac_magic_waker_filter, /*magic_waker_filter*/
 	mac_tcp_keepalive, /*tcp_keepalive*/
+	mac_wow_dbg_dump, /* wowlan flow debug dump*/
+	mac_wow_h2c_filter_en, /* wow_h2c_filter_en */
+#endif /* MAC_FEAT_WOWLAN */
 	/*system related*/
+#if MAC_FEAT_DBCC
 	mac_dbcc_enable, /*enable / disable dbcc */
 	mac_dbcc_pre_cfg, /* dbcc_pre_cfg */
 	mac_dbcc_cfg, /* dbcc_cfg */
 	mac_dbcc_trx_ctrl, /* dbcc_trx_ctrl */
+#endif /* MAC_FEAT_DBCC */
 	mac_port_cfg, /* cofig port para */
 	mac_port_init, /* init port para */
 	mac_enable_imr, /* enable CMAC/DMAC IMR */
+#if MAC_FEAT_EFUSE_HV
 	mac_dump_efuse_map_wl_plus, /* dump_wl_efuse*/
 	mac_dump_efuse_map_bt, /* dump_bt_efuse */
+	mac_mask_log_efuse, /* mask_logical_efuse_map */
+	mac_pg_sec_data_by_map, /* program_secure_data_map */
+	mac_cmp_sec_data_by_map, /* compare_secure_data_map */
+	mac_pg_simulator_plus, /* efuse pg simulator */
+	mac_checksum_update, /* checksum update */
+	mac_checksum_rpt, /*report checksum comparison result*/
+	mac_otp_test, /*efuse OTP test R/W to 0x7ff*/
+#endif
+#if MAC_FEAT_EFUSE_HV || MAC_FEAT_EFUSE_MP
+	mac_pg_efuse_by_map_plus, /* program_efuse_map */
+	mac_pg_efuse_by_map_bt, /* program_efuse_map_bt */
+	mac_pg_efuse_by_block_bt, /* pg_efuse_by_block_bt */
+#endif
+
 	mac_write_efuse_plus, /* write_wl_bt_efuse */
 	mac_read_efuse_plus, /* read_wl_bt_efuse */
 	mac_read_hidden_efuse, /* read_hidden_efuse */
 	mac_get_efuse_avl_size, /* get_available_efuse_size */
+	mac_get_efuse_avl_size_dav, /* get_available_efuse_size_dav */
 	mac_get_efuse_avl_size_bt, /* get_available_efuse_size_bt */
 	mac_dump_log_efuse_plus, /* dump_logical_efuse */
 	mac_read_log_efuse_plus, /* read_logical_efuse */
 	mac_write_log_efuse_plus, /* write_logical_efuse */
 	mac_dump_log_efuse_bt, /* dump_logical_efuse_bt */
+	mac_dump_log_block_bt, /* mac_dump_log_block_bt */
 	mac_read_log_efuse_bt, /* read_logical_efuse_bt */
 	mac_write_log_efuse_bt, /* write_logical_efuse_bt */
-	mac_pg_efuse_by_map_plus, /* program_efuse_map */
-	mac_pg_efuse_by_map_bt, /* program_efuse_map_bt */
-	mac_mask_log_efuse, /* mask_logical_efuse_map */
-	mac_pg_sec_data_by_map, /* program_secure_data_map */
-	mac_cmp_sec_data_by_map, /* compare_secure_data_map */
 	mac_get_efuse_info, /* get_efuse_info */
 	mac_set_efuse_info, /* set_efuse_info */
+	mac_dump_efuse_ofld, /* dump_efuse_ofld */
+	mac_efuse_ofld_map, /* efuse_ofld_map */
 	mac_read_hidden_rpt, /* read_efuse_hidden_report */
 	mac_check_efuse_autoload, /* check_efuse_autoload */
-	mac_pg_simulator_plus, /* efuse pg simulator */
-	mac_checksum_update, /* checksum update */
-	mac_checksum_rpt, /*report checksum comparison result*/
 	mac_disable_rf_ofld_by_info, /* Disable RF Offload */
 	mac_set_efuse_ctrl, /*set efuse ctrl 0x30 or 0xC30*/
-	mac_otp_test, /*efuse OTP test R/W to 0x7ff*/
 	mac_get_ft_status, /* get_mac_ft_status */
-	mac_fw_log_cfg, /* fw_log_cfg */
 	mac_pinmux_set_func_8852b, /* pinmux_set_func */
 	mac_pinmux_free_func, /* pinmux_free_func */
 	mac_sel_uart_tx_pin, /* sel_uart_tx_pin */
@@ -490,10 +625,11 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_get_hw_value, /* get_hw_value */
 	mac_get_err_status, /* get_err_status */
 	mac_set_err_status, /* set_err_status */
-	mac_general_pkt_ids, /*general_pkt_ids */
+#if MAC_FEAT_COEX
 	mac_coex_init_8852b, /* coex_init */
 	mac_read_coex_reg_8852b, /* coex_read */
 	mac_write_coex_reg_8852b, /* coex_write */
+#endif /* MAC_FEAT_COEX */
 	mac_trigger_cmac_err, /*trigger_cmac_err*/
 	mac_trigger_cmac1_err, /*trigger_cmac1_err*/
 	mac_trigger_dmac_err, /*trigger_dmac_err*/
@@ -503,11 +639,9 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_io_chk_access, /* io_chk_access */
 	mac_ser_ctrl, /* ser_ctrl */
 	mac_chk_err_status, /* chk_ser_status */
-	mac_set_l0_dbg_mode, /* Set SER L0 to debug mode */
-	mac_set_l1_dbg_mode, /* Set SER L1 to debug mode */
-	mac_reset_dbg_mode, /* Reset SER debug mode */
 	mac_get_freerun, /* mac_get_freerun */
 	mac_set_h2c_c2h_mon, /* set_h2c_c2h_mon */
+#if MAC_FEAT_MCC
 	/* mcc */
 	mac_reset_mcc_group,
 	mac_reset_mcc_request,
@@ -530,6 +664,7 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_check_mcc_macid_bitmap_done,
 	mac_check_mcc_sync_enable_done,
 	mac_check_mcc_set_duration_done,
+#endif /* MAC_FEAT_MCC */
 	/* not mcc */
 	mac_check_access,
 	mac_set_led_mode, /* set_led_mode */
@@ -539,7 +674,6 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_get_c2h_event, /* get_c2h_event */
 	mac_cfg_wps_8852b, /* cfg_wps */
 	mac_get_wl_dis_val, /* get_wl_dis_val */
-	mac_cfg_per_pkt_phy_rpt_8852b, /* cfg_per_pkt_phy_rpt */
 #if MAC_AX_FEATURE_DBGPKG
 	mac_fwcmd_lb, /* fwcmd_lb */
 	mac_test_l12, /* test_l12 */
@@ -554,62 +688,33 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_fw_dbg_dump,
 	mac_event_notify,
 	mac_dbgport_hw_set, /* Set debug port for LA */
+	mac_fw_general_io_test, /* fw_general_io_test */
+	mac_fw_log_cfg, /* fw_log_cfg */
+	mac_fw_dbg_dle_cfg,
+	mac_fw_log_set_array,
+	mac_fw_log_unset_array,
+	mac_get_fw_status,
+	mac_halmac_cmd, /* halmac_cmd */
+	mac_halmac_cmd_parser, /* halmac_cmd_parser */
+	mac_set_ser_case, /* Set SER debug mode stop case */
 #endif
 #if MAC_AX_FEATURE_HV
 	mac_ram_boot, /* ram_boot */
-	/*fw offload related*/
-	mac_clear_write_request, /* clear_write_request */
-	mac_add_write_request, /* add_write_request */
-	mac_write_ofld, /* write_ofld */
-	mac_clear_conf_request, /* clear_conf_request */
-	mac_add_conf_request, /* add_conf_request */
-	mac_conf_ofld, /* conf_ofld */
-	mac_clear_read_request, /* clear_read_request */
-	mac_add_read_request, /* add_read_request */
-	mac_read_ofld, /* read_ofld */
-	mac_read_ofld_value, /* read_ofld_value */
 #endif
-	mac_add_cmd_ofld, /* add_cmd_ofld */
-	mac_add_cmd_ofld_v1, /* add_cmd_ofld_v1 */
-	mac_cmd_ofld, /* cmd_ofld */
 	mac_flash_erase,
 	mac_flash_read,
 	mac_flash_write,
 	mac_fw_status_cmd, /* fw_status_cmd */
-	mac_fw_general_io_test, /* fw_general_io_test */
 	mac_tx_duty, /* tx_duty */
 	mac_tx_duty_stop, /* tx_duty _stop */
-	mac_fwc2h_ofdma_sts_parse, /* parse c2h fw sts */
-	mac_fw_ofdma_sts_en, /* send fw sts en to fw */
-	mac_get_phy_rpt_cfg, /* get_phy_rpt_cfg */
-#if MAC_AX_FEATURE_DBGCMD
-	mac_halmac_cmd, /* halmac_cmd */
-	mac_halmac_cmd_parser, /* halmac_cmd_parser */
-#endif
 	mac_fast_ch_sw,
 	mac_fast_ch_sw_done,
 	mac_get_fast_ch_sw_rpt,
 	mac_h2c_agg_enable,
 	mac_h2c_agg_flush,
 	mac_h2c_agg_tx,
-	mac_fw_dbg_dle_cfg,
-	mac_add_scanofld_ch,
-	mac_scanofld,
-	mac_scanofld_fw_busy,
-	mac_scanofld_chlist_busy,
-	mac_scanofld_hst_ctrl,
-#if MAC_AX_FEATURE_DBGDEC
-	mac_fw_log_set_array,
-	mac_fw_log_unset_array,
-#endif
-	mac_get_fw_status,
 	mac_role_sync,
-	mac_ch_switch_ofld,
-	mac_get_ch_switch_rpt,
-	mac_cfg_bcn_filter,
-	mac_bcn_filter_rssi,
-	mac_bcn_filter_tp,
-	mac_cfg_bcn_early_rpt,
+#if MAC_FEAT_WOWLAN
 	/*Proxy related*/
 	mac_proxyofld,
 	mac_proxy_mdns_serv_pktofld,
@@ -617,10 +722,22 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_proxy_mdns,
 	mac_proxy_ptcl_pattern,
 	mac_proxy_snmp,
+	mac_proxy_llmnr,
+	mac_mdns_ofld,
+	mac_apf_ofld,
+	mac_apf_ofld_ctrl,
+	mac_apf_get_report,
 	mac_check_proxy_done,
-	/*fw cap related*/
-	mac_get_wlanfw_cap,
+#endif /* MAC_FEAT_WOWLAN */
+	/* ftm related */
+#if MAC_FEAT_FTM
+	mac_ista_ftm_proc, /*mac_ista_ftm_proc*/
+	mac_ista_ftm_enable, /*mac_ista_ftm_enable*/
+	mac_ista_ftm_cancel, /*mac_ista_ftm_cancel*/
+	mac_ista_ftm_upd_para, /*mac_ista_ftm_upd_para*/
+#endif/* MAC_FEAT_FTM */
 	/* NAN related */
+#if MAC_FEAT_NAN
 	mac_nan_act_schedule_req,
 	mac_nan_bcn_req,
 	mac_nan_func_ctrl,
@@ -631,9 +748,7 @@ static struct mac_ax_ops mac8852b_ops = {
 	mac_nan_get_cluster_info,
 	mac_check_cluster_info,
 	mac_nan_avail_t_bitmap,
-	/*sta csa*/
-	mac_cfg_sta_csa,
-	mac_check_sta_csa_cfg,
+#endif
 	/* tx mode switch */
 	mac_txmode_switch,
 	/* MP security related */
@@ -655,72 +770,75 @@ static struct mac_ax_ops mac8852b_ops = {
 };
 
 static struct mac_ax_hw_info mac8852b_hw_info = {
-	0, /* done */
-	MAC_AX_CHIP_ID_8852B, /* chip_id */
-	0xFF, /* cv */
-	0, /* acv */
-	0xFF, /* fv */
-	MAC_AX_INTF_INVALID, /* intf */
-	19, /* tx_ch_num */
-	10, /* tx_data_ch_num */
-	WD_BODY_LEN, /* wd_body_len */
-	WD_INFO_LEN, /* wd_info_len */
-	pwr_on_seq_8852b, /* pwr_on_seq */
-	pwr_off_seq_8852b, /* pwr_off_seq */
-	PWR_SEQ_VER_8852B, /* pwr_seq_ver */
-	196608, /* fifo_size */
-	32, /* macid_num */
-	5, /* port_num */
-	4, /* mbssid_num */
-	20, /* bssid_num */
-	1536, /* wl_efuse_size */
-	1216, /* wl_zone2_efuse_size */
-	2048, /* log_efuse_size */
-	1280, /* limit_efuse_size_PCIE */
-	1280, /* limit_efuse_size_USB */
-	1280, /* limit_efuse_size_SDIO */
-	512, /* bt_efuse_size */
-	1024, /* bt_log_efuse_size */
-	96, /* hidden_efuse_rf_size */
-	32, /*hidden_efuse_mac_size*/
-	4, /* sec_ctrl_efuse_size */
-	192, /* sec_data_efuse_size */
-	NULL, /* sec_cam_table_t pointer */
-	NULL, /* dctl_sec_info_t pointer */
-	32, /* ple_rsvd_space */
-	24, /* payload_desc_size */
-	8, /* efuse_version_size */
-	128, /* wl_efuse_size_DAV */
-	96, /* wl_zone2_efuse_size_DAV  */
-	32, /* hidden_efuse_size_DAV  */
-	16, /* log_efuse_size_DAV  */
-	0, /* wl_efuse_start_addr */
-	0, /* wl_efuse_start_addr_DAV  */
-	0x600, /* bt_efuse_start_addr */
-	0, /* wd_checksum_en */
-	0, /* sw_amsdu_max_size */
-	0, /* ind_aces_cnt */
-	0, /* dbg_port_cnt */
-	0, /* core_swr_volt */
-	0, /* is_sec_ic */
-	0x3F, /* sta_empty_flg */
-	{{{0}, {0}, 0}}, /* cust_proc_id */
 	MAC_AX_SWR_NORM, /* core_swr_volt_sel */
 	MAC_AX_DRV_INFO_NONE, /* cmac0_drv_info */
 	MAC_AX_DRV_INFO_NONE, /* cmac1_drv_info */
+	MAC_AX_TRX_HW_MODE,
+	NULL, /* sec_cam_table_t pointer */
+	NULL, /* dctl_sec_info_t pointer */
+	SHARE_MEM_SIZE_8852B, /* fifo_size */
+	WL_EFUSE_FULL_SIZE_8852B, /* wl_efuse_size */
+	WL_EFUSE_LOG_SIZE_8852B, /* efuse_size */
+	WL_EFUSE_LOG_MAP_SIZE_8852B, /* log_efuse_size */
+	BT_EFUSE_FULL_SIZE_8852B, /* bt_efuse_size */
+	BT_EFUSE_LOG_MAP_SIZE_8852B, /* bt_log_efuse_size */
+	WL_HIDDEN_EFUSE_RF_SIZE_8852B, /* hidden_efuse_rf_size */
+	WL_HIDDEN_EFUSE_MAC_SIZE_8852B, /*hidden_efuse_mac_size*/
+	WL_SEC_CTRL_EFUSE_SIZE_8852B, /* sec_ctrl_efuse_size */
+	WL_SEC_DATA_EFUSE_SIZE_8852B, /* sec_data_efuse_size */
+	DAV_FULL_EFUSE_SIZE_8852B, /* dav_full_efuse_size */
+	DAV_EFUSE_LOG_SIZE_8852B, /* dav_efuse_size  */
+	DAV_HIDDEN_EFUSE_SIZE_8852B, /* dav_hidden_efuse_size  */
+	DAV_EFUSE_LOG_MAP_SIZE_8852B, /* dav_log_efuse_size  */
+	CFG_DCTL_INFO_SIZE_8852B, /* dctl_info_size */
+	0, /* sw_amsdu_max_size */
 	0, /* h2c_bcn_upd_sent_band0 */
 	0, /* h2c_bcn_upd_sent_band1 */
 	0, /* c2h_bcn_upd_done_band0 */
 	0, /* c2h_bcn_upd_done_band1 */
 	0, /* bcn_drop_all_band0 */
 	0, /* bcn_drop_all_band1 */
+	A_DIE_RL1_8852B, /* aid */
+	MACID_NUM_8852B, /* macid_num */
+	0, /* done */
+	WL_EFUSE_MAP_VER_SIZE_8852B, /* efuse_version_size */
+	D_DIE_CHIP_ID_8852B, /* chip_id */
+	0xFF, /* cv */
+	0, /* acv */
+	0xFF, /* fv */
+	TX_DMA_CH_NUM_8852B, /* tx_ch_num */
+	TX_DMA_DATA_CH_NUM_8852B, /* tx_data_ch_num */
+	WD_BODY_LEN, /* wd_body_len */
+	WD_INFO_LEN, /* wd_info_len */
+	PWR_SEQ_VER_8852B, /* pwr_seq_ver */
+	HW_BAND_NUM_8852B, /* hw_band_num */
+	PORT_NUM_8852B, /* port_num */
+	MBSSID_NUM_8852B, /* mbssid_num */
+	BSSIDCAM_NUM_8852B, /* bssid_num */
+	WP_SEC_RSVD_SIZE_8852B, /* ple_rsvd_space */
+	WP_PLD_DESC_SIZE_8852B, /* payload_desc_size */
+	0, /* wd_checksum_en */
+	0, /* core_swr_volt */
+	MAX_AGG_TXTIME_HW_8852B, /*max_agg_txtime_reg*/
 	0, /* bcn_pkt_drop */
+};
+
+struct mac_ax_drv_info mac_8852b_drv_info = {
+	{{{0}, {0}, 0}}, /* cust_proc_id */
+#ifdef DBG_HAL_MAC_MEM_MOINTOR
+	0,
+#endif
+	MAC_AX_CHIP_ID_8852B,
 };
 
 struct mac_ax_ft_status mac_8852b_ft_status[] = {
 	{MAC_AX_FT_DUMP_EFUSE, MAC_AX_STATUS_IDLE, NULL, 0},
 	{MAC_AX_FT_MAX, MAC_AX_STATUS_ERR, NULL, 0},
 };
+
+#ifdef MAC_TXRPT_STATISTIC
+static struct mac_txrpt_dbg_stat mac_8852b_txrpt_dbg_stat;
+#endif
 
 static struct mac_ax_adapter mac_8852b_adapter =  {
 	&mac8852b_ops, /* ops */
@@ -729,39 +847,57 @@ static struct mac_ax_adapter mac_8852b_adapter =  {
 	NULL, /* pltfm_cb */
 	MAC_AX_DFLT_SM, /* sm */
 	NULL, /* hw_info */
-	{0}, /* fw_info */
+	{{{{0}}}}, /* fw_info */
+	&mac_8852b_drv_info, /* drv_info */
 	{{0}}, /* ser_info */
 	{0}, /* efuse_param */
-	{0}, /* mac_pwr_info */
+	{pwr_on_seq_8852b, pwr_off_seq_8852b,
+	 NULL, 0, 0}, /* mac_pwr_info */
 	mac_8852b_ft_status, /* ft_stat */
 	NULL, /* hfc_param */
 	{MAC_AX_QTA_SCC, 64, 128, 0, 0, 0, 0, 0,
 	 0, 0, 0, 0}, /* dle_info */
-	{0, 0, 0, 0, 0, 0, 0, 0,
+	{DFLT_GPIO_STATE, DFLT_SW_IO_MODE,
+	 0xFF, 0xFF, 0,
 	 0, 0, 0, 0, 0, 0, 0, 0,
-	 0, 0, 0, 0, 0,
-	 0xFF, 0xFF, DFLT_GPIO_STATE}, /* gpio_info */
+	 0, 0, 0, 0, 0, 0, 0, 0,
+	 0, 0, 0, 0, 0}, /* gpio_info */
 	NULL, /* role table */
 	{NULL, NULL, NULL, 0, 0, 0, 0}, /* read_ofld_info */
 	{0, 0, NULL}, /* read_ofld_value */
 	{NULL, NULL, NULL, 0, 0, 0, 0}, /* write_ofld_info */
 	{NULL}, /* efuse_ofld_info */
 	{NULL, NULL, 0, 0, 0, 0}, /* conf_ofld_info */
-	{PKT_OFLD_OP_MAX, PKT_OFLD_MAX_COUNT, 0, {0}}, /* pkt_ofld_info */
+	{0, PKT_OFLD_MAX_COUNT - 1, 0, {0}, {0}, PKT_OFLD_OP_MAX, PKT_OFLD_NOT_EXISTS_ID}, /* pkt_ofld_info */
 	{0, 0, 0, NULL}, /* pkt_ofld_pkt */
-	{NULL, NULL, NULL, 0, 0, 0, 0, 0}, /* cmd_ofld_info */
+	{NULL, NULL, NULL, 0, 0, 0, 0, 0, 0, 0}, /* cmd_ofld_info */
+#if MAC_FEAT_MCC
 	{{{0}, {0}, {0}, {0}}}, /* mcc_group_info */
-	{NULL}, /* wowlan_info */
+#endif /* MAC_FEAT_MCC */
+	{NULL, 0}, /* wowlan_info */
+#if MAC_FEAT_P2P
 	NULL, /* p2p_info */
 	NULL, /* t32_togl_rpt */
+#endif
 	NULL, /* port_info */
 	{0}, /* struct mac_ax_int_stats stats */
 	{0}, /*h2c_agg_info*/
 	{0, 0}, /* struct mac_ax_drv_stats drv_stats */
 	{0}, /* csi_info */
-	{{0}, 0, 0, 0, 0, 0, 0, 0, {0}}, /* nan_info */
-	DUT_ENV_ASIC, /* env */
+#if MAC_FEAT_NAN
+	{NAN_C2H_TYPE_MAX, {0}, 0, 0, 0, 0, {0}, 0, 0, 0, 0}, /* nan_info */
+#endif
+	{MAC_AX_INTF_INVALID, DUT_ENV_ASIC}, /* env_info */
+	{0}, /* dbg_info */
 	{0, 0}, /* test_l12_info */
+	{0,
+#if MAC_AX_FEATURE_DBGPKG
+	 0,
+#endif
+#if MAC_AX_FEATURE_ERR_FLAG
+	 ERR_FLAG_REV_8852B
+#endif
+	 }, /* mac_auto_gen_info */
 #if MAC_AX_SDIO_SUPPORT
 	{MAC_AX_SDIO_4BYTE_MODE_DISABLE, MAC_AX_SDIO_TX_MODE_AGG,
 	MAC_AX_SDIO_SPEC_VER_2_00, MAC_AX_SDIO_OPN_MODE_BLOCK,
@@ -773,82 +909,34 @@ static struct mac_ax_adapter mac_8852b_adapter =  {
 #if MAC_AX_PCIE_SUPPORT
 	{0}, /* pcie_info */
 #endif
-	{0, 0, 0, 0, 0, 0, 0, 0, 0, NULL}, /*flash_info */
+	{NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0}, /*flash_info */
 	{0, 0}, /* fast_ch_sw_info */
 #if MAC_AX_FEATURE_HV
 	NULL, /*hv_ax_ops*/
 #endif
-#if MAC_AX_FEATURE_DBGCMD
-	{NULL, 0, 0, 1, 0, 0, 1, 0}, /*fw_dbgcmd*/
-#endif
-#if MAC_AX_FEATURE_DBGDEC
+	{NULL, 0, 0, 0, 0, 0, 1, 1}, /*fw_dbgcmd*/
 	NULL, /*fw_log_array*/
 	NULL,
 	0,
-#endif
 	{{NULL, NULL}}, /*scanofld_info*/
 	{0}, /*log_cfg*/
 	NULL, /* twt_info */
 	{0}, /*ch_switch_rpt*/
 	NULL, /* dbcc_info */
 	{0}, /* bn_fltr_rpt */
-	{0}, /* bcn_ignore_edcca */
 	NULL, /* bcn_rpt_stats */
+#if	MAC_FEAT_BCN_CNT
+	{0}, /* bcn_sync_rpt */
+	{0}, /* bcn_sync_info */
+#endif
 	{0}, /* wdt_log_en */
+#ifdef MAC_TXRPT_STATISTIC
+	&mac_8852b_txrpt_dbg_stat, /* txrpt_dbg_stat */
+#endif
+	{{0}, {{0}}, 0}, /* sta_diag_info */
+	{0}, /* apf_info */
 };
 
-#ifdef CONFIG_NEW_HALMAC_INTERFACE
-struct mac_ax_adapter *get_mac_8852b_adapter(enum mac_ax_intf intf,
-					     u8 cv, void *phl_adapter,
-					     void *drv_adapter,
-					     struct mac_ax_pltfm_cb *pltfm_cb)
-{
-	struct mac_ax_adapter *adapter = NULL;
-	struct mac_ax_mac_pwr_info *pwr_info;
-
-	adapter =
-	(struct mac_ax_adapter *)hal_mem_alloc(drv_adapter,
-		sizeof(struct mac_ax_adapter));
-	if (!adapter)
-		return NULL;
-
-	hal_mem_cpy(drv_adapter, adapter, &mac_8852b_adapter,
-		    sizeof(struct mac_ax_adapter));
-	pwr_info = &adapter->mac_pwr_info;
-
-	adapter->phl_adapter = phl_adapter;
-	adapter->drv_adapter = drv_adapter;
-	adapter->pltfm_cb = pltfm_cb;
-	adapter->hw_info->cv = cv;
-	adapter->hw_info->intf = intf;
-	adapter->hw_info->done = 1;
-
-	switch (intf) {
-#if MAC_AX_SDIO_SUPPORT
-	case MAC_AX_INTF_SDIO:
-		adapter->ops->intf_ops = &mac8852b_sdio_ops;
-		pwr_info->intf_pwr_switch = sdio_pwr_switch;
-		break;
-#endif
-#if MAC_AX_USB_SUPPORT
-	case MAC_AX_INTF_USB:
-		adapter->ops->intf_ops = &mac8852b_usb_ops;
-		pwr_info->intf_pwr_switch = usb_pwr_switch;
-		break;
-#endif
-#if MAC_AX_PCIE_SUPPORT
-	case MAC_AX_INTF_PCIE:
-		adapter->ops->intf_ops = &mac8852b_pcie_ops;
-		pwr_info->intf_pwr_switch = pcie_pwr_switch;
-		break;
-#endif
-	default:
-		return NULL;
-	}
-
-	return adapter;
-}
-#else
 struct mac_ax_adapter *get_mac_8852b_adapter(enum mac_ax_intf intf,
 					     u8 cv, void *drv_adapter,
 					     struct mac_ax_pltfm_cb *pltfm_cb)
@@ -879,6 +967,8 @@ struct mac_ax_adapter *get_mac_8852b_adapter(enum mac_ax_intf intf,
 
 	if (!hw_info) {
 		pltfm_cb->msg_print(drv_adapter, _PHL_ERR_, "Malloc hw info fail\n");
+		pltfm_cb->rtl_free(drv_adapter, adapter,
+				   sizeof(struct mac_ax_adapter) + priv_size);
 		return NULL;
 	}
 
@@ -892,7 +982,7 @@ struct mac_ax_adapter *get_mac_8852b_adapter(enum mac_ax_intf intf,
 	adapter->pltfm_cb = pltfm_cb;
 	adapter->hw_info = hw_info;
 	adapter->hw_info->cv = cv;
-	adapter->hw_info->intf = intf;
+	adapter->env_info.intf = intf;
 	adapter->hw_info->done = 1;
 
 	p = get_priv(adapter);
@@ -915,12 +1005,13 @@ struct mac_ax_adapter *get_mac_8852b_adapter(enum mac_ax_intf intf,
 		break;
 #endif
 	default:
+		pltfm_cb->rtl_free(drv_adapter, adapter,
+				   sizeof(struct mac_ax_adapter) + priv_size);
 		return NULL;
 	}
 
 	return adapter;
 }
-#endif
 
 u32 dmac_func_en_8852b(struct mac_ax_adapter *adapter)
 {

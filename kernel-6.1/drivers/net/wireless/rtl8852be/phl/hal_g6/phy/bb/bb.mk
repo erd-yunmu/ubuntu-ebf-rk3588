@@ -61,7 +61,8 @@ halbb-y += $(path_halbb_d1)/halbb.o \
 			$(path_halbb_d1)/halbb_dyn_dtr.o\
 			$(path_halbb_d1)/halbb_dbg_cnsl_out.o\
 			$(path_halbb_d1)/halbb_bb_wrapper.o\
-			$(path_halbb_d1)/halbb_spatial_reuse.o
+			$(path_halbb_d1)/halbb_spatial_reuse.o\
+			$(path_halbb_d1)/halbb_dv_dbg.o
 
 ifeq ($(CONFIG_RTL8852A), y)
 bb_ic := 8852a
@@ -95,6 +96,19 @@ halbb-y += $(path_halbb_8852b)/halbb_8852b.o \
 			$(path_halbb_8852b)/halbb_8852b_fwofld_api.o \
 			$(path_halbb_8852b)/halbb_hwimg_8852b.o \
 			$(path_halbb_8852b)/halbb_reg_cfg_8852b.o
+endif
+
+ifeq ($(CONFIG_RTL8842A), y)
+bb_ic := 8852c
+# Level 2 directory
+path_halbb_8852c := $(path_halbb_d1)/halbb_$(bb_ic)
+
+halbb-y += $(path_halbb_8852c)/halbb_8852c.o \
+			$(path_halbb_8852c)/halbb_8852c_api.o \
+			$(path_halbb_8852c)/halbb_8852c_fwofld_api.o \
+			$(path_halbb_8852c)/halbb_hwimg_8852c.o \
+			$(path_halbb_8852c)/halbb_reg_cfg_8852c.o \
+			$(path_halbb_8852c)/halbb_8852c_dcra.o
 endif
 
 ifeq ($(CONFIG_RTL8852D), y)
@@ -205,5 +219,17 @@ halbb-y += $(path_halbb_8934a)/halbb_8934a.o \
 			$(path_halbb_8934a)/halbb_8934a_api.o \
 			$(path_halbb_8934a)/halbb_hwimg_8934a.o \
 			$(path_halbb_8934a)/halbb_reg_cfg_8934a.o
+endif
+
+ifeq ($(CONFIG_RTL8852BPT), y)
+bb_ic := 8852b
+# Level 2 directory
+path_halbb_8852b := $(path_halbb_d1)/halbb_$(bb_ic)
+
+halbb-y += $(path_halbb_8852b)/halbb_8852b.o \
+			$(path_halbb_8852b)/halbb_8852b_api.o \
+			$(path_halbb_8852b)/halbb_8852b_fwofld_api.o \
+			$(path_halbb_8852b)/halbb_hwimg_8852b.o \
+			$(path_halbb_8852b)/halbb_reg_cfg_8852b.o
 endif
 _HAL_BB_FILES +=	$(halbb-y)

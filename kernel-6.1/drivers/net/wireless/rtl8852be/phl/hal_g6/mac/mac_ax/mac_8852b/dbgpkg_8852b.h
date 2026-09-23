@@ -19,6 +19,7 @@
 
 #include "../../mac_def.h"
 
+#if MAC_AX_FEATURE_DBGPKG
 #if MAC_AX_8852B_SUPPORT
 
 /**
@@ -133,19 +134,6 @@ u32 tx_flow_sch_dbg_port_8852b(struct mac_ax_adapter *adapter, u8 band);
  */
 
 /**
- * @brief ss_stat_chk_8852b
- * mac ss_stat_chk
- * @param *adapter
- * @return Please Place Description here.
- * @retval u32
- */
-u32 ss_stat_chk_8852b(struct mac_ax_adapter *adapter);
-/**
- * @}
- * @}
- */
-
-/**
  * @brief is_dbg_port_not_valid_8852b
  *
  * @param *adapter
@@ -160,4 +148,5 @@ u8 is_dbg_port_not_valid_8852b(struct mac_ax_adapter *adapter, u32 dbg_sel);
  */
 
 #endif /* MAC_AX_8852B_SUPPORT */
+#endif /* MAC_AX_FEATURE_DBGPKG */
 #endif /* _MAC_AX_DBGPKG_8852B_H_ */

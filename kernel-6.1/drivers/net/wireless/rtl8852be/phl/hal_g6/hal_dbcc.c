@@ -57,13 +57,13 @@ rtw_hal_dbcc_trx_ctrl(void *hal, struct rtw_phl_com_t *phl_com,
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	hsts = rtw_hal_mac_dbcc_trx_ctrl(hal_info, band_idx, pause);
 	if (hsts != RTW_HAL_STATUS_SUCCESS)
 		PHL_ERR("%s band_%d , pause:%d failed\n", __func__, band_idx, pause);
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(hal_info->phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return hsts;
 }
@@ -78,7 +78,7 @@ rtw_hal_dbcc_pre_cfg(void *hal, struct rtw_phl_com_t *phl_com, bool dbcc_en)
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	if (!phl_com->dev_cap.dbcc_sup)
 		goto exit_func;
@@ -170,7 +170,7 @@ rtw_hal_dbcc_pre_cfg(void *hal, struct rtw_phl_com_t *phl_com, bool dbcc_en)
 
 exit_func:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(hal_info->phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return hsts;
 }
@@ -185,7 +185,7 @@ rtw_hal_dbcc_cfg(void *hal, struct rtw_phl_com_t *phl_com, bool dbcc_en)
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	if (!phl_com->dev_cap.dbcc_sup)
 		goto exit_func;
@@ -263,7 +263,7 @@ rtw_hal_dbcc_cfg(void *hal, struct rtw_phl_com_t *phl_com, bool dbcc_en)
 
 exit_func:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(hal_info->phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return hsts;
 }
@@ -332,6 +332,10 @@ hal_dbcc_cfg_phy_map(struct hal_info_t *hal, enum phl_band_idx band_idx)
 	enum phl_phy_idx phy_idx = rtw_hal_hw_band_to_phy_idx(band_idx);
 	enum phl_phy_idx cck_phy_idx = HW_PHY_MAX;
 
+	if (phy_idx == HW_PHY_MAX) {
+		PHL_ERR("%s invalid phy idx\n", __func__);
+		return;
+	}
 	rtw_hal_reset(hal->hal_com, phy_idx, band_idx, true);
 
 	cck_phy_idx = hal_dbcc_cck_phyidx_decision(hal, hal->phl_com,

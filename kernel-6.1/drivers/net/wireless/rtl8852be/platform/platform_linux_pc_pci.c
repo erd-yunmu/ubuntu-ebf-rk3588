@@ -58,6 +58,10 @@ void pci_get_bus_addr(struct pci_dev *hwdev,
 			hwdev->dev.dma_mask = NULL;
 #endif
 		*bus_addr = dma_map_single(&hwdev->dev, vir_addr, size, direction);
+		if (dma_mapping_error(&hwdev->dev, *bus_addr)) {
+			RTW_ERR("%s: failed to map dma addr\n", __func__);
+			*bus_addr = 0x0;
+		}
 	} else {
 		RTW_ERR("pcie hwdev handle is NULL!\n");
 		*bus_addr = (dma_addr_t)virt_to_phys(vir_addr);
@@ -89,7 +93,7 @@ void *pci_alloc_cache_mem(struct pci_dev *pdev,
 	}
 	else {
 		pci_get_bus_addr(pdev, vir_addr, bus_addr, size, direction);
-		if (!vir_addr) {
+		if (!*bus_addr) {
 			RTW_ERR("%s: map %ld failed\n", __func__, size);
 		}
 	}

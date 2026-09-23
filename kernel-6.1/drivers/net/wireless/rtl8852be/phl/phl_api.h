@@ -30,6 +30,8 @@ void rtw_phl_write_bbreg(void *phl,
 			u32 offset, u32 bit_mask, u32 data);
 u32 rtw_phl_read_rfreg(void *phl,
 			enum rf_path path, u32 offset, u32 bit_mask);
+u32 rtw_phl_cmd_read_rfreg(void *phl, enum rf_path path, u32 offset,
+			   u32 bit_mask);
 void rtw_phl_write_rfreg(void *phl,
 			enum rf_path path, u32 offset, u32 bit_mask, u32 data);
 enum rtw_phl_status rtw_phl_interrupt_handler(void *phl);
@@ -39,6 +41,7 @@ void rtw_phl_disable_interrupt(void *phl);
 bool rtw_phl_recognize_interrupt(void *phl);
 void rtw_phl_clear_interrupt(void *phl);
 void rtw_phl_restore_interrupt(void *phl);
+enum rtw_phl_status rtw_phl_interrupt_request_handler(void *phl);
 
 enum rtw_phl_status
 rtw_phl_cmd_cfg_hw_seq(void *phl,
@@ -205,7 +208,9 @@ void rtw_phl_proc_cmd(void *phl, char proc_cmd,
 void rtw_phl_get_halmac_ver(char *buf, u16 buf_len);
 void rtw_phl_get_fw_ver(void *phl, char *ver_str, u16 len);
 
+#ifndef CONFIG_CORE_DBG_NONE
 enum rtw_fw_status rtw_phl_get_fw_status(void *phl);
+#endif
 
 enum rf_path rtw_phl_get_path_from_ant_num(void *phl, u8 antnum);
 
@@ -270,6 +275,8 @@ rtw_phl_cmd_change_stainfo(void *phl,
 	u8 *chg_info, u8 chg_info_len,
 	enum phl_cmd_type cmd_type, u32 cmd_timeout);
 
+bool phl_is_sta_linked(void *phl, struct rtw_phl_stainfo_t *sta);
+
 enum rtw_phl_status
 rtw_phl_cmd_update_media_status(void *phl,
                                 struct rtw_phl_stainfo_t *sta,
@@ -285,7 +292,8 @@ struct rtw_phl_stainfo_t *
 rtw_phl_get_stainfo_by_addr(void *phl,
                             struct rtw_wifi_role_t *wrole,
                             struct rtw_wifi_role_link_t *rlink,
-                            u8 *addr);
+                            u8 *addr,
+                            bool ext_q);
 
 struct rtw_phl_stainfo_t *
 rtw_phl_get_stainfo_by_macid(void *phl, u16 macid);
@@ -391,6 +399,8 @@ rtw_phl_start_rx_ba_session(void *phl, struct rtw_phl_stainfo_t *sta,
 			    u16 ba_policy, u16 tid, u16 buf_size);
 void rtw_phl_rx_bar(void *phl, struct rtw_phl_stainfo_t *sta, u8 tid, u16 seq);
 void rtw_phl_flush_reorder_buf(void *phl, struct rtw_phl_stainfo_t *sta);
+void rtw_phl_set_reorder_timeout(void *phl, struct rtw_phl_stainfo_t *sta, u16 value);
+
 enum rtw_phl_status
 rtw_phl_enter_mon_mode(void *phl, struct rtw_wifi_role_t *wrole);
 enum rtw_phl_status
@@ -413,6 +423,14 @@ rtw_phl_cmd_stop_beacon(void *phl,
                         u8 stop,
                         enum phl_cmd_type cmd_type,
                         u32 cmd_timeout);
+
+enum rtw_phl_status
+rtw_phl_cmd_core_stop_beacon(void *phl,
+                        struct rtw_wifi_role_link_t *rlink,
+                        u8 stop,
+                        enum phl_cmd_type cmd_type,
+                        u32 cmd_timeout);
+
 #ifdef CONFIG_RTW_DEBUG_BCN_TX
 enum rtw_phl_status rtw_phl_get_beacon_cnt(void *phl,
 				u8 bcn_id, struct rtw_bcn_stats **bcn_stats);
@@ -604,8 +622,10 @@ rtw_phl_wifi_role_realloc_band(void *phl,
 #ifdef CONFIG_PHL_CHANNEL_INFO
 enum rtw_phl_status rtw_phl_cmd_cfg_chinfo(void *phl,
 	struct rtw_chinfo_action_parm *act_parm, enum phl_cmd_type cmd_type, u32 cmd_timeout);
+#ifndef CONFIG_PHL_CHANNEL_INFO_DIRECT_INDICATE
 enum rtw_phl_status rtw_phl_query_chan_info(void *phl, u32 buf_len,
 	u8* chan_info_buffer, u32 *length, struct csi_header_t *csi_header);
+#endif
 #endif /* CONFIG_PHL_CHANNEL_INFO */
 
 void rtw_phl_set_edcca_mode(void *phl, enum rtw_edcca_mode mode);
@@ -617,6 +637,16 @@ rtw_phl_cmd_edcca_mode_cfg(void *phl,
                            u32 cmd_timeout);
 
 enum rtw_edcca_mode rtw_phl_get_edcca_mode(void *phl);
+
+#ifdef RTW_WKARD_DYNAMIC_PCIE_GEN
+void rtw_phl_pcie_gen_dm(void *phl,
+			 bool (*condition)(void *priv,
+					   enum rtw_pcie_gen cur_gen),
+			 void *priv);
+#endif
+
+void rtw_phl_update_io_dump_allow(void *phl, bool io_dump_allow);
+void rtw_phl_update_fw_log_dump_allow(void *phl, bool fw_log_dump_allow);
 
 u8 rtw_phl_get_domain_index(
 	void *phl, u8 domain, bool is_6g, u8 tbl_idx);
@@ -845,6 +875,9 @@ void rtw_phl_get_env_rpt(void *phl,
                          struct rtw_env_report *env_rpt,
                          u8 hw_band);
 
+
+#ifdef CONFIG_PHL_BEAMFORM
+
 #ifdef RTW_WKARD_DYNAMIC_BFEE_CAP
 enum rtw_phl_status
 rtw_phl_bfee_ctrl(void *phl, struct rtw_wifi_role_link_t *rlink, bool ctrl);
@@ -889,6 +922,17 @@ rtw_phl_snd_cmd_set_aid(void *phl,
 enum rtw_phl_status
 rtw_phl_sound_start_ex(void *phl, u8 wrole_idx, u8 st_dlg_tkn, u8 period, u8 test_flag);
 
+#else
+#define rtw_phl_sound_start(_phl, _wrole_idx, _st_dlg_tkn, _period, _test_flag) RTW_PHL_STATUS_SUCCESS
+#define rtw_phl_sound_start_ex(_phl, _wrole_idx, _st_dlg_tkn, _period, _test_flag) RTW_PHL_STATUS_SUCCESS
+#define rtw_phl_sound_abort(_phl) RTW_PHL_STATUS_SUCCESS
+#define rtw_phl_snd_chk_in_progress(_phl) RTW_PHL_STATUS_SUCCESS
+#define rtw_phl_snd_cmd_set_aid(_phl, _wrole, _sta, _aid) RTW_PHL_STATUS_SUCCESS
+#define rtw_phl_snd_cmd_set_vht_gid(_phl, _wrole, _tbl) RTW_PHL_STATUS_SUCCESS
+#define rtw_phl_bfee_ctrl(_phl, _rlink, _ctrl) RTW_PHL_STATUS_SUCCESS
+#define rtw_phl_snd_init_ops_send_ndpa(_phl, _snd_send_ndpa) RTW_PHL_STATUS_SUCCESS
+#endif
+
 enum rtw_phl_status
 rtw_phl_set_power_limit(void *phl);
 
@@ -897,7 +941,13 @@ s8 rtw_phl_get_power_limit(void *phl, u8 hw_band,
 s8 rtw_phl_get_power_by_rate_band(void *phl, u8 hw_band, u16 rate, u8 dcm, u8 offset, u32 band);
 s8 rtw_phl_get_power_limit_option(void *phl, u8 hw_band, u8 rf_path, u16 rate,
 	u8 bandwidth, u8 beamforming, u8 tx_num, u8 channel, u32 band, u8 reg);
+s8 rtw_phl_get_power_limit_ru_option(void *phl,
+	u8 hw_band, u8 rf_path, u16 rate, u8 bandwidth,
+	u8 tx_num, u8 channel, u32 band, u8 reg);
 u8 rtw_phl_get_tx_tbl_to_tx_pwr_times(void *phl);
+s8 rtw_phl_get_power_limit_value_ww(void *phl);
+s8 rtw_phl_get_power_limit_value_na(void *phl);
+u32 rtw_phl_get_regulation_max_num(void *phl, enum band_type band);
 
 void
 rtw_phl_enable_ext_pwr_lmt(void *phl, u8 hw_band,
@@ -907,6 +957,11 @@ rtw_phl_set_ext_pwr_lmt_en(void *phl, bool enable);
 enum rtw_phl_status
 rtw_phl_cmd_updt_ext_txpwr_lmt(void *phl,
 	struct rtw_phl_cmd_epl_para *param,
+	enum phl_cmd_type cmd_type,
+	u32 cmd_timeout);
+enum rtw_phl_status
+rtw_phl_cmd_set_tas_en(void *phl,
+	u8 en,
 	enum phl_cmd_type cmd_type,
 	u32 cmd_timeout);
 
@@ -1049,6 +1104,7 @@ void rtw_phl_notification(void *phl,
                           struct rtw_wifi_role_t *wrole,
                           bool direct);
 void rtw_phl_dev_terminate_ntf(void *phl);
+void rtw_phl_dev_shall_stop_ntf(void *phl);
 
 enum rtw_phl_status
 rtw_phl_cmd_force_usb_switch(void *phl, u32 speed,
@@ -1062,6 +1118,15 @@ enum rtw_phl_status
 rtw_phl_cmd_get_usb_support_ability(void *phl, u32* ability,
 				enum phl_band_idx band_idx,
 				enum phl_cmd_type cmd_type, u32 cmd_timeout);
+
+enum rtw_phl_status rtw_phl_cmd_get_usb_mode_status(void *phl, u32 *status,
+						    enum phl_band_idx band_idx,
+						    enum phl_cmd_type cmd_type,
+						    u32 cmd_timeout);
+enum rtw_phl_status rtw_phl_cmd_get_u3_perf_mode(void *phl, u32 *perf_mode,
+						 enum phl_band_idx band_idx,
+						 enum phl_cmd_type cmd_type,
+						 u32 cmd_timeout);
 u8 rtw_phl_get_sta_mgnt_rssi(struct rtw_phl_stainfo_t *psta);
 
 void rtw_phl_init_chdef(struct rtw_phl_com_t *phl_com, struct rtw_chan_def *chdef);
@@ -1138,13 +1203,20 @@ void rtw_phl_packet_event_notify(void *phl,
  * TX power APIs
  *
  *****************************************************************************/
+u8 rtw_phl_get_pw_lmt_regu_type(void *phl, enum band_type band);
 int rtw_phl_get_pw_lmt_regu_type_from_str(void *phl, const char *str);
+int rtw_phl_get_pw_lmt_regu_type_of_band_from_str(void *phl
+	, enum band_type band, const char *str);
 const char *rtw_phl_get_pw_lmt_regu_str_from_type(void *phl, u8 regu);
+const char *rtw_phl_get_pw_lmt_regu_str_from_type_of_band(void *phl
+	, enum band_type band, u8 regu);
 
 const char *rtw_phl_get_pw_lmt_regu_type_str(void *phl, enum band_type band);
 
 bool rtw_phl_pw_lmt_regu_tbl_exist(void *phl, enum band_type band, u8 regu);
 u8 rtw_phl_ext_reg_codemap_search(void *phl, u16 domain_code, const char *country, const char **reg_name);
+u8 rtw_phl_ext_reg_codemap_of_band_search(void *phl, enum band_type band
+	, u16 domain_code, const char *country, const char **reg_name);
 
 bool rtw_phl_get_pwr_lmt_en(void *phl, u8 band_idx);
 
@@ -1203,8 +1275,21 @@ rtw_phl_cmd_tpe_update(struct rtw_wifi_role_link_t *rlink,
 enum rtw_phl_status
 rtw_phl_free_mld(void *phl, struct rtw_phl_mld_t *mld);
 
+enum rtw_phl_status
+rtw_phl_free_mld_ext(void *phl, struct rtw_phl_mld_t *mld);
+
 struct rtw_phl_mld_t *
 rtw_phl_alloc_mld(void *phl,
+                  struct rtw_wifi_role_t *wrole,
+                  u8 *mac_addr,
+                  enum rtw_device_type type);
+
+enum rtw_phl_status
+rtw_phl_link_mld_stainfo(struct rtw_phl_mld_t *mld,
+                         struct rtw_phl_stainfo_t *phl_sta);
+
+struct rtw_phl_mld_t *
+rtw_phl_alloc_mld_ext(void *phl,
                   struct rtw_wifi_role_t *wrole,
                   u8 *mac_addr,
                   enum rtw_device_type type);
@@ -1221,6 +1306,12 @@ struct rtw_phl_mld_t *
 rtw_phl_get_mld_by_addr(void *phl,
                         struct rtw_wifi_role_t *wrole,
                         u8 *addr);
+
+struct rtw_phl_mld_t *
+rtw_phl_get_mld_by_addr_ext(void *phl,
+                        struct rtw_wifi_role_t *wrole,
+                        u8 *addr);
+
 
 struct rtw_phl_mld_t *
 rtw_phl_get_mld_self(void *phl, struct rtw_wifi_role_t *wrole);
@@ -1249,12 +1340,24 @@ u8 rtw_phl_scanofld_support(void *phl);
 bool
 rtw_phl_check_sta_has_busy_wp(struct rtw_phl_stainfo_t *sta);
 
-void rtw_phl_set_tx_pwr_comp(void *phl, u8 regu, s8 ag_comp_2g,
-			     s8 ag_comp_5g, s8 ag_comp_6g);
+void rtw_phl_set_tx_pwr_comp(void *phl, struct rtw_phl_regu_dyn_ant_gain *dyn_ag,
+		enum band_type band, const char *sregulation);
+
+enum rtw_phl_status rtw_phl_update_tas_def_setting(
+	void *phl, u32 tas_config);
 
 #ifdef CONFIG_PHL_DIAGNOSE
 bool rtw_phl_send_diag_hub_msg(struct rtw_phl_com_t *phl_com,
 		u16 phl_evt, u8 sub_evt, u8 level, u8 ver, u8 *buf, u32 len);
+bool rtw_phl_query_rf_diag_err_code(void *phl, u32 *err_code);
+bool rtw_phl_query_rf_diag_info_len(u32 *len);
+bool rtw_phl_query_rf_diag_info(void *phl,
+	struct rtw_phl_diag_rf_info *info);
+bool rtw_phl_query_bb_diag_info_len_ver(u32 *len, u8 *ver, u8 type);
+enum rtw_phl_status rtw_phl_query_bb_diag_info(void *phl,
+		struct rtw_wifi_role_link_t *rlink, u8 *bb_comp_buf, u32 len,
+		enum rtw_phl_bb_dbg_type type);
+
 #endif
 
 #ifdef CONFIG_POST_CORE_KEEP_ALIVE
@@ -1269,6 +1372,8 @@ rtw_phl_get_antenna_info(void *phl, struct rtw_phl_smart_ant_info_t *antenna_inf
 void
 rtw_phl_get_antenna_info_acs(void *phl, struct rtw_phl_smart_ant_info_t *antenna_info);
 #endif
+
+void rtw_phl_get_mac_sel_tx_status(void *phl, enum phl_band_idx bidx, void *out_tx_cnt);
 
 #endif /*_PHL_API_H_*/
 

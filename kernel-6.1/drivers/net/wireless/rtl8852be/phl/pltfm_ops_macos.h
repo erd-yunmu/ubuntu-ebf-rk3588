@@ -15,6 +15,8 @@
 #ifndef _PLTFM_OPS_MACOS_H_
 #define _PLTFM_OPS_MACOS_H_
 
+#include "core4phl_inc.h"
+
 static __inline char *_os_strsep(char **s, const char *ct)
 {
 	return NULL;
@@ -72,6 +74,11 @@ static inline u32 _os_get_cur_time_us(void)
 	return 0;
 }
 static inline u32 _os_get_cur_time_ms(void)
+{
+	return 0;
+}
+
+static inline _os_raw_time _os_get_cur_raw_time(void)
 {
 	return 0;
 }
@@ -431,6 +438,27 @@ static inline u8 _os_deinit_handler_ext(void *drv_priv,
 }
 
 /* File Operation */
+
+/*
+* if _os_file_readable() is supported
+*/
+static inline bool _os_file_readable_supported(void)
+{
+	return false;
+}
+
+/*
+* Test if the specific @param path is a file and readable.
+* If readable, @param sz is set to file size
+* @param path the path of the file to test
+* @param sz the file size if file is readable
+* @return true or false
+*/
+static inline bool _os_file_readable(const char *path, u32 *sz)
+{
+	return false;
+}
+
 static inline u32 _os_read_file(const char *path, u8 *buf, u32 sz)
 {
 	/* OS Dependent API */
@@ -472,6 +500,19 @@ static __inline u32 _os_write32_pcie(void *h, u32 addr, u32 val)
 {
 	return 0;
 }
+
+static __inline bool _os_get_pci_cfg(void *drv_priv, u32 offset, void *buf, u32 len)
+{
+	/* TBD */
+	return false;
+}
+
+static __inline bool _os_set_pci_cfg(void *drv_priv, u32 offset, void *buf, u32 len)
+{
+	/* TBD */
+	return false;
+}
+
 #endif/*#ifdef CONFIG_PCI_HCI*/
 
 #ifdef CONFIG_USB_HCI

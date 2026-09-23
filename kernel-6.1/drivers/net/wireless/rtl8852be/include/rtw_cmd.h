@@ -156,7 +156,6 @@ struct mgnt_tx_parm {
 
 enum rtw_drvextra_cmd_id {
 	NONE_WK_CID, /*MCC_CMD_WK_CID*/
-	STA_MSTATUS_RPT_WK_CID,
 	#if 0 /*#ifdef CONFIG_CORE_DM_CHK_TIMER*/
 	DYNAMIC_CHK_WK_CID,
 	#endif
@@ -196,6 +195,9 @@ enum rtw_drvextra_cmd_id {
 #ifdef CONFIG_P2P
 	HIDE_SSID_WK_CID,
 #endif
+#endif
+#ifdef CONFIG_BTC
+	CORE_BTC_CID,
 #endif
 	MAX_WK_CID
 };
@@ -560,6 +562,7 @@ u8 rtw_run_in_thread_cmd_wait(_adapter *adapter, void (*func)(void *), void *con
 struct ssmps_cmd_parm {
 	struct sta_info *sta;
 	u8 smps;
+	u8 retry_cnt;
 };
 u8 rtw_ssmps_wk_cmd(_adapter *adapter, struct sta_info *sta, u8 smps, u8 enqueue);
 
@@ -597,7 +600,6 @@ extern void rtw_disassoc_cmd_callback(_adapter  *padapter, struct cmd_obj *pcmd)
 void rtw_create_ibss_post_hdl(_adapter *padapter, int status);
 extern void rtw_readtssi_cmdrsp_callback(_adapter	*padapter,  struct cmd_obj *pcmd);
 
-extern void rtw_setstaKey_cmdrsp_callback(_adapter  *padapter,  struct cmd_obj *pcmd);
 extern void rtw_getrttbl_cmdrsp_callback(_adapter  *padapter,  struct cmd_obj *pcmd);
 void rtw_run_cmd(_adapter *padapter, struct cmd_obj *pcmd, bool discard);
 u32 rtw_get_turbo_edca(_adapter *padapter, u8 aifs, u8 ecwmin, u8 ecwmax, u8 txop);
@@ -607,14 +609,7 @@ enum rtw_cmd_id {
 	CMD_DISCONNECT,
 	CMD_CREATE_BSS,
 	CMD_SET_OPMODE,
-#ifdef CONFIG_FSM
-	CMD_SITE_SURVEY,
-#endif
 	CMD_SET_AUTH,
-#ifndef CONFIG_CMD_DISP
-	CMD_SET_KEY,
-	CMD_SET_STAKEY,
-#endif
 	CMD_ADD_BAREQ,
 	CMD_SET_CHANNEL,
 	CMD_TX_BEACON,
@@ -640,10 +635,6 @@ enum rtw_cmd_id {
 	(cmd)->cmdcode == CMD_SET_DRV_EXTRA ? ((struct drvextra_cmd_parm *)(cmd)->parmbuf)->ec_id : ((cmd)->cmdcode == CMD_SET_MLME_EVT ? ((struct rtw_evt_header *)(cmd)->parmbuf)->id : 0), \
 	(cmd)->cmdcode == CMD_SET_DRV_EXTRA ? ((struct drvextra_cmd_parm *)(cmd)->parmbuf)->type : 0
 
-#ifdef CONFIG_CMD_GENERAL
 void rtw_dynamic_chk_wk_sw_hdl(_adapter *padapter);
 void rtw_dynamic_chk_wk_hw_hdl(_adapter *padapter);
-#else
-void rtw_dynamic_chk_wk_hdl(_adapter *padapter);
-#endif
 #endif /* _CMD_H_ */

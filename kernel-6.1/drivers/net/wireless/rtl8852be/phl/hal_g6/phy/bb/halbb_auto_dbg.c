@@ -25,20 +25,56 @@
 #include "halbb_precomp.h"
 
 #ifdef HALBB_AUTO_DBG_SUPPORT
-void halbb_query_hang_info(struct bb_info *bb, struct bb_stat_hang_info *rpt)
+
+#ifdef HALBB_SELF_DIAG_SUPPORT
+void halbb_query_hang_info(struct bb_info *bb_0, struct bb_stat_hang_info *rpt, enum phl_phy_idx phy_idx)
 {
+	struct bb_info *bb = bb_0;
+
+	#ifdef HALBB_DBCC_SUPPORT
+	HALBB_GET_PHY_PTR(bb_0, bb, phy_idx);
+	#endif
+
 	BB_DBG(bb, DBG_AUTO_DBG, "[%s]\n", __func__);
 	halbb_mem_cpy(bb, rpt, &bb->bb_stat_i.bb_stat_hang_i, sizeof(struct bb_stat_hang_info));
 }
 
-void halbb_query_pmac_info(struct bb_info *bb, struct bb_bkp_pmac_info *rpt)
+void halbb_query_pmac_info(struct bb_info *bb_0, struct bb_bkp_pmac_info *rpt, enum phl_phy_idx phy_idx)
 {
+	struct bb_info *bb = bb_0;
+
+	#ifdef HALBB_DBCC_SUPPORT
+	HALBB_GET_PHY_PTR(bb_0, bb, phy_idx);
+	#endif
+
 	BB_DBG(bb, DBG_AUTO_DBG, "[%s]\n", __func__);
 	halbb_mem_cpy(bb, rpt, &bb->bb_auto_dbg_i.bb_bkp_pmac_i, sizeof(struct bb_bkp_pmac_info));
 }
+#endif
 
-void halbb_query_phy_utility_info(struct bb_info *bb, struct bb_bkp_phy_utility_info *rpt)
+void halbb_direct_query_pmac_cr_info(struct bb_info *bb_0, struct bb_bkp_pmac_info *rpt, enum phl_phy_idx phy_idx)
 {
+	struct bb_info *bb = bb_0;
+
+	#ifdef HALBB_DBCC_SUPPORT
+	HALBB_GET_PHY_PTR(bb_0, bb, phy_idx);
+	#endif
+
+	BB_DBG(bb, DBG_AUTO_DBG, "[%s]\n", __func__);
+
+	halbb_pmac_statistics_io_en(bb);
+	halbb_mem_cpy(bb, rpt, &bb->bb_stat_i, sizeof(struct bb_bkp_pmac_info));
+	halbb_statistics_reset(bb);
+}
+
+void halbb_query_phy_utility_info(struct bb_info *bb_0, struct bb_bkp_phy_utility_info *rpt, enum phl_phy_idx phy_idx)
+{
+	struct bb_info *bb = bb_0;
+
+	#ifdef HALBB_DBCC_SUPPORT
+	HALBB_GET_PHY_PTR(bb_0, bb, phy_idx);
+	#endif
+
 	BB_DBG(bb, DBG_AUTO_DBG, "[%s]\n", __func__);
 	halbb_mem_cpy(bb, rpt, &bb->bb_auto_dbg_i.bb_bkp_phy_utility_i, sizeof(struct bb_bkp_phy_utility_info));
 }
@@ -158,42 +194,39 @@ void halbb_auto_chk_hang_init(struct bb_info *bb)
 
 	chk_hang->table_size = table_size;
 	chk_hang->dbg_port_table = halbb_mem_alloc(bb, table_size);
-	halbb_mem_cpy(bb, chk_hang->dbg_port_table, dbg_port_table, table_size);
+	if (chk_hang->dbg_port_table)
+		halbb_mem_cpy(bb, chk_hang->dbg_port_table, dbg_port_table, table_size);
 	
 	chk_hang->dbg_port_val= halbb_mem_alloc(bb, table_size);
-	a_dbg->auto_dbg_type |= AUTO_DBG_CHECK_HANG;
+	a_dbg->auto_dbg_type |= BIT(AUTO_DBG_CHECK_HANG);
 }
 
 void halbb_auto_debug_watchdog(struct bb_info *bb)
 {
 	struct bb_auto_dbg_info *a_dbg = &bb->bb_auto_dbg_i;
 
+	halbb_show_cr_cnt(bb, BB_WD_AUTO_DBG);
+
 	if (!(bb->support_ability & BB_AUTO_DBG))
 		return;
 
 #ifdef BB_AUTO_CHK_HALNG
 	/*check hang*/
-	if (a_dbg->auto_dbg_type & AUTO_DBG_CHECK_HANG)
+	if (a_dbg->auto_dbg_type & BIT(AUTO_DBG_CHECK_HANG))
 		halbb_auto_chk_hang(bb);
 #endif
-	if (a_dbg->auto_dbg_type & AUTO_DBG_STORE_PMAC)
+	if (a_dbg->auto_dbg_type & BIT(AUTO_DBG_STORE_PMAC))
 		halbb_store_pmac_info(bb);
 
-	if (a_dbg->auto_dbg_type & AUTO_DBG_PHY_UTILITY)
+	if (a_dbg->auto_dbg_type & BIT(AUTO_DBG_PHY_UTILITY))
 		halbb_store_phy_utility(bb);
 }
 
 void halbb_auto_debug_init(struct bb_info *bb)
 {
 	struct bb_auto_dbg_info *a_dbg = &bb->bb_auto_dbg_i;
-	/*a_dbg->auto_dbg_type = AUTO_DBG_STORE_PMAC | AUTO_DBG_PHY_UTILITY;*/
 
-	/*check hang*/
-	#ifdef BB_AUTO_CHK_HALNG
-	halbb_auto_chk_hang_init(bb);
-	#endif
-	/*check RX Part*/
-	/*check TX Part*/
+	a_dbg->auto_dbg_type = BIT(AUTO_DBG_PHY_UTILITY); /*default enable for BTC*/
 }
 
 void halbb_auto_debug_pmac_print(struct bb_info *bb, u32 *_used,
@@ -231,6 +264,9 @@ void halbb_auto_debug_pmac_print(struct bb_info *bb, u32 *_used,
 	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 		    "[FA]{CCK, OFDM, All}: %d, %d, %d\n",
 		    fa->cnt_cck_fail, fa->cnt_ofdm_fail, fa->cnt_fail_all);
+	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+		    " *[CCA Spoofing Cnt] {CCK, OFDM} = {%d, %d}, *[AMPDU Miss] = {%d}\n",
+		    cca->cnt_cck_spoofing, cca->cnt_ofdm_spoofing, crc->cnt_ampdu_miss);
 	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 		    " *[CCK]sfd/sig_GG=%d/%d, *[OFDM]Prty=%d, Rate=%d, LSIG_brk_s/l=%d/%d, SBD=%d\n",
 		    cck_fa->sfd_gg_cnt, cck_fa->sig_gg_cnt,
@@ -376,6 +412,7 @@ void halbb_auto_debug_pmac_print_3(struct bb_info *bb, u32 *_used,
 void halbb_auto_debug_dbg(struct bb_info *bb, char input[][16], 
 			  u32 *_used, char *output, u32 *_out_len)
 {
+#ifdef HALBB_SELF_DIAG_SUPPORT
 	struct bb_bkp_phy_utility_info phy_rpt;
 	struct bb_bkp_pmac_info pmac_rpt;
 	struct bb_stat_hang_info hang_rpt;
@@ -385,7 +422,7 @@ void halbb_auto_debug_dbg(struct bb_info *bb, char input[][16],
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			 "type {0:chk_hang, 1:chk_tx, 2:PMAC, 3:phy_utility} {en}\n");
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-			 "query {0:phy_utility, 1: PMAC}\n");
+			 "query {0:chk_hang, 1:chk_tx, 2:PMAC, 3:phy_utility}\n");
 
 		return;
 	}
@@ -401,7 +438,7 @@ void halbb_auto_debug_dbg(struct bb_info *bb, char input[][16],
 		HALBB_SCAN(input[2], DCMD_DECIMAL, &val[0]);
 
 		if (val[0] == 3) {
-			halbb_query_phy_utility_info(bb, &phy_rpt);
+			halbb_query_phy_utility_info(bb, &phy_rpt, bb->bb_phy_idx);
 			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "tx_rate=0x%x, avg_phy_rate=0x%x, rx_rate_plurality=0x%x, rx_utility=%d\n",
 			    phy_rpt.tx_rate, phy_rpt.avg_phy_rate, phy_rpt.rx_rate_plurality,
@@ -411,12 +448,12 @@ void halbb_auto_debug_dbg(struct bb_info *bb, char input[][16],
 			    phy_rpt.bb_physts_avg_i.evm_min, phy_rpt.bb_physts_avg_i.evm_max,
 			    phy_rpt.bb_physts_avg_i.evm_1ss);
 		} else if (val[0] == 2){
-			halbb_query_pmac_info(bb, &pmac_rpt);
+			halbb_query_pmac_info(bb, &pmac_rpt, bb->bb_phy_idx);
 			halbb_auto_debug_pmac_print(bb, _used, output, _out_len, &pmac_rpt);
 			halbb_auto_debug_pmac_print_2(bb, _used, output, _out_len, &pmac_rpt);
 			halbb_auto_debug_pmac_print_3(bb, _used, output, _out_len, &pmac_rpt);
 		} else if (val[0] == 0) {
-			halbb_query_hang_info(bb, &hang_rpt);
+			halbb_query_hang_info(bb, &hang_rpt, bb->bb_phy_idx);
 			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "consecutive_no_tx_cnt=%d, consecutive_no_rx_cnt=%d, hang_occur=%d\n",
 			    hang_rpt.consecutive_no_tx_cnt,
@@ -427,5 +464,6 @@ void halbb_auto_debug_dbg(struct bb_info *bb, char input[][16],
 			    "Err\n");
 		}
 	}
+	#endif
 }
 #endif

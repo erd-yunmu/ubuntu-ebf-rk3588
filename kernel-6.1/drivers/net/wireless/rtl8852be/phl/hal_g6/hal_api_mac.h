@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2019 - 2020 Realtek Corporation.
+ * Copyright(c) 2019 - 2024 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -64,9 +64,10 @@ u32 rtw_hal_mac_init(struct rtw_phl_com_t *phl_com,
 					struct hal_info_t *hal_info);
 u32 rtw_hal_mac_deinit(struct rtw_phl_com_t *phl_com,
 					struct hal_info_t *hal_info);
+#ifdef CONFIG_HAL_MAC_DBG
 bool rtw_hal_mac_proc_cmd(struct hal_info_t *hal_info, struct rtw_proc_cmd *incmd,
 						char *output, u32 out_len);
-
+#endif
 enum rtw_hal_status rtw_hal_mac_get_hwseq(void *hal, u16 macid, u8 ref_sel, u8 ssn_sel,
 						u16 *hw_seq);
 
@@ -77,6 +78,7 @@ enum rtw_hal_status rtw_hal_mac_power_switch(struct rtw_phl_com_t *phl_com,
 					     struct hal_info_t *hal_info,
 					     u8 on_off);
 
+#ifdef CONFIG_DBCC_SUPPORT
 enum rtw_hal_status rtw_hal_mac_dbcc_pre_cfg(struct rtw_phl_com_t *phl_com,
 					     struct hal_info_t *hal_info,
 					     u8 dbcc_en);
@@ -88,6 +90,7 @@ enum rtw_hal_status rtw_hal_mac_dbcc_trx_ctrl(struct hal_info_t *hal_info,
                                               bool pause);
 enum rtw_hal_status rtw_hal_mac_dbcc_hci_ctrl(struct hal_info_t *hal_info,
                                               enum phl_band_idx band_idx, u8 pause);
+#endif /* CONFIG_DBCC_SUPPORT */
 
 enum rtw_hal_status
 rtw_hal_mac_poll_hw_tx_done(struct hal_info_t *hal_info);
@@ -135,6 +138,7 @@ rtw_hal_mac_trigger_txstart(struct hal_info_t *hal,
 enum rtw_hal_status
 rtw_hal_mac_notify_rxdone(struct hal_info_t *hal, struct rx_base_desc *rxbd,
                           u8 ch_idx);
+enum rtw_hal_status rtw_hal_mac_aspm_frontdoor_set(struct hal_info_t *hal_info);
 #endif
 
 
@@ -148,6 +152,9 @@ u16 hal_mac_usb_get_max_dma_txagg_msk(struct hal_info_t *hal);
 enum rtw_hal_status hal_mac_force_usb_switch(struct hal_info_t *hal);
 u32 hal_mac_get_cur_usb_mode(struct hal_info_t *hal);
 u32 hal_mac_get_usb_support_ability(struct hal_info_t *hal);
+u32 hal_mac_set_usb_support_ability(struct hal_info_t *hal, u32 ability);
+u32 hal_mac_get_usb_mode_status(struct hal_info_t *hal, u32 *status);
+u32 hal_mac_get_u3_perf_mode(struct hal_info_t *hal, u32 *perf_mode);
 #endif
 
 #ifdef CONFIG_PHL_CSUM_OFFLOAD_RX
@@ -193,8 +200,13 @@ rtw_hal_mac_set_hci_speed(struct hal_info_t *hal_info, u8 speed);
 enum rtw_hal_status
 rtw_hal_mac_get_hci_speed(struct hal_info_t *hal_info, u8 *speed);
 
+enum rtw_hal_status
+rtw_hal_mac_get_max_hci_speed(struct hal_info_t *hal_info, u8 *speed);
+
 enum rtw_hal_status rtw_hal_mac_set_rxfltr_loopbk_mode(void *hal);
 
+enum rtw_fw_type
+rtw_hal_mac_get_fw_type(struct rtw_phl_com_t *phl_com);
 
 enum rtw_hal_status
 rtw_hal_mac_hal_init(struct rtw_phl_com_t *phl_com,
@@ -211,6 +223,9 @@ enum rtw_hal_status
 rtw_hal_mac_hal_fast_init(struct rtw_phl_com_t *phl_com,
 			  struct hal_info_t *hal_info,
 			  struct hal_init_info_t *init_info);
+
+enum rtw_hal_status rtw_hal_mac_hal_fast_deinit(struct rtw_phl_com_t *phl_com,
+						struct hal_info_t *hal_info);
 
 enum rtw_hal_status
 rtw_hal_mac_hal_deinit(struct rtw_phl_com_t *phl_com, struct hal_info_t *hal_info);
@@ -255,7 +270,7 @@ rtw_hal_mac_cfg_wow_cam(struct hal_info_t *hal_info, u16 macid, u8 en, struct rt
 enum rtw_hal_status
 rtw_hal_mac_get_aoac_rpt(struct hal_info_t *hal_info, struct rtw_aoac_report *aoac_info, u8 rx_ready);
 
-enum rtw_hal_status rtw_hal_mac_set_wowlan(struct hal_info_t *hal, u8 enter);
+enum rtw_hal_status rtw_hal_mac_set_wowlan(struct hal_info_t *hal, enum mac_ax_wow_ctrl ctrl);
 enum rtw_hal_status rtw_hal_mac_wow_chk_txq_empty(struct hal_info_t *hal, u8 *empty);
 enum rtw_hal_status rtw_hal_mac_wow_wde_drop(struct hal_info_t *hal, u8 band);
 enum rtw_hal_status
@@ -264,6 +279,25 @@ rtw_hal_mac_cfg_nlo(struct hal_info_t *hal, u16 macid, u8 en,
 enum rtw_hal_status
 rtw_hal_mac_cfg_periodic_wake(struct hal_info_t *hal, u16 macid, u8 en,
 			      struct rtw_periodic_wake_info *cfg);
+enum rtw_hal_status
+rtw_hal_mac_wow_dbg_dump(struct hal_info_t *hal_info);
+enum rtw_hal_status
+rtw_hal_mac_wow_req_tri_evt(struct hal_info_t *hal);
+enum rtw_hal_status
+rtw_hal_mac_wow_req_diag_rpt(struct hal_info_t *hal);
+
+#ifdef CONFIG_PHL_MDNS_OFFLOAD
+enum rtw_hal_status
+rtw_hal_mac_cfg_mdns_ofld(struct hal_info_t *hal_info, u16 macid, u8 en,
+			  struct rtw_mdns_ofld_info *cfg);
+#endif
+#ifdef CONFIG_PHL_APF
+enum rtw_hal_status
+rtw_hal_mac_ctrl_apf(struct hal_info_t *hal_info, struct phl_apf_info *info);
+#endif
+enum rtw_hal_status
+rtw_hal_mac_cfg_sta_csa(struct hal_info_t *hal, u16 macid, u8 en,
+			struct rtw_hal_mac_sta_csa *cfg);
 #endif /* CONFIG_WOWLAN */
 
 #ifdef CONFIG_PHL_SCANOFLD
@@ -307,6 +341,9 @@ rtw_hal_mac_romdl(struct hal_info_t *hal_info, u8 *rom_buf, u32 rom_size);
 
 enum rtw_hal_status
 rtw_hal_mac_fwdl(struct hal_info_t *hal_info, u8 *fw_buf, u32 fw_size);
+
+bool
+rtw_hal_mac_fwredl_needed(struct hal_info_t *hal_info);
 
 enum rtw_hal_status
 rtw_hal_mac_fwredl(struct hal_info_t *hal_info, u8 *fw_buf, u32 fw_size);
@@ -503,14 +540,16 @@ enum rtw_hal_status rtw_hal_mac_get_acpt_icv_err(struct hal_info_t *hal_info, u8
 #ifdef CONFIG_PHL_CHANNEL_INFO
 enum rtw_hal_status
 rtw_hal_mac_chan_info_cfg(struct hal_info_t *hal_info,
-				bool chinfo_en, u8 macid,
+				bool chinfo_en, u16 macid,
 				enum phl_chinfo_mode mode, u8 filter, u8 sg_size);
 
+#ifdef CONFIG_PHL_CSI_FW_TX_OFLD
 enum rtw_hal_status
 rtw_hal_mac_cfg_sensing_csi(struct hal_info_t *hal_info,
-							u8 macid, u8 en, u16 period, u8 retry_cnt,
+							u16 macid, u8 en, u16 period, u8 retry_cnt,
 							u16 rate, u8 pkt_num, u8 *pkt_id);
 #endif
+#endif /* CONFIG_PHL_CHANNEL_INFO */
 
 void rtw_hal_mac_dbg_status_dump(struct hal_info_t *hal, struct hal_mac_dbg_dump_cfg *cfg);
 
@@ -597,8 +636,10 @@ rtw_hal_mac_is_tx_mgnt_empty(struct hal_info_t *hal_info, u8 band, u8 *st);
 
 enum rtw_hal_status
 rtw_hal_mac_fw_dbg_dump(struct hal_info_t *hal_info);
+#ifdef CONFIG_HAL_MAC_DBG
 enum rtw_fw_status
 rtw_hal_mac_get_fw_status(struct hal_info_t *hal_info);
+#endif
 
 #ifdef CONFIG_POWER_SAVE
 enum rtw_hal_status
@@ -634,18 +675,22 @@ rtw_hal_mac_lps_bcn_tracking_cfg(struct hal_info_t *hal,
 enum rtw_hal_status
 rtw_hal_mac_tbtt_tuning_cfg(struct hal_info_t *hal, enum phl_band_idx band,
 				u8 port, u32 tbtt);
-
+#ifdef CONFIG_PHL_BEAMFORM
 enum rtw_hal_status
 hal_mac_ax_send_fw_snd(struct hal_info_t *hal_info,
 		       struct hal_ax_fwcmd_snd *hal_cmd);
-
+#endif
 enum rtw_hal_status
 rtw_hal_mac_tx_mode_sel(struct hal_info_t *hal_info, u8 fw_tx, u8 txop_wmm_en_bm);
 enum rtw_hal_status
 rtw_hal_mac_get_tx_cnt(struct hal_info_t *hal, enum phl_band_idx bidx, u8 sel);
 
 enum rtw_hal_status
+rtw_hal_mac_get_sel_tx_cnt(struct hal_info_t *hal, enum phl_band_idx bidx, void *out_tx_cnt);
+
+enum rtw_hal_status
 rtw_hal_mac_get_rx_cnt(struct hal_info_t *hal_info, u8 cur_phy_idx, u8 type_idx, u32 *ret_value);
+
 enum rtw_hal_status
 rtw_hal_mac_get_rx_cnt_by_idx(struct hal_info_t *hal_info, u8 cur_phy_idx,
 			      u8 cnt_idx, u16 *ret_value);
@@ -762,8 +807,11 @@ enum rtw_hal_status rtw_hal_mac_ch_switch_ofld(struct hal_info_t *hal_info,
 					       bool reload_rf);
 #endif
 
+#ifdef CONFIG_PHL_BCN_ERLY_RPT
 enum rtw_hal_status rtw_hal_mac_cfg_bcn_early_rpt(struct hal_info_t *hal_info,
 						  u8 band, u8 port, u8 en);
+#endif
+
 void rtw_hal_mac_notification(struct hal_info_t *hal_info,
                               enum phl_msg_evt_id event,
                               u8 band);
@@ -893,6 +941,10 @@ rtw_hal_mac_txagg_timeout_thrhold(struct hal_info_t *hal_info);
 enum rtw_hal_status
 rtw_hal_mac_fw_general_io_test(struct hal_info_t *hal_info);
 
+enum rtw_hal_status rtw_hal_mac_set_rsp_stat_rts_chk_en(struct hal_info_t *hal,
+							enum phl_band_idx band,
+							bool en);
+
 enum rtw_hal_status
 rtw_hal_mac_sr_update(struct rtw_hal_com_t *hal_com,
                       void *sr_info,
@@ -900,4 +952,16 @@ rtw_hal_mac_sr_update(struct rtw_hal_com_t *hal_com,
 
 enum rtw_hal_status
 rtw_hal_mac_set_aspm_test(struct hal_info_t *hal_info);
+
+enum rtw_hal_status rtw_hal_mac_usr_frame_to_act(
+    struct hal_info_t *hal_info, struct mac_ax_usr_frame_to_act_cfg *act_cfg);
+
+#ifdef CONFIG_PHL_CUSTOM_FRAME_STAT
+enum rtw_hal_status
+rtw_hal_mac_set_usr_tx_rpt_cfg(void *hal, struct rtw_phl_usr_tx_rpt_cfg *param);
+
+enum rtw_hal_status
+rtw_hal_mac_set_ch_busy_stat_cfg(struct hal_info_t *hal_info,
+                                 struct mac_ax_ch_busy_cnt_cfg *mac_param);
+#endif /*CONFIG_PHL_CUSTOM_FRAME_STAT*/
 #endif /*_HAL_API_MAC_H_*/

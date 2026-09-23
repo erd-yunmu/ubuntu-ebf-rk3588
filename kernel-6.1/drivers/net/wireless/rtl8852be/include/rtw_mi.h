@@ -157,7 +157,6 @@ void rtw_mi_buddy_cancel_all_timer(_adapter *adapter);
 void rtw_mi_reset_drv_sw(_adapter *adapter);
 void rtw_mi_buddy_reset_drv_sw(_adapter *adapter);
 
-u8 rtw_mi_hal_iface_init(_adapter *padapter);
 void rtw_mi_suspend_free_assoc_resource(_adapter *adapter);
 void rtw_mi_buddy_suspend_free_assoc_resource(_adapter *adapter);
 
@@ -171,9 +170,6 @@ void rtw_mi_buddy_set_scan_deny(_adapter *adapter, u32 ms);
 
 u8 rtw_mi_is_scan_deny(_adapter *adapter);
 u8 rtw_mi_buddy_is_scan_deny(_adapter *adapter);
-
-void rtw_mi_beacon_update(_adapter *padapter);
-void rtw_mi_buddy_beacon_update(_adapter *padapter);
 
 
 u8 rtw_mi_busy_traffic_check(_adapter *padapter);
@@ -216,8 +212,6 @@ u8 rtw_mi_check_pending_xmitbuf(_adapter *padapter);
 u8 rtw_mi_buddy_check_pending_xmitbuf(_adapter *padapter);
 #endif
 
-void rtw_mi_adapter_reset(_adapter *padapter);
-void rtw_mi_buddy_adapter_reset(_adapter *padapter);
 
 u8 rtw_mi_dynamic_check_handlder(struct _ADAPTER *padapter);
 u8 rtw_mi_keep_alive_pre_chk_hdl(struct _ADAPTER *padapter);
@@ -236,26 +230,12 @@ u8 rtw_mi_buddy_os_xmit_schedule(_adapter *padapter);
 u8 rtw_mi_report_survey_event(_adapter *padapter, union recv_frame *precv_frame);
 u8 rtw_mi_buddy_report_survey_event(_adapter *padapter, union recv_frame *precv_frame);
 
-extern void sreset_start_adapter(_adapter *padapter);
-extern void sreset_stop_adapter(_adapter *padapter);
-u8 rtw_mi_sreset_adapter_hdl(_adapter *padapter, u8 bstart);
-u8 rtw_mi_buddy_sreset_adapter_hdl(_adapter *padapter, u8 bstart);
-#if defined(DBG_CONFIG_ERROR_RESET) && defined(CONFIG_CONCURRENT_MODE)
-void rtw_mi_ap_info_restore(_adapter *adapter);
-#endif
-
 u8 rtw_mi_tx_beacon_hdl(_adapter *padapter);
 u8 rtw_mi_buddy_tx_beacon_hdl(_adapter *padapter);
 
 u8 rtw_mi_set_tx_beacon_cmd(_adapter *padapter);
 u8 rtw_mi_buddy_set_tx_beacon_cmd(_adapter *padapter);
 
-#ifdef CONFIG_P2P
-u8 rtw_mi_stay_in_p2p_mode(_adapter *padapter);
-u8 rtw_mi_buddy_stay_in_p2p_mode(_adapter *padapter);
-#endif
-
-_adapter *rtw_get_iface_by_id(_adapter *padapter, u8 iface_id);
 _adapter *rtw_get_iface_by_macddr(_adapter *padapter, const u8 *mac_addr);
 
 void rtw_mi_buddy_clone_bcmc_packet(_adapter *padapter, union recv_frame *precvframe);

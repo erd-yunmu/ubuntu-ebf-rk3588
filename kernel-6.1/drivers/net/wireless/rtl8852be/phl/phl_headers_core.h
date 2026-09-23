@@ -32,7 +32,6 @@
 /* Exported structure/definition from PHL */
 #include "phl_util.h"
 #include "phl_regulation_def.h"
-#include "phl_scan_instance.h"
 #include "hal_g6/mac/mac_exp_def.h"
 #include "phl_regulation.h"
 #include "phl_def.h"
@@ -54,6 +53,7 @@
 #include "custom/phl_custom_def.h"
 #include "phl_ext_tx_pwr_lmt_def.h"
 #include "phl_diagnose.h"
+#include "phl_txpwr.h"
 
 /* Exported APIs from PHL */
 #include "phl_api.h"
@@ -65,5 +65,9 @@
 #include "phl_tdls.h"
 #include "phl_ecsa_export.h"
 #include "custom/phl_custom_api.h"
+
+#ifdef CONFIG_PHL_CUSTOM_FEATURE_USB
+#include "custom/phl_custom_usb.h"
+#endif
 
 #endif /*_PHL_HEADERS_CORE_H_*/

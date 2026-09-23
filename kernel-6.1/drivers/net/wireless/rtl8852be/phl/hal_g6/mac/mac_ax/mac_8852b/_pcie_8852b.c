@@ -19,43 +19,44 @@
 #if MAC_AX_PCIE_SUPPORT
 
 static struct mac_ax_intf_info intf_info_def_8852b = {
-	MAC_AX_BD_TRUNC,
-	MAC_AX_BD_TRUNC,
-	MAC_AX_RXBD_PKT,
-	MAC_AX_TAG_MULTI,
-	MAC_AX_TX_BURST_2048B,
-	MAC_AX_RX_BURST_128B,
-	MAC_AX_WD_DMA_INTVL_256NS,
-	MAC_AX_WD_DMA_INTVL_256NS,
-	MAC_AX_TAG_NUM_8,
-	0,
-	NULL,
-	NULL,
-	0,
-	NULL,
-	MAC_AX_PCIE_ENABLE,
-	MAC_AX_LBC_TMR_2MS,
-	MAC_AX_PCIE_DISABLE,
-	MAC_AX_PCIE_DISABLE,
-	MAC_AX_IO_RCY_ANA_TMR_6MS
+	MAC_AX_BD_TRUNC, /* txbd_trunc_mode */
+	MAC_AX_BD_TRUNC, /* rxbd_trunc_mode */
+	MAC_AX_RXBD_PKT, /* rxbd_mode */
+	MAC_AX_TAG_MULTI, /* tag_mode */
+	MAC_AX_TX_BURST_2048B, /* tx_burst */
+	MAC_AX_RX_BURST_128B, /* rx_burst */
+	MAC_AX_WD_DMA_INTVL_256NS, /* wd_dma_idle_intvl */
+	MAC_AX_WD_DMA_INTVL_256NS, /* wd_dma_act_intvl */
+	MAC_AX_TAG_NUM_8, /* multi_tag_num */
+	MAC_AX_PCIE_ENABLE, /* lbc_en */
+	MAC_AX_LBC_TMR_2MS, /* lbc_tmr */
+	MAC_AX_PCIE_DISABLE, /* autok_en */
+	MAC_AX_PCIE_DISABLE, /* io_rcy_en */
+	MAC_AX_IO_RCY_ANA_TMR_6MS, /* io_rcy_tmr */
 };
 
 static struct mac_ax_pcie_ltr_param pcie_ltr_param_def_8852b = {
-	0,
-	0,
-	MAC_AX_PCIE_ENABLE,
-	MAC_AX_PCIE_ENABLE,
-	MAC_AX_PCIE_LTR_SPC_500US,
-	MAC_AX_PCIE_LTR_IDLE_TIMER_3_2MS,
-	{MAC_AX_PCIE_ENABLE, 0x28},
-	{MAC_AX_PCIE_ENABLE, 0x28},
-	{MAC_AX_PCIE_ENABLE, 0x90039003},
-	{MAC_AX_PCIE_ENABLE, 0x880b880b}
+	MAC_AX_PCIE_ENABLE, /* ltr_ctrl */
+	MAC_AX_PCIE_ENABLE, /* ltr_hw_ctrl */
+	MAC_AX_PCIE_LTR_SPC_500US, /* ltr_spc_ctrl */
+	MAC_AX_PCIE_LTR_IDLE_TIMER_3_2MS, /* ltr_idle_timer_ctrl */
+	MAC_AX_PCIE_IGNORE, /* hw_port_ctrl */
+	MAC_AX_PCIE_IGNORE, /* fw_port_ctrl */
+	MAC_AX_PCIE_IGNORE, /* drv_port_ctrl */
+	PCIE_LTR_IDX_INVALID, /* hw_idx */
+	PCIE_LTR_IDX_INVALID, /* fw_idx */
+	PCIE_LTR_IDX_INVALID, /* drv_idx */
+	{MAC_AX_PCIE_ENABLE, 0x28}, /* ltr_rx0_th_ctrl */
+	{MAC_AX_PCIE_ENABLE, 0x28}, /* ltr_rx1_th_ctrl */
+	{MAC_AX_PCIE_ENABLE, 0x90039003}, /* ltr_idle_lat_ctrl */
+	{MAC_AX_PCIE_ENABLE, 0x880b880b}, /* ltr_act_lat_ctrl */
+	{MAC_AX_PCIE_IGNORE, 0}, /* ltr_dis_lat_ctrl */
+	0, /* curr_ltcy */
+	0, /* write */
+	0, /* read */
 };
 
 static struct mac_ax_pcie_cfgspc_param pcie_cfgspc_param_def_8852b = {
-	0,
-	0,
 	MAC_AX_PCIE_DISABLE,
 	MAC_AX_PCIE_ENABLE,
 	MAC_AX_PCIE_ENABLE,
@@ -63,7 +64,9 @@ static struct mac_ax_pcie_cfgspc_param pcie_cfgspc_param_def_8852b = {
 	MAC_AX_PCIE_ENABLE,
 	MAC_AX_PCIE_CLKDLY_500US,
 	MAC_AX_PCIE_L0SDLY_4US,
-	MAC_AX_PCIE_L1DLY_16US
+	MAC_AX_PCIE_L1DLY_16US,
+	0,
+	0,
 };
 
 struct txbd_ram mac_bdram_tbl_8852b[] = {
@@ -290,6 +293,9 @@ u32 get_txbd_reg_pcie_8852b(struct mac_ax_adapter *adapter, u8 dma_ch, u32 *reg,
 		case PCIE_BD_CTRL_DESC_H:
 			*reg = R_AX_ACH0_TXBD_DESA_H;
 			break;
+		case PCIE_BD_CTRL_DESC_H_P2:
+			*reg = R_AX_BD_ADDR_H;
+			break;
 		case PCIE_BD_CTRL_NUM:
 			*reg = R_AX_ACH0_TXBD_NUM;
 			break;
@@ -311,6 +317,9 @@ u32 get_txbd_reg_pcie_8852b(struct mac_ax_adapter *adapter, u8 dma_ch, u32 *reg,
 			break;
 		case PCIE_BD_CTRL_DESC_H:
 			*reg = R_AX_ACH1_TXBD_DESA_H;
+			break;
+		case PCIE_BD_CTRL_DESC_H_P2:
+			*reg = R_AX_BD_ADDR_H;
 			break;
 		case PCIE_BD_CTRL_NUM:
 			*reg = R_AX_ACH1_TXBD_NUM;
@@ -334,6 +343,9 @@ u32 get_txbd_reg_pcie_8852b(struct mac_ax_adapter *adapter, u8 dma_ch, u32 *reg,
 		case PCIE_BD_CTRL_DESC_H:
 			*reg = R_AX_ACH2_TXBD_DESA_H;
 			break;
+		case PCIE_BD_CTRL_DESC_H_P2:
+			*reg = R_AX_BD_ADDR_H;
+			break;
 		case PCIE_BD_CTRL_NUM:
 			*reg = R_AX_ACH2_TXBD_NUM;
 			break;
@@ -355,6 +367,9 @@ u32 get_txbd_reg_pcie_8852b(struct mac_ax_adapter *adapter, u8 dma_ch, u32 *reg,
 			break;
 		case PCIE_BD_CTRL_DESC_H:
 			*reg = R_AX_ACH3_TXBD_DESA_H;
+			break;
+		case PCIE_BD_CTRL_DESC_H_P2:
+			*reg = R_AX_BD_ADDR_H;
 			break;
 		case PCIE_BD_CTRL_NUM:
 			*reg = R_AX_ACH3_TXBD_NUM;
@@ -378,6 +393,9 @@ u32 get_txbd_reg_pcie_8852b(struct mac_ax_adapter *adapter, u8 dma_ch, u32 *reg,
 		case PCIE_BD_CTRL_DESC_H:
 			*reg = R_AX_CH8_TXBD_DESA_H;
 			break;
+		case PCIE_BD_CTRL_DESC_H_P2:
+			*reg = R_AX_BD_ADDR_H;
+			break;
 		case PCIE_BD_CTRL_NUM:
 			*reg = R_AX_CH8_TXBD_NUM;
 			break;
@@ -399,6 +417,9 @@ u32 get_txbd_reg_pcie_8852b(struct mac_ax_adapter *adapter, u8 dma_ch, u32 *reg,
 			break;
 		case PCIE_BD_CTRL_DESC_H:
 			*reg = R_AX_CH9_TXBD_DESA_H;
+			break;
+		case PCIE_BD_CTRL_DESC_H_P2:
+			*reg = R_AX_BD_ADDR_H;
 			break;
 		case PCIE_BD_CTRL_NUM:
 			*reg = R_AX_CH9_TXBD_NUM;
@@ -422,6 +443,9 @@ u32 get_txbd_reg_pcie_8852b(struct mac_ax_adapter *adapter, u8 dma_ch, u32 *reg,
 		case PCIE_BD_CTRL_DESC_H:
 			*reg = R_AX_CH12_TXBD_DESA_H;
 			break;
+		case PCIE_BD_CTRL_DESC_H_P2:
+			*reg = R_AX_BD_ADDR_H;
+			break;
 		case PCIE_BD_CTRL_NUM:
 			*reg = R_AX_CH12_TXBD_NUM;
 			break;
@@ -444,7 +468,7 @@ u32 get_txbd_reg_pcie_8852b(struct mac_ax_adapter *adapter, u8 dma_ch, u32 *reg,
 	case MAC_AX_DMA_B1HI:
 		return MACNOTSUP;
 	default:
-		PLTFM_MSG_ERR("[ERR] TXBD num CH%d invalid\n", dma_ch);
+		PLTFM_MSG_ERR("Get TXBD reg CH%d invalid\n", dma_ch);
 		return MACFUNCINPUT;
 	}
 
@@ -468,6 +492,7 @@ u32 set_txbd_reg_pcie_8852b(struct mac_ax_adapter *adapter, u8 dma_ch,
 	switch (type) {
 	case PCIE_BD_CTRL_DESC_L:
 	case PCIE_BD_CTRL_DESC_H:
+	case PCIE_BD_CTRL_DESC_H_P2:
 		MAC_REG_W32(reg, val0);
 		break;
 	case PCIE_BD_CTRL_NUM:
@@ -542,7 +567,7 @@ u32 get_rxbd_reg_pcie_8852b(struct mac_ax_adapter *adapter, u8 dma_ch, u32 *reg,
 		}
 		break;
 	default:
-		PLTFM_MSG_ERR("[ERR] RXBD CH%d invalid\n", dma_ch);
+		PLTFM_MSG_ERR("Get RXBD reg CH%d invalid\n", dma_ch);
 		return MACFUNCINPUT;
 	}
 
@@ -662,6 +687,8 @@ u32 pcie_cfgspc_write_8852b(struct mac_ax_adapter *adapter,
 			return ret;
 		if (tmp8 == PROC_SHORT_DLY)
 			clk_val = PCIE_CLKDLY_HW_50US;
+		else if (tmp8 == PROC_100US_DLY)
+			clk_val = PCIE_CLKDLY_HW_100US;
 #endif
 		ret = dbi_w8_pcie(adapter, PCIE_CLK_CTRL, clk_val);
 		if (ret != MACSUCCESS)
@@ -997,6 +1024,113 @@ u32 ltr_sw_trigger_8852b(struct mac_ax_adapter *adapter,
 	return MACSUCCESS;
 }
 
+u32 ltr_dyn_ctrl_8852b(struct mac_ax_adapter *adapter, enum mac_ax_ltr_dyn_ctrl_tp type,
+		       void *param)
+{
+	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
+	struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
+	struct mac_ax_pcie_ltr_param ltr_param = {
+		MAC_AX_PCIE_DEFAULT, /* ltr_ctrl */
+		MAC_AX_PCIE_DEFAULT, /* ltr_hw_ctrl */
+		MAC_AX_PCIE_LTR_SPC_DEF, /* ltr_spc_ctrl */
+		MAC_AX_PCIE_LTR_IDLE_TIMER_DEF, /* ltr_idle_timer_ctrl */
+		MAC_AX_PCIE_IGNORE, /* hw_port_ctrl */
+		MAC_AX_PCIE_IGNORE, /* fw_port_ctrl */
+		MAC_AX_PCIE_IGNORE, /* drv_port_ctrl */
+		PCIE_LTR_IDX_INVALID, /* hw_idx */
+		PCIE_LTR_IDX_INVALID, /* fw_idx */
+		PCIE_LTR_IDX_INVALID, /* drv_idx */
+		{MAC_AX_PCIE_DEFAULT, 0}, /* ltr_rx0_th_ctrl */
+		{MAC_AX_PCIE_DEFAULT, 0}, /* ltr_rx1_th_ctrl */
+		{MAC_AX_PCIE_DEFAULT, 0}, /* ltr_idle_lat_ctrl */
+		{MAC_AX_PCIE_DEFAULT, 0}, /* ltr_act_lat_ctrl */
+		{MAC_AX_PCIE_DEFAULT, 0}, /* ltr_dis_lat_ctrl */
+		0, /* curr_ltcy */
+		1, /* write */
+		0, /* read */
+	};
+	u32 ret, val32;
+
+	switch (type) {
+	case LTR_DYN_CTRL_LEAVE_LPS:
+	case LTR_DYN_CTRL_LEAVE_IPS:
+	case LTR_DYN_CTRL_ENTER_WOWLAN:
+	case LTR_DYN_CTRL_LEAVE_WOWLAN:
+		break;
+	case LTR_DYN_CTRL_PRE_INIT:
+		ret = patch_pcie_sw_ltr_setparm(adapter, &ltr_param);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]init patch pcie sw ltr set param %d\n", ret);
+			return ret;
+		}
+
+		ret = ops->ltr_set_pcie(adapter, &ltr_param);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]type %d set pcie ltr fail %d\n", type, ret);
+			return ret;
+		}
+
+		ret = _patch_pcie_sw_ltr(adapter, MAC_AX_PCIE_LTR_SW_ACT);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]patch pcie sw ltr act %d\n", ret);
+			return ret;
+		}
+		break;
+	case LTR_DYN_CTRL_FAST_INIT:
+		ltr_param.ltr_hw_ctrl = MAC_AX_PCIE_DISABLE;
+		ret = ops->ltr_set_pcie(adapter, &ltr_param);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]type %d set pcie ltr fail %d\n", type, ret);
+			return ret;
+		}
+
+		ret = p_ops->ltr_sw_trigger(adapter, MAC_AX_PCIE_LTR_SW_IDLE);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]type %d trigger ltr idle fail %d\n", type, ret);
+			return ret;
+		}
+		break;
+	case LTR_DYN_CTRL_INIT:
+		val32 = MAC_REG_R32(R_AX_LTR_CTRL_0);
+		if (val32 & B_AX_LTR_EN)
+			return MACSUCCESS;
+
+		ret = patch_pcie_sw_ltr_setparm(adapter, &ltr_param);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]init patch pcie sw ltr set param %d\n", ret);
+			return ret;
+		}
+
+		ret = ops->ltr_set_pcie(adapter, &ltr_param);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]init set pcie ltr fail %d\n", ret);
+			return ret;
+		}
+
+		ret = _patch_pcie_sw_ltr(adapter, MAC_AX_PCIE_LTR_SW_ACT);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]patch pcie sw ltr act %d\n", ret);
+			return ret;
+		}
+		break;
+	case LTR_DYN_CTRL_FAST_DEINIT:
+	case LTR_DYN_CTRL_DEINIT:
+		ltr_param.ltr_ctrl = MAC_AX_PCIE_DISABLE;
+		ltr_param.ltr_hw_ctrl = MAC_AX_PCIE_DISABLE;
+		ret = ops->ltr_set_pcie(adapter, &ltr_param);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]type %d set pcie ltr fail %d\n", type, ret);
+			return ret;
+		}
+		break;
+	default:
+		PLTFM_MSG_ERR("%s invalid type %d\n", __func__, type);
+		return MACFUNCINPUT;
+	}
+
+	return MACSUCCESS;
+}
+
 u32 get_avail_txbd_8852b(struct mac_ax_adapter *adapter, u8 ch_idx,
 			 u16 *host_idx, u16 *hw_idx, u16 *avail_txbd)
 {
@@ -1018,9 +1152,6 @@ u32 get_avail_txbd_8852b(struct mac_ax_adapter *adapter, u8 ch_idx,
 	*host_idx = (u16)GET_FIELD(tmp32, B_AX_ACH0_HOST_IDX);
 	*hw_idx = (u16)GET_FIELD(tmp32, B_AX_ACH0_HW_IDX);
 	*avail_txbd = calc_avail_wptr(*hw_idx, *host_idx, bndy);
-	PLTFM_MSG_TRACE("%s: ", __func__);
-	PLTFM_MSG_TRACE("dma_ch %d, host_idx %d, hw_idx %d avail_txbd %d\n",
-			ch_idx, *host_idx, *hw_idx, avail_txbd);
 
 	return MACSUCCESS;
 }
@@ -1191,10 +1322,10 @@ u32 set_pcie_speed_8852b(struct mac_ax_adapter *adapter,
 			 enum mac_ax_pcie_phy set_speed)
 {
 	u32 ret;
-	u32 support_gen;
+	u32 support_gen = MAC_AX_PCIE_PHY_GEN1;
 	u32 cnt;
 	u32 poll_val32;
-	u8 link_speed;
+	u8 link_speed = MAC_AX_PCIE_PHY_GEN1;
 
 	if  (!(set_speed == MAC_AX_PCIE_PHY_GEN1 || set_speed == MAC_AX_PCIE_PHY_GEN2)) {
 		PLTFM_MSG_ERR("[ERR]Do not support that speed!\n");
@@ -1304,7 +1435,6 @@ u32 ctrl_wpdma_pcie_8852b(struct mac_ax_adapter *adapter,
 
 u32 poll_io_idle_pcie_8852b(struct mac_ax_adapter *adapter)
 {
-#define B_IO_BUSY (B_AX_PCIEIO_BUSY | B_AX_PCIEIO_TX_BUSY | B_AX_PCIEIO_RX_BUSY)
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 	u32 reg_busy1 = R_AX_PCIE_DMA_BUSY1;
 	u32 val32;
@@ -1757,7 +1887,7 @@ u32 mac_auto_refclk_cal_pcie_8852b(struct mac_ax_adapter *adapter,
 	u32 ret = MACSUCCESS;
 	enum mac_ax_pcie_phy phy_rate = MAC_AX_PCIE_PHY_GEN1;
 
-	if (adapter->env == DUT_ENV_FPGA || adapter->env == DUT_ENV_PXP)
+	if (adapter->env_info.env == DUT_ENV_FPGA || adapter->env_info.env == DUT_ENV_PXP)
 		return MACSUCCESS;
 
 #if (INTF_INTGRA_HOSTREF_V1 <= INTF_INTGRA_MINREF_V1)
@@ -1872,6 +2002,117 @@ end:
 	PLTFM_MSG_TRACE("[TRACE]%s: <==\n", __func__);
 
 	return ret;
+}
+
+u32 get_pcie_support_width_8852b(struct mac_ax_adapter *adapter, u16 *width)
+{
+	u32 ret;
+	u32 val32;
+
+	ret = dbi_r32_pcie(adapter, PCIE_LINK_CAP, &val32);
+	if (ret != MACSUCCESS)
+		return ret;
+	val32 = GET_FIEL2(val32, PCIE_LINK_WIDTH_SH, PCIE_LINK_WIDTH_MSK);
+	*width = (u16)val32;
+	PLTFM_MSG_TRACE("pcie support highest link width: %d\n", *width);
+
+	return ret;
+}
+
+u32 get_pcie_link_width_8852b(struct mac_ax_adapter *adapter, u16 *width)
+{
+	u32 ret;
+	u32 val32;
+
+	ret = dbi_r32_pcie(adapter, PCIE_LINK_CTRL_STS_OFFSET, &val32);
+	if (ret != MACSUCCESS)
+		return ret;
+
+	val32 = GET_FIEL2(val32, PCIE_LINK_WIDTH_SH, PCIE_LINK_WIDTH_MSK);
+
+	*width = (u16)val32;
+
+	return MACSUCCESS;
+}
+
+u32 set_pcie_link_width_8852b(struct mac_ax_adapter *adapter,
+			      enum mac_ax_pcie_link_width set_width)
+{
+	u32 ret, cnt;
+	u32 val32;
+	u16 support_width = MAC_AX_PCIE_1_LANE;
+	u16 link_width = MAC_AX_PCIE_1_LANE;
+	struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
+
+	ret = p_ops->get_pcie_support_width(adapter, &support_width);
+	if (ret != MACSUCCESS)
+		return ret;
+
+	ret = p_ops->get_pcie_link_width(adapter, &link_width);
+	if (ret != MACSUCCESS)
+		return ret;
+
+	if (set_width == link_width) {
+		ret = MACSUCCESS;
+	} else if ((set_width < support_width) && (set_width != 0)) {
+		val32 = PCIE_LANE_RESIZING_VAL | set_width;
+		ret = dbi_w32_pcie(adapter, PCIE_LANE_RESIZING_OFFSET, val32);
+		if (ret != MACSUCCESS)
+			return ret;
+
+		cnt = PCIE_POLL_LANE_RESIZING_CNT;
+		while (cnt) {
+			ret = p_ops->get_pcie_link_width(adapter, &link_width);
+			if (ret != MACSUCCESS)
+				return ret;
+			if (link_width == set_width)
+				break;
+			cnt--;
+			PLTFM_DELAY_US(PCIE_POLL_IO_IDLE_DLY_US);
+		}
+		if (!cnt) {
+			PLTFM_MSG_WARN("[WARN]Set pcie link width polling timeout\n");
+			ret = MACPOLLTO;
+		}
+	} else {
+		PLTFM_MSG_ERR("[ERR]Not support that link width!\n");
+		ret = MACFUNCINPUT;
+	}
+
+	return ret;
+}
+
+u32 pcie_aspm_frontdoor_set_8852b(struct mac_ax_adapter *adapter)
+{
+	u32 ret = MACSUCCESS, val32;
+
+	ret = dbi_r32_pcie(adapter, PCIE_L1_STS, &val32);
+	if (ret != MACSUCCESS)
+		return ret;
+
+	val32 = SET_CLR_WOR2(val32, 0x142, 0, 0xFFF);
+
+	ret = dbi_w32_pcie(adapter, PCIE_L1_STS, val32);
+	if (ret != MACSUCCESS)
+		return ret;
+
+	ret = dbi_r32_pcie(adapter, PCIE_L1SS_STS, &val32);
+	if (ret != MACSUCCESS)
+		return ret;
+
+	val32 = SET_CLR_WOR2(val32, 0xF, 0, 0xF);
+
+	ret = dbi_w32_pcie(adapter, PCIE_L1SS_STS, val32);
+	if (ret != MACSUCCESS)
+		return ret;
+
+	return ret;
+}
+
+u32 pcie_set_oobs_8852b(struct mac_ax_adapter *adapter,
+			struct mac_ax_intf_info *intf_info)
+{
+	return MACSUCCESS;
 }
 
 #endif /* #if MAC_AX_PCIE_SUPPORT */

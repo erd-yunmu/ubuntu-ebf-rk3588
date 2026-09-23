@@ -120,16 +120,141 @@ void halbb_delay_us(struct bb_info *bb, u32 us)
 	_os_delay_us(bb->hal_com->drv_priv, us);
 }
 
-void halbb_set_bb_wrap_reg_cmn(struct bb_info* bb, enum phl_phy_idx bb_phy_idx, u32 addr, u32 val)
+u32 halbb_set_pwr_reg_cmn(struct bb_info* bb, enum phl_phy_idx bb_phy_idx, u32 addr, u32 val)
 {
-	rtw_hal_mac_set_pwr_reg(bb->hal_com, (u8)bb_phy_idx, addr, val);
+	if ((!bb->hal_com->dbcc_en) && (bb_phy_idx == HW_PHY_1))
+		return -1;
+	if (bb->bb_dbg_i.cr_cnt_ctrl)
+		bb->bb_dbg_i.wrapcr_recorde_w_cnt++;
+
+	return rtw_hal_mac_set_pwr_reg(bb->hal_com, (u8)bb_phy_idx, addr, val);
 }
+
+u32 halbb_write_mask_pwr_reg_cmn(struct bb_info* bb, enum phl_phy_idx bb_phy_idx, u32 addr, u32 mask, u32 val)
+{
+	if ((!bb->hal_com->dbcc_en) && (bb_phy_idx == HW_PHY_1))
+		return -1;
+	if (bb->bb_dbg_i.cr_cnt_ctrl)
+		bb->bb_dbg_i.wrapcr_recorde_w_cnt++;
+
+	return rtw_hal_mac_write_msk_pwr_reg(bb->hal_com, (u8)bb_phy_idx, addr, mask, val);
+}
+
+#define HALBB_RF_IO_API
+
+#ifdef HALBB_RF_IO_API
+
+void halbb_show_rf_cr_cnt(struct bb_info *bb, u8 module_idx)
+{
+	if (bb->bb_dbg_i.rfcr_cnt_ctrl == BB_CR_CNT_DISABLE)
+		return;
+
+	BB_TRACE("[%s][%02d] RF_cnt{R, W} = {%08d, %08d}\n",
+		 __func__, module_idx, bb->bb_dbg_i.rfcr_recorde_r_cnt, bb->bb_dbg_i.rfcr_recorde_w_cnt);
+
+	if (bb->bb_dbg_i.rfcr_cnt_ctrl == BB_CR_CNT_ENABLE_RESET) {
+		bb->bb_dbg_i.rfcr_recorde_r_cnt = 0;
+		bb->bb_dbg_i.rfcr_recorde_w_cnt = 0;
+	}
+}
+
+u32 halbb_rfio_get_cr(struct bb_info *bb, u32 addr, u32 mask)
+{
+	u32 val = 0;
+
+	if (bb->bb_dbg_i.rfcr_cnt_ctrl)
+		bb->bb_dbg_i.rfcr_recorde_r_cnt++;
+
+	if (mask == MASKDWORD)
+		mask = 0; /*prevent compile warning*/
+	val = hal_read32(bb->hal_com, (addr + bb->bb0_cr_offset));
+
+	return val;
+}
+
+void halbb_rfio_set_cr(struct bb_info *bb, u32 addr, u32 mask, u32 val)
+{
+	if (bb->bb_dbg_i.rfcr_cnt_ctrl)
+		bb->bb_dbg_i.rfcr_recorde_w_cnt++;
+
+	if (mask == MASKDWORD)
+		mask = 0; /*prevent compile warning*/
+	hal_write32(bb->hal_com, (addr + bb->bb0_cr_offset), val);
+}
+
+u32 halbb_rfio_get_reg_cmn(struct bb_info *bb, u32 addr, u32 mask, enum phl_phy_idx phy_idx)
+{
+	u32 val_0 = 0;
+	u32 shift_val = 0;
+
+	addr += halbb_phy0_to_phy1_ofst(bb, addr, phy_idx);
+
+	shift_val = halbb_cal_bit_shift(mask);
+	shift_val = (shift_val >= 31) ? 31 : shift_val;
+
+	val_0 = (halbb_rfio_get_cr(bb, addr, mask) & mask) >> shift_val;
+
+	return val_0;
+}
+
+void halbb_rfio_set_reg_cmn(struct bb_info *bb, u32 addr, u32 mask, u32 val, enum phl_phy_idx phy_idx)
+{
+	u32 ori_val, shift;
+	u32 val_mod = val;
+
+	addr += halbb_phy0_to_phy1_ofst(bb, addr, phy_idx);
+
+	if (mask != MASKDWORD) {
+		shift = halbb_cal_bit_shift(mask);
+		
+		ori_val = halbb_rfio_get_cr(bb, addr, mask);
+		val_mod = ((ori_val) & (~mask)) | (((val << shift)) & mask);
+	}
+
+	halbb_rfio_set_cr(bb, addr, mask, val_mod);
+}
+#endif
+
+void halbb_show_cr_cnt(struct bb_info *bb, u8 module_idx)
+{
+	if (bb->bb_dbg_i.cr_cnt_ctrl == BB_CR_CNT_DISABLE)
+		return;
+
+	BB_TRACE("[%s][%02d] cnt{R, W, P} = {%08d, %08d, %08d}\n",
+		 __func__, module_idx, bb->bb_dbg_i.cr_recorde_r_cnt,
+		 bb->bb_dbg_i.cr_recorde_w_cnt, bb->bb_dbg_i.wrapcr_recorde_w_cnt);
+
+	if (bb->bb_dbg_i.cr_cnt_ctrl == BB_CR_CNT_ENABLE_RESET) {
+		bb->bb_dbg_i.cr_recorde_r_cnt = 0;
+		bb->bb_dbg_i.cr_recorde_w_cnt = 0;
+		bb->bb_dbg_i.wrapcr_recorde_w_cnt = 0;
+	}
+}
+
+
+#ifdef HALBB_BB_WRAP_SUPPORT
+u32 halbb_write_bb_wrap_cmn(struct bb_info* bb, u32 addr, u32 val)
+{
+	return rtw_hal_mac_write_bb_wrapper(bb->hal_com, addr, val);
+}
+
+u32 halbb_write_mask_bb_wrap_cmn(struct bb_info* bb, u32 addr, u32 mask, u32 val)
+{
+	return rtw_hal_mac_write_msk_bb_wrapper(bb->hal_com, addr, mask, val);
+}
+#endif
 
 void halbb_set_cr(struct bb_info *bb, u32 addr, u32 mask, u32 val)
 {
 	u8 mask_lsb = 0, mask_msb = 0;
 
 	if (bb->bb_dbg_i.cr_recorder_en) {
+		#ifdef HALBB_DV_PXP_DBG_SUPPORT
+		if (bb->bb_dv_pxp_dbg_i.is_dv_pxp_dbg && bb->bb_dv_pxp_dbg_i.is_print) {
+			BB_TRACE("[DV/PXP]0x3, 0x1862%04x, 0x%08x, 0x%08x\n", addr, mask, val&mask);
+			return;
+		}
+		#endif
 		BB_TRACE("[W] 0x%04x = 0x%08x\n", addr, val);
 	} else if (bb->bb_dbg_i.cr_mp_recorder_en) {
 		if ((addr != 0xF9) && (addr != 0xFA) && (addr != 0xFB) && (addr != 0xFD) && (addr != 0xFE)) {
@@ -151,6 +276,9 @@ void halbb_set_cr(struct bb_info *bb, u32 addr, u32 mask, u32 val)
 				BB_TRACE("[MP] delay 50\n");
 		}
 	}
+
+	if (bb->bb_dbg_i.cr_cnt_ctrl)
+		bb->bb_dbg_i.cr_recorde_w_cnt++;
 
 	hal_write32(bb->hal_com, (addr + bb->bb0_cr_offset), val);
 
@@ -322,6 +450,13 @@ u32 halbb_get_reg_curr_phy(struct bb_info *bb, u32 addr, u32 mask)
 	val_0 = (halbb_get_cr(bb, addr, mask) & mask) >> halbb_cal_bit_shift(mask);
 
 	return val_0;
+}
+
+u32 halbb_get_phy0_phy1_reg(struct bb_info *bb, u32 addr, enum phl_phy_idx phy_idx)
+{
+	addr += halbb_phy0_to_phy1_ofst(bb, addr, phy_idx);
+
+	return addr;
 }
 
 u32 halbb_get_reg_cmn(struct bb_info *bb, u32 addr, u32 mask, enum phl_phy_idx phy_idx)
@@ -522,14 +657,21 @@ u32 halbb_c2h_fw_h2c_test(struct bb_info *bb, u16 len, u8 *c2h)
 u32 halbb_c2h_ra_parsing(struct bb_info *bb, u8 cmdid, u16 len, u8 *c2h)
 {
 	u32 val = 0;
-	u16 i;
+	u16 i = 0;
+
+	if (!c2h) {
+		BB_WARNING("[%s]c2h\n", __func__);
+		return 0;
+	}
 
 	BB_DBG(bb, DBG_FW_INFO, "FW C2H RA parsing: cmdid:%d len:%d\n", cmdid, len);
 	BB_DBG(bb, DBG_FW_INFO, "FW C2H RA parsing: content ==>");
 
 	for (i = 0; i < len; i++)
 		BB_DBG(bb, DBG_FW_INFO, "%x", c2h[i]);
+
 	BB_DBG(bb, DBG_FW_INFO, "<== \n ");
+
 	switch(cmdid) {
 	case HALBB_C2HRA_STS_RPT:
 		val = halbb_get_fw_ra_rpt(bb, len, c2h);
@@ -543,7 +685,11 @@ u32 halbb_c2h_ra_parsing(struct bb_info *bb, u8 cmdid, u16 len, u8 *c2h)
 	case HALBB_C2HRA_TX_DBG_INFO:
 		val = halbb_get_fw_ra_dbgrpt_wifi7(bb, len, c2h);
 		break;
+	case HALBB_C2HRA_TX_HIST:
+		halbb_get_fw_c2h_tx_hist(bb, len, c2h);
+		break;
 	default:
+		BB_WARNING("[%s] BB C2H id=0x%x\n", __func__, cmdid);
 		break;
 	}
 	return val;
@@ -570,8 +716,8 @@ u32 halbb_c2h_dm_parsing(struct bb_info *bb, u8 cmdid, u16 len, u8 *c2h)
 		val = halbb_c2h_lowrt_rty(bb, len, c2h);
 		break;
 	#endif
-	#ifdef HALBB_DIG_MCC_SUPPORT
-	case DM_C2H_MCC_DIG:
+	#ifdef HALBB_MCC_SUPPORT
+	case DM_C2H_MCC:
 		val = halbb_c2h_mccdm_check(bb, len, c2h);
 		break;
 	#endif
@@ -582,6 +728,14 @@ u32 halbb_c2h_dm_parsing(struct bb_info *bb, u8 cmdid, u16 len, u8 *c2h)
 	#endif
 	case DM_C2H_DBG:
 		val = halbb_c2h_fw_dbg(bb, len, c2h);
+		break;
+	#ifdef HALBB_STATISTICS_SUPPORT
+	case DM_C2H_STATISTICS:
+		#ifdef HALBB_COMPILE_AP2_SERIES
+		val = halbb_get_fw_c2h_statistics(bb, len, c2h);
+		#endif
+		break;
+	#endif
 	default:
 		break;
 	}
@@ -701,11 +855,11 @@ halbb_config_cmac_tbl_ax(struct bb_info *bb, struct rtw_phl_stainfo_t *phl_sta_i
 
 	/* BB related mask */
 	cctl_info_mask->txpwr_mode = 0x7;
-	cctl_info_mask->ntx_path_en = 0xf;
-	cctl_info_mask->path_map_a = 0x3;
-	cctl_info_mask->path_map_b = 0x3;
-	cctl_info_mask->path_map_c = 0x3;
-	cctl_info_mask->path_map_d = 0x3;
+	cctl_info_mask->ntx_path_en = 0;
+	cctl_info_mask->path_map_a = 0;
+	cctl_info_mask->path_map_b = 0;
+	cctl_info_mask->path_map_c = 0;
+	cctl_info_mask->path_map_d = 0;
 	cctl_info_mask->antsel_a = 0x1;
 	cctl_info_mask->antsel_b = 0x1;
 	cctl_info_mask->antsel_c = 0x1;
@@ -728,6 +882,9 @@ halbb_config_cmac_tbl_ax(struct bb_info *bb, struct rtw_phl_stainfo_t *phl_sta_i
 	cctrl->antsel_d = 0x0;
 	cctrl->doppler_ctrl = 0;
 	cctrl->txpwr_tolerence = 0;
+	#ifdef HALBB_PATH_DIV_SUPPORT
+	halbb_update_tx_path_div(bb, phl_sta_i);
+	#endif
 	ret = RTW_HAL_STATUS_SUCCESS;
 	BB_DBG(bb, DBG_FW_INFO, "HALBB CMAC tbl config: path = %x\n", cfg);
 	return ret;
@@ -827,7 +984,6 @@ bool halbb_set_pwr_by_rate_tbl(struct bb_info *bb, struct rtw_phl_stainfo_t *phl
 	u8 channel = phl_sta_i->chandef.center_ch;
 	s16 pwr_db = 0;
 
-
 	for (i = 0; i < PWR_TBL_NUM; i++) {
 		rate = ru_pwr_rate[i];
 		if (i >=24)
@@ -837,6 +993,5 @@ bool halbb_set_pwr_by_rate_tbl(struct bb_info *bb, struct rtw_phl_stainfo_t *phl
 		pwr_t.pwr_by_rate[i*2+1] = (u8)((pwr_db>>8)&0xff);
 	}
 	/* Get pwr by rate tbl from halrf */
-	halbb_fill_h2c_cmd(bb, cmdlen, RUA_H2C_PWR_TBL, HALBB_H2C_RUA, pval);
-	return false;
+	return halbb_fill_h2c_cmd(bb, cmdlen, RUA_H2C_PWR_TBL, HALBB_H2C_RUA, pval);
 }

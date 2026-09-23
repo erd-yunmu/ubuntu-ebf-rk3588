@@ -209,12 +209,14 @@ u32	rtw_get_dft_vht_cap_ie(_adapter *padapter, u8 *pbuf);
 void rtw_vht_get_dft_setting(_adapter *padapter,
 			struct protocol_cap_t *dft_proto_cap,
 			struct role_link_cap_t *dft_cap);
-void	rtw_vht_get_real_setting(_adapter *padapter, struct _ADAPTER_LINK *padapter_link, bool log);
+bool rtw_vht_is_omn_channel_width_support(enum channel_width omn_chan_width);
+enum channel_width rtw_vht_get_omn_channel_width(struct sta_info *psta);
+void	rtw_vht_get_real_setting(_adapter *padapter, struct _ADAPTER_LINK *padapter_link);
 u32	rtw_build_vht_operation_ie(_adapter *padapter, struct _ADAPTER_LINK *padapter_link,
 						u8 *pbuf, enum band_type band, u8 channel);
 u32	rtw_build_vht_op_mode_notify_ie(_adapter *padapter, struct _ADAPTER_LINK *padapter_link,
 						u8 *pbuf, u8 bw);
-u32	rtw_build_vht_cap_ie(_adapter *padapter, struct _ADAPTER_LINK *padapter_link, u8 *pbuf, bool log);
+u32	rtw_build_vht_cap_ie(_adapter *padapter, struct _ADAPTER_LINK *padapter_link, u8 *pbuf);
 void	update_sta_vht_info_apmode(_adapter *padapter, void *psta);
 void	VHT_caps_handler(_adapter *padapter, struct _ADAPTER_LINK *padapter_link,
 				PNDIS_802_11_VARIABLE_IEs pIE);

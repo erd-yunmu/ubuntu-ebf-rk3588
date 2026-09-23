@@ -39,121 +39,6 @@ u32 check_mac_en(struct mac_ax_adapter *adapter, u8 band,
 	return MACSUCCESS;
 }
 
-static u32 scheduler_imr_enable(struct mac_ax_adapter *adapter, u8 band)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32, reg;
-
-		reg = band == MAC_AX_BAND_0 ?
-		      R_AX_SCHEDULE_ERR_IMR : R_AX_SCHEDULE_ERR_IMR_C1;
-		val32 = MAC_REG_R32(reg);
-		val32 &= ~(B_AX_SORT_NON_IDLE_ERR_INT_EN |
-			   B_AX_FSM_TIMEOUT_ERR_INT_EN);
-		val32 |= ((B_AX_SORT_NON_IDLE_ERR_INT_EN &
-			   SCHEDULER_SORT_NON_IDLE_ERR_SER_EN) |
-			  (B_AX_FSM_TIMEOUT_ERR_INT_EN &
-			   SCHEDULER_FSM_TIMEOUT_ERR_SER_EN));
-		MAC_REG_W32(reg, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 ptcl_imr_enable(struct mac_ax_adapter *adapter, u8 band)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32, reg;
-
-		reg = band == MAC_AX_BAND_0 ?
-		      R_AX_PTCL_IMR0 : R_AX_PTCL_IMR0_C1;
-		val32 = 0;
-		val32 &= ~(B_AX_FSM_TIMEOUT_ERR_INT_EN |
-			   B_AX_F2PCMDRPT_FULL_DROP_ERR_INT_EN |
-			   B_AX_TXPRT_FULL_DROP_ERR_INT_EN |
-			   B_AX_D_PKTID_ERR_INT_EN |
-			   B_AX_Q_PKTID_ERR_INT_EN |
-			   B_AX_BCNQ_ORDER_ERR_INT_EN |
-			   B_AX_TWTSP_QSEL_ERR_INT_EN |
-			   B_AX_F2PCMD_EMPTY_ERR_INT_EN |
-			   B_AX_TX_RECORD_PKTID_ERR_INT_EN |
-			   B_AX_TX_SPF_U3_PKTID_ERR_INT_EN |
-			   B_AX_TX_SPF_U2_PKTID_ERR_INT_EN |
-			   B_AX_TX_SPF_U1_PKTID_ERR_INT_EN |
-			   B_AX_RX_SPF_U0_PKTID_ERR_INT_EN |
-			   B_AX_F2PCMD_USER_ALLC_ERR_INT_EN |
-			   B_AX_F2PCMD_ASSIGN_PKTID_ERR_INT_EN |
-			   B_AX_F2PCMD_RD_PKTID_ERR_INT_EN |
-			   B_AX_F2PCMD_PKTID_ERR_INT_EN);
-
-		val32 |= ((B_AX_FSM_TIMEOUT_ERR_INT_EN &
-			   PTCL_FSM_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_F2PCMDRPT_FULL_DROP_ERR_INT_EN &
-			   PTCL_F2PCMDRPT_FULL_DROP_SER_EN) |
-			  (B_AX_TXPRT_FULL_DROP_ERR_INT_EN &
-			   PTCL_TXRPT_FULL_DROP_SER_EN) |
-			  (B_AX_D_PKTID_ERR_INT_EN &
-			   PTCL_D_PKTID_ERR_SER_EN) |
-			  (B_AX_Q_PKTID_ERR_INT_EN &
-			   PTCL_Q_PKTID_ERR_SER_EN) |
-			  (B_AX_BCNQ_ORDER_ERR_INT_EN &
-			   PTCL_BCNQ_ORDER_ERR_SER_EN) |
-			  (B_AX_TWTSP_QSEL_ERR_INT_EN &
-			   PTCL_TWTSP_QSEL_ERR_SER_EN) |
-			  (B_AX_F2PCMD_EMPTY_ERR_INT_EN &
-			   PTCL_F2PCMD_EMPTY_ERR_SER_EN) |
-			  (B_AX_TX_RECORD_PKTID_ERR_INT_EN &
-			   PTCL_TX_RECORD_PKTID_ERR_SER_EN) |
-			  (B_AX_TX_SPF_U3_PKTID_ERR_INT_EN &
-			   PTCL_TX_SPF_U3_PKTID_ERR_SER_EN) |
-			  (B_AX_TX_SPF_U2_PKTID_ERR_INT_EN &
-			   PTCL_TX_SPF_U2_PKTID_ERR_SER_EN) |
-			  (B_AX_TX_SPF_U1_PKTID_ERR_INT_EN &
-			   PTCL_TX_SPF_U1_PKTID_ERR_SER_EN) |
-			  (B_AX_RX_SPF_U0_PKTID_ERR_INT_EN &
-			   PTCL_TX_SPF_U0_PKTID_ERR_SER_EN) |
-			  (B_AX_F2PCMD_USER_ALLC_ERR_INT_EN &
-			   PTCL_F2PCMD_USER_ALLC_ERR_SER_EN) |
-			  (B_AX_F2PCMD_ASSIGN_PKTID_ERR_INT_EN &
-			   PTCL_F2PCMD_ASSIGN_PKTID_ERR_SER_EN) |
-			  (B_AX_F2PCMD_RD_PKTID_ERR_INT_EN &
-			   PTCL_F2PCMD_RD_PKTID_ERR_SER_EN) |
-			  (B_AX_F2PCMD_PKTID_ERR_INT_EN &
-			   PTCL_F2PCMD_PKTID_ERR_SER_EN));
-		MAC_REG_W32(reg, val32);
-	}
-#endif
-
-	return MACSUCCESS;
-}
-
-static u32 _patch_cmac_dma_err_fa(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-/*
- * AP  Disable B_AX_STS_FSM_HANG_ERROR_IMR
- * STA Enable  B_AX_STS_FSM_HANG_ERROR_IMR (Wait for "Scan+SER L0")
- */
-		if (!chk_patch_cmac_dma_err_fa(adapter))
-			return B_AX_RXDATA_FSM_HANG_ERROR_IMR;
-	}
-#endif
-	return 0;
-}
-
 static u32 _patch_wmac_timer_src(struct mac_ax_adapter *adapter, u8 band)
 {
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
@@ -191,7 +76,7 @@ static u32 _patch_ss2f_path(struct mac_ax_adapter *adapter)
 
 bool chk_patch_ss2f_path(struct mac_ax_adapter *adapter)
 {
-		switch (adapter->hw_info->chip_id) {
+		switch (adapter->drv_info->sw_chip_id) {
 		case MAC_AX_CHIP_ID_8192XB:
 				switch (adapter->hw_info->cv) {
 				case CAV:
@@ -252,14 +137,6 @@ bool chk_patch_ss2f_path(struct mac_ax_adapter *adapter)
 						return PATCH_ENABLE;
 				}
 				break;
-		case MAC_AX_CHIP_ID_8851E:
-				switch (adapter->hw_info->cv) {
-				case CAV:
-						return PATCH_ENABLE;
-				default:
-						return PATCH_ENABLE;
-				}
-				break;
 		case MAC_AX_CHIP_ID_8852D:
 				switch (adapter->hw_info->cv) {
 				case CAV:
@@ -280,883 +157,6 @@ bool chk_patch_ss2f_path(struct mac_ax_adapter *adapter)
 						 adapter->hw_info->cv);
 				return PATCH_DISABLE;
 		}
-}
-
-static u32 cdma_imr_enable(struct mac_ax_adapter *adapter, u8 band)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32, reg;
-
-		reg = band == MAC_AX_BAND_0 ? R_AX_DLE_CTRL : R_AX_DLE_CTRL_C1;
-		val32 = MAC_REG_R32(reg);
-		val32 &= ~(B_AX_RXSTS_FSM_HANG_ERROR_IMR |
-			   B_AX_RXDATA_FSM_HANG_ERROR_IMR |
-			   B_AX_NO_RESERVE_PAGE_ERR_IMR);
-		val32 |= ((B_AX_RXSTS_FSM_HANG_ERROR_IMR &
-			   CMAC_DMA_RXSTS_FSM_HANG_SER_EN) |
-			  (B_AX_RXDATA_FSM_HANG_ERROR_IMR &
-			   CMAC_DMA_RXDATA_FSM_HANG_SER_EN) |
-			  (B_AX_NO_RESERVE_PAGE_ERR_IMR &
-			   CMAC_DMA_NO_RSVD_PAGE_SER_EN));
-		val32 |= _patch_cmac_dma_err_fa(adapter);
-		MAC_REG_W32(reg, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 phy_intf_imr_enable(struct mac_ax_adapter *adapter, u8 band)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-		u32 reg;
-
-		reg = band == MAC_AX_BAND_0 ?
-		      R_AX_PHYINFO_ERR_IMR : R_AX_PHYINFO_ERR_IMR_C1;
-		val32 = MAC_REG_R32(reg);
-		val32 &= ~(B_AX_PHY_TXON_TIMEOUT_INT_EN |
-			   B_AX_CCK_CCA_TIMEOUT_INT_EN |
-			   B_AX_OFDM_CCA_TIMEOUT_INT_EN |
-			   B_AX_DATA_ON_TIMEOUT_INT_EN |
-			   B_AX_STS_ON_TIMEOUT_INT_EN |
-			   B_AX_CSI_ON_TIMEOUT_INT_EN);
-
-		val32 |= ((B_AX_PHY_TXON_TIMEOUT_INT_EN &
-			   PHYINTF_PHY_TXON_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_CCK_CCA_TIMEOUT_INT_EN &
-			   PHYINTF_CCK_CCA_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_OFDM_CCA_TIMEOUT_INT_EN &
-			   PHYINTF_OFDM_CCA_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_DATA_ON_TIMEOUT_INT_EN &
-			   PHYINTF_DATA_ON_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_STS_ON_TIMEOUT_INT_EN &
-			   PHYINTF_STS_ON_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_CSI_ON_TIMEOUT_INT_EN &
-			   PHYINTF_CSI_ON_TIMEOUT_ERR_SER_EN));
-		MAC_REG_W32(reg, val32);
-	}
-#endif
-
-	return MACSUCCESS;
-}
-
-static u32 rmac_imr_enable(struct mac_ax_adapter *adapter, u8 band)
-{
-	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-	u32 val32 = 0, reg = R_AX_RMAC_ERR_ISR;
-
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-
-		reg = band == MAC_AX_BAND_0 ?
-		      R_AX_RMAC_ERR_ISR : R_AX_RMAC_ERR_ISR_C1;
-		val32 = MAC_REG_R32(reg);
-		val32 &= ~(B_AX_RMAC_CCA_TO_IDLE_TIMEOUT_INT_EN |
-			   B_AX_RMAC_DATA_ON_TO_IDLE_TIMEOUT_INT_EN |
-			   B_AX_RMAC_DMA_TIMEOUT_INT_EN |
-			   B_AX_RMAC_CCA_TIMEOUT_INT_EN |
-			   B_AX_RMAC_DATA_ON_TIMEOUT_INT_EN |
-			   B_AX_RMAC_CSI_TIMEOUT_INT_EN |
-			   B_AX_RMAC_RX_TIMEOUT_INT_EN |
-			   B_AX_RMAC_RX_CSI_TIMEOUT_INT_EN);
-
-		val32 |= ((B_AX_RMAC_CCA_TO_IDLE_TIMEOUT_INT_EN &
-			   RMAC_CCA_TO_RX_IDLE_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_RMAC_DATA_ON_TO_IDLE_TIMEOUT_INT_EN &
-			   RMAC_DATA_ON_TO_RX_IDLE_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_RMAC_DMA_TIMEOUT_INT_EN &
-			   RMAC_DMA_WRITE_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_RMAC_CCA_TIMEOUT_INT_EN &
-			   RMAC_CCA_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_RMAC_DATA_ON_TIMEOUT_INT_EN &
-			   RMAC_DATA_ON_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_RMAC_CSI_TIMEOUT_INT_EN &
-			   RMAC_CSI_DATA_ON_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_RMAC_RX_TIMEOUT_INT_EN &
-			   RMAC_RX_FSM_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_RMAC_RX_CSI_TIMEOUT_INT_EN &
-			   RMAC_CSI_MODE_TIMEOUT_ERR_SER_EN));
-		MAC_REG_W32(reg, val32);
-	}
-#endif
-
-#if (MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT)
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B)) {
-		reg = band == MAC_AX_BAND_0 ?
-		      R_AX_PHYINFO_ERR_IMR : R_AX_PHYINFO_ERR_IMR_C1;
-		val32 = MAC_REG_R32(reg);
-		val32 |= B_AX_PHY_TXON_TIMEOUT_INT_EN;
-		val32 = SET_CLR_WORD(val32, 0x7, B_AX_PHYINTF_TIMEOUT_THR);
-		MAC_REG_W32(reg, val32);
-	}
-#endif
-	PLTFM_MSG_WARN("%x:%x %x", reg, MAC_REG_R32(reg), val32);
-
-	return MACSUCCESS;
-}
-
-static u32 tmac_imr_enable(struct mac_ax_adapter *adapter, u8 band)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32, reg;
-
-		reg = band == MAC_AX_BAND_0 ?
-		      R_AX_TMAC_ERR_IMR_ISR : R_AX_TMAC_ERR_IMR_ISR_C1;
-		val32 = MAC_REG_R32(reg);
-		val32 &= ~(B_AX_TMAC_MACTX_INT_EN |
-			   B_AX_TMAC_TXCTL_INT_EN |
-			   B_AX_TMAC_RESP_INT_EN |
-			   B_AX_TMAC_TXPLCP_INT_EN);
-
-		val32 |= ((B_AX_TMAC_MACTX_INT_EN &
-			   TMAC_MACTX_TIME_ERR_SER_EN) |
-			  (B_AX_TMAC_TXCTL_INT_EN &
-			   TMAC_TRXPTCL_TXCTL_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_TMAC_RESP_INT_EN &
-			   TMAC_RESPONSE_TXCTL_TIMEOUT_ERR_SER_EN) |
-			  (B_AX_TMAC_TXPLCP_INT_EN &
-			   TMAC_TX_PLCP_INFO_ERR_SER_EN));
-		MAC_REG_W32(reg, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 wdrls_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		val32 = MAC_REG_R32(R_AX_WDRLS_ERR_IMR);
-		val32 &= ~(B_AX_WDRLS_CTL_WDPKTID_ISNULL_ERR_INT_EN |
-			   B_AX_WDRLS_CTL_PLPKTID_ISNULL_ERR_INT_EN |
-			   B_AX_WDRLS_CTL_FRZTO_ERR_INT_EN |
-			   B_AX_WDRLS_PLEBREQ_TO_ERR_INT_EN |
-			   B_AX_WDRLS_PLEBREQ_PKTID_ISNULL_ERR_INT_EN |
-			   B_AX_WDRLS_RPT0_AGGNUM0_ERR_INT_EN |
-			   B_AX_WDRLS_RPT0_FRZTO_ERR_INT_EN |
-			   B_AX_WDRLS_RPT1_AGGNUM0_ERR_INT_EN |
-			   B_AX_WDRLS_RPT1_FRZTO_ERR_INT_EN);
-
-		val32 |= ((B_AX_WDRLS_CTL_WDPKTID_ISNULL_ERR_INT_EN &
-			   DMAC_WDRLS_CTL_WDPKTID_ISNULL_ERR_SER_EN) |
-			  (B_AX_WDRLS_CTL_PLPKTID_ISNULL_ERR_INT_EN &
-			   DMAC_WDRLS_CTL_PLPKTID_ISNULL_ERR_SER_EN) |
-			  (B_AX_WDRLS_CTL_FRZTO_ERR_INT_EN &
-			   DMAC_WDRLS_CTL_FRZTO_ERR_SER_EN) |
-			  (B_AX_WDRLS_PLEBREQ_TO_ERR_INT_EN &
-			   DMAC_WDRLS_PLEBREQ_TO_ERR_SER_EN) |
-			  (B_AX_WDRLS_PLEBREQ_PKTID_ISNULL_ERR_INT_EN &
-			   DMAC_WDRLS_PLEBREQ_PKTID_ISNULL_ERR_SER_EN) |
-			  (B_AX_WDRLS_RPT0_AGGNUM0_ERR_INT_EN &
-			   DMAC_WDRLS_RPT0_AGGNUM0_ERR_SER_EN) |
-			  (B_AX_WDRLS_RPT0_FRZTO_ERR_INT_EN &
-			   DMAC_WDRLS_RPT0_FRZTO_ERR_SER_EN) |
-			  (B_AX_WDRLS_RPT1_AGGNUM0_ERR_INT_EN &
-			   DMAC_WDRLS_RPT1_AGGNUM0_ERR_SER_EN) |
-			  (B_AX_WDRLS_RPT1_FRZTO_ERR_INT_EN &
-			   DMAC_WDRLS_RPT1_FRZTO_ERR_SER_EN));
-		MAC_REG_W32(R_AX_WDRLS_ERR_IMR, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 wsec_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		val32 = MAC_REG_R32(R_AX_SEC_DEBUG);
-		val32 &= ~(B_AX_IMR_ERROR);
-
-		val32 |= ((B_AX_IMR_ERROR &
-			   DMAC_IMR_ERROR));
-		MAC_REG_W32(R_AX_SEC_DEBUG, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 mpdu_trx_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		/* MDPU Processor TX */
-		val32 = MAC_REG_R32(R_AX_MPDU_TX_ERR_IMR);
-		val32 &= ~(B_AX_TX_GET_ERRPKTID_INT_EN |
-			   B_AX_TX_NXT_ERRPKTID_INT_EN |
-			   B_AX_TX_MPDU_SIZE_ZERO_INT_EN |
-			   B_AX_TX_OFFSET_ERR_INT_EN |
-			   B_AX_TX_HDR3_SIZE_ERR_INT_EN);
-
-		val32 |= ((B_AX_TX_GET_ERRPKTID_INT_EN &
-			   DMAC_TX_GET_ERRPKTID_SER_EN) |
-			  (B_AX_TX_NXT_ERRPKTID_INT_EN &
-			   DMAC_TX_NXT_ERRPKTID_SER_EN) |
-			  (B_AX_TX_MPDU_SIZE_ZERO_INT_EN &
-			   DMAC_TX_MPDU_SIZE_ZERO_SER_EN) |
-			  (B_AX_TX_OFFSET_ERR_INT_EN &
-			   DMAC_TX_OFFSET_ERR_SER_EN) |
-			  (B_AX_TX_HDR3_SIZE_ERR_INT_EN &
-			   DMAC_TX_HDR3_SIZE_ERR_SER_EN));
-		MAC_REG_W32(R_AX_MPDU_TX_ERR_IMR, val32);
-
-		/* MDPU Processor RX */
-		val32 = MAC_REG_R32(R_AX_MPDU_RX_ERR_IMR);
-		val32 &= ~(B_AX_GETPKTID_ERR_INT_EN |
-			   B_AX_MHDRLEN_ERR_INT_EN |
-			   B_AX_RPT_ERR_INT_EN);
-
-		val32 |= ((B_AX_GETPKTID_ERR_INT_EN &
-			   DMAC_GETPKTID_ERR_SER_EN) |
-			  (B_AX_MHDRLEN_ERR_INT_EN &
-			   DMAC_MHDRLEN_ERR_SER_EN) |
-			  (B_AX_RPT_ERR_INT_EN &
-			   DMAC_RPT_ERR_SER_EN));
-		MAC_REG_W32(R_AX_MPDU_RX_ERR_IMR, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 sta_sch_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		/* MDPU Processor TX */
-		val32 = MAC_REG_R32(R_AX_STA_SCHEDULER_ERR_IMR);
-		val32 &= ~(B_AX_SEARCH_HANG_TIMEOUT_INT_EN |
-			   B_AX_RPT_HANG_TIMEOUT_INT_EN |
-			   B_AX_PLE_B_PKTID_ERR_INT_EN);
-
-		val32 |= ((B_AX_SEARCH_HANG_TIMEOUT_INT_EN &
-			   DMAC_SEARCH_HANG_TIMEOUT_SER_EN) |
-			  (B_AX_RPT_HANG_TIMEOUT_INT_EN &
-			   DMAC_RPT_HANG_TIMEOUT_SER_EN) |
-			  (B_AX_PLE_B_PKTID_ERR_INT_EN &
-			   DMAC_PLE_B_PKTID_ERR_SER_EN));
-		MAC_REG_W32(R_AX_STA_SCHEDULER_ERR_IMR, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 txpktctl_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		val32 = MAC_REG_R32(R_AX_TXPKTCTL_ERR_IMR_ISR);
-		val32 &= ~(B_AX_TXPKTCTL_USRCTL_REINIT_ERR_INT_EN |
-			   B_AX_TXPKTCTL_USRCTL_NOINIT_ERR_INT_EN |
-			   B_AX_TXPKTCTL_USRCTL_RDNRLSCMD_ERR_INT_EN |
-			   B_AX_TXPKTCTL_USRCTL_RLSBMPLEN_ERR_INT_EN |
-			   B_AX_TXPKTCTL_CMDPSR_CMDTYPE_ERR_INT_EN |
-			   B_AX_TXPKTCTL_CMDPSR_FRZTO_ERR_INT_EN);
-
-		val32 |= ((B_AX_TXPKTCTL_USRCTL_REINIT_ERR_INT_EN &
-			   DMAC_TXPKTCTL_USRCTL_REINIT_ERR_SER_EN) |
-			  (B_AX_TXPKTCTL_USRCTL_NOINIT_ERR_INT_EN &
-			   DMAC_TXPKTCTL_USRCTL_NOINIT_ERR_SER_EN) |
-			  (B_AX_TXPKTCTL_USRCTL_RDNRLSCMD_ERR_INT_EN &
-			   DMAC_TXPKTCTL_USRCTL_RDNRLSCMD_ERR_SER_EN) |
-			  (B_AX_TXPKTCTL_USRCTL_RLSBMPLEN_ERR_INT_EN &
-			   DMAC_TXPKTCTL_USRCTL_RLSBMPLEN_ERR_SER_EN) |
-			  (B_AX_TXPKTCTL_CMDPSR_CMDTYPE_ERR_INT_EN &
-			   DMAC_TXPKTCTL_CMDPSR_CMDTYPE_ERR_SER_EN) |
-			  (B_AX_TXPKTCTL_CMDPSR_FRZTO_ERR_INT_EN &
-			   DMAC_TXPKTCTL_CMDPSR_FRZTO_ERR_SER_EN));
-		MAC_REG_W32(R_AX_TXPKTCTL_ERR_IMR_ISR, val32);
-
-		val32 = MAC_REG_R32(R_AX_TXPKTCTL_ERR_IMR_ISR_B1);
-		val32 &= ~(B_AX_TXPKTCTL_USRCTL_REINIT_ERR_INT_EN |
-			   B_AX_TXPKTCTL_USRCTL_NOINIT_ERR_INT_EN |
-			   B_AX_TXPKTCTL_USRCTL_RDNRLSCMD_ERR_INT_EN |
-			   B_AX_TXPKTCTL_USRCTL_RLSBMPLEN_ERR_INT_EN |
-			   B_AX_TXPKTCTL_CMDPSR_CMDTYPE_ERR_INT_EN |
-			   B_AX_TXPKTCTL_CMDPSR_FRZTO_ERR_INT_EN);
-
-		val32 |= ((B_AX_TXPKTCTL_USRCTL_REINIT_ERR_INT_EN &
-			   DMAC_TXPKTCTL_USRCTL_REINIT_B1_ERR_SER_EN) |
-			  (B_AX_TXPKTCTL_USRCTL_NOINIT_ERR_INT_EN &
-			   DMAC_TXPKTCTL_USRCTL_NOINIT_B1_ERR_SER_EN) |
-			  (B_AX_TXPKTCTL_USRCTL_RDNRLSCMD_ERR_INT_EN &
-			   DMAC_TXPKTCTL_USRCTL_RDNRLSCMD_B1_ERR_SER_EN) |
-			  (B_AX_TXPKTCTL_USRCTL_RLSBMPLEN_ERR_INT_EN &
-			   DMAC_TXPKTCTL_USRCTL_RLSBMPLEN_B1_ERR_SER_EN) |
-			  (B_AX_TXPKTCTL_CMDPSR_CMDTYPE_ERR_INT_EN &
-			   DMAC_TXPKTCTL_CMDPSR_CMDTYPE_ERR_B1_SER_EN) |
-			  (B_AX_TXPKTCTL_CMDPSR_FRZTO_ERR_INT_EN &
-			   DMAC_TXPKTCTL_CMDPSR_FRZTO_ERR_B1_SER_EN));
-		MAC_REG_W32(R_AX_TXPKTCTL_ERR_IMR_ISR_B1, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 wde_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		val32 = MAC_REG_R32(R_AX_WDE_ERR_IMR);
-		val32 &= ~(B_AX_WDE_BUFREQ_QTAID_ERR_INT_EN |
-			   B_AX_WDE_BUFREQ_UNAVAL_ERR_INT_EN |
-			   B_AX_WDE_BUFRTN_INVLD_PKTID_ERR_INT_EN |
-			   B_AX_WDE_BUFRTN_SIZE_ERR_INT_EN |
-			   B_AX_WDE_BUFREQ_SRCHTAILPG_ERR_INT_EN |
-			   B_AX_WDE_GETNPG_STRPG_ERR_INT_EN |
-			   B_AX_WDE_GETNPG_PGOFST_ERR_INT_EN |
-			   B_AX_WDE_BUFMGN_FRZTO_ERR_INT_EN |
-			   B_AX_WDE_QUE_CMDTYPE_ERR_INT_EN |
-			   B_AX_WDE_QUE_DSTQUEID_ERR_INT_EN |
-			   B_AX_WDE_QUE_SRCQUEID_ERR_INT_EN |
-			   B_AX_WDE_ENQ_PKTCNT_OVRF_ERR_INT_EN |
-			   B_AX_WDE_ENQ_PKTCNT_NVAL_ERR_INT_EN |
-			   B_AX_WDE_PREPKTLLT_AD_ERR_INT_EN |
-			   B_AX_WDE_NXTPKTLL_AD_ERR_INT_EN |
-			   B_AX_WDE_QUEMGN_FRZTO_ERR_INT_EN |
-			   B_AX_WDE_DATCHN_ARBT_ERR_INT_EN |
-			   B_AX_WDE_DATCHN_NULLPG_ERR_INT_EN |
-			   B_AX_WDE_DATCHN_FRZTO_ERR_INT_EN);
-
-		val32 |= ((B_AX_WDE_BUFREQ_QTAID_ERR_INT_EN &
-			   DMAC_WDE_BUFREQ_QTAID_ERR_SER_EN) |
-			  (B_AX_WDE_BUFREQ_UNAVAL_ERR_INT_EN &
-			   DMAC_WDE_BUFREQ_UNAVAL_ERR_SER_EN) |
-			  (B_AX_WDE_BUFRTN_INVLD_PKTID_ERR_INT_EN &
-			   DMAC_WDE_BUFRTN_INVLD_PKTID_ERR_SER_EN) |
-			  (B_AX_WDE_BUFRTN_SIZE_ERR_INT_EN &
-			   DMAC_WDE_BUFRTN_SIZE_ERR_SER_EN) |
-			  (B_AX_WDE_BUFREQ_SRCHTAILPG_ERR_INT_EN &
-			   DMAC_WDE_BUFREQ_SRCHTAILPG_ERR_SER_EN) |
-			  (B_AX_WDE_GETNPG_STRPG_ERR_INT_EN &
-			   DMAC_WDE_GETNPG_STRPG_ERR_SER_EN) |
-			  (B_AX_WDE_GETNPG_PGOFST_ERR_INT_EN &
-			   DMAC_WDE_GETNPG_PGOFST_ERR_SER_EN) |
-			  (B_AX_WDE_BUFMGN_FRZTO_ERR_INT_EN &
-			   DMAC_WDE_BUFMGN_FRZTO_ERR_SER_EN) |
-			  (B_AX_WDE_QUE_CMDTYPE_ERR_INT_EN &
-			   DMAC_WDE_QUE_CMDTYPE_ERR_SER_EN) |
-			  (B_AX_WDE_QUE_DSTQUEID_ERR_INT_EN &
-			   DMAC_WDE_QUE_DSTQUEID_ERR_SER_EN) |
-			  (B_AX_WDE_QUE_SRCQUEID_ERR_INT_EN &
-			   DMAC_WDE_QUE_SRCQUEID_ERR_SER_EN) |
-			  (B_AX_WDE_ENQ_PKTCNT_OVRF_ERR_INT_EN &
-			   DMAC_WDE_ENQ_PKTCNT_OVRF_ERR_SER_EN) |
-			  (B_AX_WDE_ENQ_PKTCNT_NVAL_ERR_INT_EN &
-			   DMAC_WDE_ENQ_PKTCNT_NVAL_ERR_SER_EN) |
-			  (B_AX_WDE_PREPKTLLT_AD_ERR_INT_EN &
-			   DMAC_WDE_PREPKTLLT_AD_ERR_SER_EN) |
-			  (B_AX_WDE_NXTPKTLL_AD_ERR_INT_EN &
-			   DMAC_WDE_NXTPKTLL_AD_ERR_SER_EN) |
-			  (B_AX_WDE_QUEMGN_FRZTO_ERR_INT_EN &
-			   DMAC_WDE_QUEMGN_FRZTO_ERR_SER_EN) |
-			  (B_AX_WDE_DATCHN_ARBT_ERR_INT_EN &
-			   DMAC_WDE_DATCHN_ARBT_ERR_SER_EN) |
-			  (B_AX_WDE_DATCHN_NULLPG_ERR_INT_EN &
-			   DMAC_WDE_DATCHN_NULLPG_ERR_SER_EN) |
-			  (B_AX_WDE_DATCHN_FRZTO_ERR_INT_EN &
-			   DMAC_WDE_DATCHN_FRZTO_ERR_SER_EN));
-		MAC_REG_W32(R_AX_WDE_ERR_IMR, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 ple_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		val32 = MAC_REG_R32(R_AX_PLE_ERR_IMR);
-		val32 &= ~(B_AX_PLE_BUFREQ_QTAID_ERR_INT_EN |
-			   B_AX_PLE_BUFREQ_UNAVAL_ERR_INT_EN |
-			   B_AX_PLE_BUFRTN_INVLD_PKTID_ERR_INT_EN |
-			   B_AX_PLE_BUFRTN_SIZE_ERR_INT_EN |
-			   B_AX_PLE_BUFREQ_SRCHTAILPG_ERR_INT_EN |
-			   B_AX_PLE_GETNPG_STRPG_ERR_INT_EN |
-			   B_AX_PLE_GETNPG_PGOFST_ERR_INT_EN |
-			   B_AX_PLE_BUFMGN_FRZTO_ERR_INT_EN |
-			   B_AX_PLE_QUE_CMDTYPE_ERR_INT_EN |
-			   B_AX_PLE_QUE_DSTQUEID_ERR_INT_EN |
-			   B_AX_PLE_QUE_SRCQUEID_ERR_INT_EN |
-			   B_AX_PLE_ENQ_PKTCNT_OVRF_ERR_INT_EN |
-			   B_AX_PLE_ENQ_PKTCNT_NVAL_ERR_INT_EN |
-			   B_AX_PLE_PREPKTLLT_AD_ERR_INT_EN |
-			   B_AX_PLE_NXTPKTLL_AD_ERR_INT_EN |
-			   B_AX_PLE_QUEMGN_FRZTO_ERR_INT_EN |
-			   B_AX_PLE_DATCHN_ARBT_ERR_INT_EN |
-			   B_AX_PLE_DATCHN_NULLPG_ERR_INT_EN |
-			   B_AX_PLE_DATCHN_FRZTO_ERR_INT_EN);
-
-		val32 |= ((B_AX_PLE_BUFREQ_QTAID_ERR_INT_EN &
-			   DMAC_PLE_BUFREQ_QTAID_ERR_SER_EN) |
-			  (B_AX_PLE_BUFREQ_UNAVAL_ERR_INT_EN &
-			   DMAC_PLE_BUFREQ_UNAVAL_ERR_SER_EN) |
-			  (B_AX_PLE_BUFRTN_INVLD_PKTID_ERR_INT_EN &
-			   DMAC_PLE_BUFRTN_INVLD_PKTID_ERR_SER_EN) |
-			  (B_AX_PLE_BUFRTN_SIZE_ERR_INT_EN &
-			   DMAC_PLE_BUFRTN_SIZE_ERR_SER_EN) |
-			  (B_AX_PLE_BUFREQ_SRCHTAILPG_ERR_INT_EN &
-			   DMAC_PLE_BUFREQ_SRCHTAILPG_ERR_SER_EN) |
-			  (B_AX_PLE_GETNPG_STRPG_ERR_INT_EN &
-			   DMAC_PLE_GETNPG_STRPG_ERR_SER_EN) |
-			  (B_AX_PLE_GETNPG_PGOFST_ERR_INT_EN &
-			   DMAC_PLE_GETNPG_PGOFST_ERR_SER_EN) |
-			  (B_AX_PLE_BUFMGN_FRZTO_ERR_INT_EN &
-			   DMAC_PLE_BUFMGN_FRZTO_ERR_SER_EN) |
-			  (B_AX_PLE_QUE_CMDTYPE_ERR_INT_EN &
-			   DMAC_PLE_QUE_CMDTYPE_ERR_SER_EN) |
-			  (B_AX_PLE_QUE_DSTQUEID_ERR_INT_EN &
-			   DMAC_PLE_QUE_DSTQUEID_ERR_SER_EN) |
-			  (B_AX_PLE_QUE_SRCQUEID_ERR_INT_EN &
-			   DMAC_PLE_QUE_SRCQUEID_ERR_SER_EN) |
-			  (B_AX_PLE_ENQ_PKTCNT_OVRF_ERR_INT_EN &
-			   DMAC_PLE_ENQ_PKTCNT_OVRF_ERR_SER_EN) |
-			  (B_AX_PLE_ENQ_PKTCNT_NVAL_ERR_INT_EN &
-			   DMAC_PLE_ENQ_PKTCNT_NVAL_ERR_SER_EN) |
-			  (B_AX_PLE_PREPKTLLT_AD_ERR_INT_EN &
-			   DMAC_PLE_PREPKTLLT_AD_ERR_SER_EN) |
-			  (B_AX_PLE_NXTPKTLL_AD_ERR_INT_EN &
-			   DMAC_PLE_NXTPKTLL_AD_ERR_SER_EN) |
-			  (B_AX_PLE_QUEMGN_FRZTO_ERR_INT_EN &
-			   DMAC_PLE_QUEMGN_FRZTO_ERR_SER_EN) |
-			  (B_AX_PLE_DATCHN_ARBT_ERR_INT_EN &
-			   DMAC_PLE_DATCHN_ARBT_ERR_SER_EN) |
-			  (B_AX_PLE_DATCHN_NULLPG_ERR_INT_EN &
-			   DMAC_PLE_DATCHN_NULLPG_ERR_SER_EN) |
-			  (B_AX_PLE_DATCHN_FRZTO_ERR_INT_EN &
-			   DMAC_PLE_DATCHN_FRZTO_ERR_SER_EN));
-		MAC_REG_W32(R_AX_PLE_ERR_IMR, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 pktin_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		val32 = MAC_REG_R32(R_AX_PKTIN_ERR_IMR);
-		val32 &= ~(B_AX_PKTIN_GETPKTID_ERR_INT_EN);
-
-		val32 |= ((B_AX_PKTIN_GETPKTID_ERR_INT_EN &
-			   DMAC_PKTIN_GETPKTID_ERR_SER_EN));
-		MAC_REG_W32(R_AX_PKTIN_ERR_IMR, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 dispatcher_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		val32 = MAC_REG_R32(R_AX_HOST_DISPATCHER_ERR_IMR);
-		val32 &= ~(B_AX_HDT_CHANNEL_DIFF_ERR_INT_EN |
-			   B_AX_HDT_CHANNEL_ID_ERR_INT_EN |
-			   B_AX_HDT_PKT_FAIL_DBG_INT_EN |
-			   B_AX_HDT_PERMU_OVERFLOW_INT_EN |
-			   B_AX_HDT_PERMU_UNDERFLOW_INT_EN |
-			   B_AX_HDT_PAYLOAD_OVERFLOW_INT_EN |
-			   B_AX_HDT_PAYLOAD_UNDERFLOW_INT_EN |
-			   B_AX_HDT_OFFSET_UNMATCH_INT_EN |
-			   B_AX_HDT_CHANNEL_DMA_ERR_INT_EN |
-			   B_AX_HDT_WD_CHK_ERR_INT_EN |
-			   B_AX_HDT_PRE_COST_ERR_INT_EN |
-			   B_AX_HDT_TXPKTSIZE_ERR_INT_EN |
-			   B_AX_HDT_TCP_CHK_ERR_INT_EN |
-			   B_AX_HDT_TX_WRITE_OVERFLOW_INT_EN |
-			   B_AX_HDT_TX_WRITE_UNDERFLOW_INT_EN |
-			   B_AX_HDT_PLD_CMD_OVERLOW_INT_EN |
-			   B_AX_HDT_PLD_CMD_UNDERFLOW_INT_EN |
-			   B_AX_HDT_FLOW_CTRL_ERR_INT_EN |
-			   B_AX_HDT_NULLPKT_ERR_INT_EN |
-			   B_AX_HDT_BURST_NUM_ERR_INT_EN |
-			   B_AX_HDT_RXAGG_CFG_ERR_INT_EN |
-			   B_AX_HDT_SHIFT_EN_ERR_INT_EN |
-			   B_AX_HDT_TOTAL_LEN_ERR_INT_EN |
-			   B_AX_HDT_DMA_PROCESS_ERR_INT_EN |
-			   B_AX_HDT_SHIFT_DMA_CFG_ERR_INT_EN |
-			   B_AX_HDT_CHKSUM_FSM_ERR_INT_EN |
-			   B_AX_HDT_RX_WRITE_OVERFLOW_INT_EN |
-			   B_AX_HDT_RX_WRITE_UNDERFLOW_INT_EN);
-
-		val32 |= ((B_AX_HDT_CHANNEL_DIFF_ERR_INT_EN &
-			   DMAC_HDT_CHANNEL_DIFF_ERR_SER_EN) |
-			  (B_AX_HDT_CHANNEL_ID_ERR_INT_EN &
-			   DMAC_HDT_CHANNEL_ID_ERR_SER_EN) |
-			  (B_AX_HDT_PKT_FAIL_DBG_INT_EN &
-			   DMAC_HDT_PKT_FAIL_DBG_SER_EN) |
-			  (B_AX_HDT_PERMU_OVERFLOW_INT_EN &
-			   DMAC_HDT_PERMU_OVERFLOW_SER_EN) |
-			  (B_AX_HDT_PERMU_UNDERFLOW_INT_EN &
-			   DMAC_HDT_PERMU_UNDERFLOW_SER_EN) |
-			  (B_AX_HDT_PAYLOAD_OVERFLOW_INT_EN &
-			   DMAC_HDT_PAYLOAD_OVERFLOW_SER_EN) |
-			  (B_AX_HDT_PAYLOAD_UNDERFLOW_INT_EN &
-			   DMAC_HDT_PAYLOAD_UNDERFLOW_SER_EN) |
-			  (B_AX_HDT_OFFSET_UNMATCH_INT_EN &
-			   DMAC_HDT_OFFSET_UNMATCH_SER_EN) |
-			  (B_AX_HDT_CHANNEL_DMA_ERR_INT_EN &
-			   DMAC_HDT_CHANNEL_DMA_ERR_SER_EN) |
-			  (B_AX_HDT_WD_CHK_ERR_INT_EN &
-			   DMAC_HDT_WD_CHK_ERR_SER_EN) |
-			  (B_AX_HDT_PRE_COST_ERR_INT_EN &
-			   DMAC_HDT_PRE_COST_ERR_SER_EN) |
-			  (B_AX_HDT_TXPKTSIZE_ERR_INT_EN &
-			   DMAC_HDT_TXPKTSIZE_ERR_SER_EN) |
-			  (B_AX_HDT_TCP_CHK_ERR_INT_EN &
-			   DMAC_HDT_TCP_CHK_ERR_SER_EN) |
-			  (B_AX_HDT_TX_WRITE_OVERFLOW_INT_EN &
-			   DMAC_HDT_TX_WRITE_OVERFLOW_SER_EN) |
-			  (B_AX_HDT_TX_WRITE_UNDERFLOW_INT_EN &
-			   DMAC_HDT_TX_WRITE_UNDERFLOW_SER_EN) |
-			  (B_AX_HDT_PLD_CMD_OVERLOW_INT_EN &
-			   DMAC_HDT_PLD_CMD_OVERLOW_SER_EN) |
-			  (B_AX_HDT_PLD_CMD_UNDERFLOW_INT_EN &
-			   DMAC_HDT_PLD_CMD_UNDERFLOW_SER_EN) |
-			  (B_AX_HDT_FLOW_CTRL_ERR_INT_EN &
-			   DMAC_HDT_FLOW_CTRL_ERR_SER_EN) |
-			  (B_AX_HDT_NULLPKT_ERR_INT_EN &
-			   DMAC_HDT_NULLPKT_ERR_SER_EN) |
-			  (B_AX_HDT_BURST_NUM_ERR_INT_EN &
-			   DMAC_HDT_BURST_NUM_ERR_SER_EN) |
-			  (B_AX_HDT_RXAGG_CFG_ERR_INT_EN &
-			   DMAC_HDT_RXAGG_CFG_ERR_SER_EN) |
-			  (B_AX_HDT_SHIFT_EN_ERR_INT_EN &
-			   DMAC_HDT_SHIFT_EN_ERR_SER_EN) |
-			  (B_AX_HDT_TOTAL_LEN_ERR_INT_EN &
-			   DMAC_HDT_TOTAL_LEN_ERR_SER_EN) |
-			  (B_AX_HDT_DMA_PROCESS_ERR_INT_EN &
-			   DMAC_HDT_DMA_PROCESS_ERR_SER_EN) |
-			  (B_AX_HDT_SHIFT_DMA_CFG_ERR_INT_EN &
-			   DMAC_HDT_SHIFT_DMA_CFG_ERR_SER_EN) |
-			  (B_AX_HDT_CHKSUM_FSM_ERR_INT_EN &
-			   DMAC_HDT_CHKSUM_FSM_ERR_SER_EN) |
-			  (B_AX_HDT_RX_WRITE_OVERFLOW_INT_EN &
-			   DMAC_HDT_RX_WRITE_OVERFLOW_SER_EN) |
-			  (B_AX_HDT_RX_WRITE_UNDERFLOW_INT_EN &
-			   DMAC_HDT_RX_WRITE_UNDERFLOW_SER_EN));
-		MAC_REG_W32(R_AX_HOST_DISPATCHER_ERR_IMR, val32);
-
-		val32 = MAC_REG_R32(R_AX_CPU_DISPATCHER_ERR_IMR);
-		val32 &= ~(B_AX_CPU_CHANNEL_DIFF_ERR_INT_EN |
-			   B_AX_CPU_PKT_FAIL_DBG_INT_EN |
-			   B_AX_CPU_CHANNEL_ID_ERR_INT_EN |
-			   B_AX_CPU_PERMU_OVERFLOW_INT_EN |
-			   B_AX_CPU_PERMU_UNDERFLOW_INT_EN |
-			   B_AX_CPU_PAYLOAD_OVERFLOW_INT_EN |
-			   B_AX_CPU_PAYLOAD_UNDERFLOW_INT_EN |
-			   B_AX_CPU_PAYLOAD_CHKSUM_ERR_INT_EN |
-			   B_AX_CPU_OFFSET_UNMATCH_INT_EN |
-			   B_AX_CPU_CHANNEL_DMA_ERR_INT_EN |
-			   B_AX_CPU_WD_CHK_ERR_INT_EN |
-			   B_AX_CPU_PRE_COST_ERR_INT_EN |
-			   B_AX_CPU_PLD_CMD_OVERLOW_INT_EN |
-			   B_AX_CPU_PLD_CMD_UNDERFLOW_INT_EN |
-			   B_AX_CPU_F2P_QSEL_ERR_INT_EN |
-			   B_AX_CPU_F2P_SEQ_ERR_INT_EN |
-			   B_AX_CPU_FLOW_CTRL_ERR_INT_EN |
-			   B_AX_CPU_NULLPKT_ERR_INT_EN |
-			   B_AX_CPU_BURST_NUM_ERR_INT_EN |
-			   B_AX_CPU_RXAGG_CFG_ERR_INT_EN |
-			   B_AX_CPU_SHIFT_EN_ERR_INT_EN |
-			   B_AX_CPU_TOTAL_LEN_ERR_INT_EN |
-			   B_AX_CPU_DMA_PROCESS_ERR_INT_EN |
-			   B_AX_CPU_SHIFT_DMA_CFG_ERR_INT_EN |
-			   B_AX_CPU_CHKSUM_FSM_ERR_INT_EN |
-			   B_AX_CPU_RX_WRITE_OVERFLOW_INT_EN |
-			   B_AX_CPU_RX_WRITE_UNDERFLOW_INT_EN);
-
-		val32 |= ((B_AX_CPU_CHANNEL_DIFF_ERR_INT_EN &
-			   DMAC_CPU_CHANNEL_DIFF_ERR_SER_EN) |
-			  (B_AX_CPU_PKT_FAIL_DBG_INT_EN &
-			   DMAC_CPU_PKT_FAIL_DBG_SER_EN) |
-			  (B_AX_CPU_CHANNEL_ID_ERR_INT_EN &
-			   DMAC_CPU_CHANNEL_ID_ERR_SER_EN) |
-			  (B_AX_CPU_PERMU_OVERFLOW_INT_EN &
-			   DMAC_CPU_PERMU_OVERFLOW_SER_EN) |
-			  (B_AX_CPU_PERMU_UNDERFLOW_INT_EN &
-			   DMAC_CPU_PERMU_UNDERFLOW_SER_EN) |
-			  (B_AX_CPU_PAYLOAD_OVERFLOW_INT_EN &
-			   DMAC_CPU_PAYLOAD_OVERFLOW_SER_EN) |
-			  (B_AX_CPU_PAYLOAD_UNDERFLOW_INT_EN &
-			   DMAC_CPU_PAYLOAD_UNDERFLOW_SER_EN) |
-			  (B_AX_CPU_PAYLOAD_CHKSUM_ERR_INT_EN &
-			   DMAC_CPU_PAYLOAD_CHKSUM_ERR_SER_EN) |
-			  (B_AX_CPU_OFFSET_UNMATCH_INT_EN &
-			   DMAC_CPU_OFFSET_UNMATCH_SER_EN) |
-			  (B_AX_CPU_CHANNEL_DMA_ERR_INT_EN &
-			   DMAC_CPU_CHANNEL_DMA_ERR_SER_EN) |
-			  (B_AX_CPU_WD_CHK_ERR_INT_EN &
-			   DMAC_CPU_WD_CHK_ERR_SER_EN) |
-			  (B_AX_CPU_PRE_COST_ERR_INT_EN &
-			   DMAC_CPU_PRE_COST_ERR_SER_EN) |
-			  (B_AX_CPU_PLD_CMD_OVERLOW_INT_EN &
-			   DMAC_CPU_PLD_CMD_OVERLOW_SER_EN) |
-			  (B_AX_CPU_PLD_CMD_UNDERFLOW_INT_EN &
-			   DMAC_CPU_PLD_CMD_UNDERFLOW_SER_EN) |
-			  (B_AX_CPU_F2P_QSEL_ERR_INT_EN &
-			   DMAC_CPU_F2P_QSEL_ERR_SER_EN) |
-			  (B_AX_CPU_F2P_SEQ_ERR_INT_EN &
-			   DMAC_CPU_F2P_SEQ_ERR_SER_EN) |
-			  (B_AX_CPU_FLOW_CTRL_ERR_INT_EN &
-			   DMAC_CPU_FLOW_CTRL_ERR_SER_EN) |
-			  (B_AX_CPU_NULLPKT_ERR_INT_EN &
-			   DMAC_CPU_NULLPKT_ERR_SER_EN) |
-			  (B_AX_CPU_BURST_NUM_ERR_INT_EN &
-			   DMAC_CPU_BURST_NUM_ERR_SER_EN) |
-			  (B_AX_CPU_RXAGG_CFG_ERR_INT_EN &
-			   DMAC_CPU_RXAGG_CFG_ERR_SER_EN) |
-			  (B_AX_CPU_SHIFT_EN_ERR_INT_EN &
-			   DMAC_CPU_SHIFT_EN_ERR_SER_EN) |
-			  (B_AX_CPU_TOTAL_LEN_ERR_INT_EN &
-			   DMAC_CPU_TOTAL_LEN_ERR_SER_EN) |
-			  (B_AX_CPU_DMA_PROCESS_ERR_INT_EN &
-			   DMAC_CPU_DMA_PROCESS_ERR_SER_EN) |
-			  (B_AX_CPU_SHIFT_DMA_CFG_ERR_INT_EN &
-			   DMAC_CPU_SHIFT_DMA_CFG_ERR_SER_EN) |
-			  (B_AX_CPU_CHKSUM_FSM_ERR_INT_EN &
-			   DMAC_CPU_CHKSUM_FSM_ERR_SER_EN));
-		MAC_REG_W32(R_AX_CPU_DISPATCHER_ERR_IMR, val32);
-
-		val32 = MAC_REG_R32(R_AX_OTHER_DISPATCHER_ERR_IMR);
-		val32 &= ~(B_AX_OTHER_STF_WROQT_UNDERFLOW_INT_EN |
-			   B_AX_OTHER_STF_WROQT_OVERFLOW_INT_EN |
-			   B_AX_OTHER_STF_WRFF_UNDERFLOW_INT_EN |
-			   B_AX_OTHER_STF_WRFF_OVERFLOW_INT_EN |
-			   B_AX_OTHER_STF_CMD_UNDERFLOW_INT_EN |
-			   B_AX_OTHER_STF_CMD_OVERFLOW_INT_EN |
-			   B_AX_HOST_ADDR_INFO_LEN_ZERO_ERR_INT_EN |
-			   B_AX_CPU_ADDR_INFO_LEN_ZERO_ERR_INT_EN |
-			   B_AX_PLE_OUTPUT_ERR_INT_EN |
-			   B_AX_PLE_RESP_ERR_INT_EN |
-			   B_AX_PLE_BURST_NUM_ERR_INT_EN |
-			   B_AX_PLE_NULL_PKT_ERR_INT_EN |
-			   B_AX_PLE_FLOW_CTRL_ERR_INT_EN |
-			   B_AX_WDE_OUTPUT_ERR_INT_EN |
-			   B_AX_WDE_RESP_ERR_INT_EN |
-			   B_AX_WDE_BURST_NUM_ERR_INT_EN |
-			   B_AX_WDE_NULL_PKT_ERR_INT_EN |
-			   B_AX_WDE_FLOW_CTRL_ERR_INT_EN);
-
-		val32 |= ((B_AX_OTHER_STF_WROQT_UNDERFLOW_INT_EN &
-			   DMAC_OTHER_STF_WROQT_UNDERFLOW_SER_EN) |
-			  (B_AX_OTHER_STF_WROQT_OVERFLOW_INT_EN &
-			   DMAC_OTHER_STF_WROQT_OVERFLOW_SER_EN) |
-			  (B_AX_OTHER_STF_WRFF_UNDERFLOW_INT_EN &
-			   DMAC_OTHER_STF_WRFF_UNDERFLOW_SER_EN) |
-			  (B_AX_OTHER_STF_WRFF_OVERFLOW_INT_EN &
-			   DMAC_OTHER_STF_WRFF_OVERFLOW_SER_EN) |
-			  (B_AX_OTHER_STF_CMD_UNDERFLOW_INT_EN &
-			   DMAC_OTHER_STF_CMD_UNDERFLOW_SER_EN) |
-			  (B_AX_OTHER_STF_CMD_OVERFLOW_INT_EN &
-			   DMAC_OTHER_STF_CMD_OVERFLOW_SER_EN) |
-			  (B_AX_HOST_ADDR_INFO_LEN_ZERO_ERR_INT_EN &
-			   DMAC_HOST_ADDR_INFO_LEN_ZERO_ERR_SER_EN) |
-			  (B_AX_CPU_ADDR_INFO_LEN_ZERO_ERR_INT_EN &
-			   DMAC_CPU_ADDR_INFO_LEN_ZERO_ERR_SER_EN) |
-			  (B_AX_PLE_OUTPUT_ERR_INT_EN &
-			   DMAC_PLE_OUTPUT_ERR_SER_EN) |
-			  (B_AX_PLE_RESP_ERR_INT_EN &
-			   DMAC_PLE_RESP_ERR_SER_EN) |
-			  (B_AX_PLE_BURST_NUM_ERR_INT_EN &
-			   DMAC_PLE_BURST_NUM_ERR_SER_EN) |
-			  (B_AX_PLE_NULL_PKT_ERR_INT_EN &
-			   DMAC_PLE_NULL_PKT_ERR_SER_EN) |
-			  (B_AX_PLE_FLOW_CTRL_ERR_INT_EN &
-			   DMAC_PLE_FLOW_CTRL_ERR_SER_EN) |
-			  (B_AX_WDE_OUTPUT_ERR_INT_EN &
-			   DMAC_WDE_OUTPUT_ERR_SER_EN) |
-			  (B_AX_WDE_RESP_ERR_INT_EN &
-			   DMAC_WDE_RESP_ERR_SER_EN) |
-			  (B_AX_WDE_BURST_NUM_ERR_INT_EN &
-			   DMAC_WDE_BURST_NUM_ERR_SER_EN) |
-			  (B_AX_WDE_NULL_PKT_ERR_INT_EN &
-			   DMAC_WDE_NULL_PKT_ERR_SER_EN) |
-			  (B_AX_WDE_FLOW_CTRL_ERR_INT_EN &
-			   DMAC_WDE_FLOW_CTRL_ERR_SER_EN));
-		MAC_REG_W32(R_AX_OTHER_DISPATCHER_ERR_IMR, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 cpuio_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		val32 = MAC_REG_R32(R_AX_CPUIO_ERR_IMR);
-		val32 &= ~(B_AX_WDEBUF_OP_ERR_INT_EN |
-			   B_AX_WDEQUE_OP_ERR_INT_EN |
-			   B_AX_PLEBUF_OP_ERR_INT_EN |
-			   B_AX_PLEQUE_OP_ERR_INT_EN);
-
-		val32 |= ((B_AX_WDEBUF_OP_ERR_INT_EN &
-			   DMAC_WDEBUF_OP_ERR_SER_EN) |
-			  (B_AX_WDEQUE_OP_ERR_INT_EN &
-			   DMAC_WDEQUE_OP_ERR_SER_EN) |
-			  (B_AX_PLEBUF_OP_ERR_INT_EN &
-			   DMAC_PLEBUF_OP_ERR_SER_EN) |
-			  (B_AX_PLEQUE_OP_ERR_INT_EN &
-			   DMAC_PLEQUE_OP_ERR_SER_EN));
-		MAC_REG_W32(R_AX_CPUIO_ERR_IMR, val32);
-	}
-#endif
-	return MACSUCCESS;
-}
-
-static u32 bbrpt_imr_enable(struct mac_ax_adapter *adapter)
-{
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-		u32 val32;
-
-		val32 = MAC_REG_R32(R_AX_BBRPT_COM_ERR_IMR_ISR);
-		val32 &= ~(B_AX_BBRPT_COM_NULL_PLPKTID_ERR_INT_EN);
-
-		val32 |= ((B_AX_BBRPT_COM_NULL_PLPKTID_ERR_INT_EN &
-			   DMAC_BBRPT_COM_NULL_PLPKTID_ERR_SER_EN));
-		MAC_REG_W32(R_AX_BBRPT_COM_ERR_IMR_ISR, val32);
-
-		val32 = MAC_REG_R32(R_AX_BBRPT_CHINFO_ERR_IMR_ISR);
-		val32 &= ~(B_AX_BBPRT_CHIF_BB_TO_ERR_INT_EN |
-			   B_AX_BBPRT_CHIF_OVF_ERR_INT_EN |
-			   B_AX_BBPRT_CHIF_BOVF_ERR_INT_EN |
-			   B_AX_BBPRT_CHIF_HDRL_ERR_INT_EN |
-			   B_AX_BBPRT_CHIF_LEFT1_ERR_INT_EN |
-			   B_AX_BBPRT_CHIF_LEFT2_ERR_INT_EN |
-			   B_AX_BBPRT_CHIF_NULL_ERR_INT_EN |
-			   B_AX_BBPRT_CHIF_TO_ERR_INT_EN);
-
-		val32 |= ((B_AX_BBPRT_CHIF_BB_TO_ERR_INT_EN &
-			   DMAC_BBPRT_CHIF_BB_TO_ERR_SER_EN) |
-			  (B_AX_BBPRT_CHIF_OVF_ERR_INT_EN &
-			   DMAC_BBPRT_CHIF_OVF_ERR_SER_EN) |
-			  (B_AX_BBPRT_CHIF_BOVF_ERR_INT_EN &
-			   DMAC_BBPRT_CHIF_BOVF_ERR_SER_EN) |
-			  (B_AX_BBPRT_CHIF_HDRL_ERR_INT_EN &
-			   DMAC_BBPRT_CHIF_HDRL_ERR_SER_EN) |
-			  (B_AX_BBPRT_CHIF_LEFT1_ERR_INT_EN &
-			   DMAC_BBPRT_CHIF_LEFT1_ERR_SER_EN) |
-			  (B_AX_BBPRT_CHIF_LEFT2_ERR_INT_EN &
-			   DMAC_BBPRT_CHIF_LEFT2_ERR_SER_EN) |
-			  (B_AX_BBPRT_CHIF_NULL_ERR_INT_EN &
-			   DMAC_BBPRT_CHIF_NULL_ERR_SER_EN) |
-			  (B_AX_BBPRT_CHIF_TO_ERR_INT_EN &
-			   DMAC_BBPRT_CHIF_TO_ERR_SER_EN));
-		MAC_REG_W32(R_AX_BBRPT_CHINFO_ERR_IMR_ISR, val32);
-
-		val32 = MAC_REG_R32(R_AX_BBRPT_DFS_ERR_IMR_ISR);
-		val32 &= ~(B_AX_BBRPT_DFS_TO_ERR_INT_EN);
-
-		val32 |= ((B_AX_BBRPT_DFS_TO_ERR_INT_EN &
-			   DMAC_BBRPT_DFS_TO_ERR_SER_EN));
-		MAC_REG_W32(R_AX_BBRPT_DFS_ERR_IMR_ISR, val32);
-
-		val32 = MAC_REG_R32(R_AX_LA_ERRFLAG);
-		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A)) {
-#if MAC_AX_8852A_SUPPORT
-			val32 &= ~(B_AX_LA_IMR_DATA_LOSS_ERR);
-
-			val32 |= ((B_AX_LA_IMR_DATA_LOSS_ERR &
-				   DMAC_LA_IMR_DATA_LOSS_ERR));
-#endif
-		} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-			   is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-			   is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-#if MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-			val32 &= ~(B_AX_LA_IMR_DATA_LOSS);
-
-			val32 |= ((B_AX_LA_IMR_DATA_LOSS &
-				   DMAC_LA_IMR_DATA_LOSS_ERR));
-#endif
-		}
-		MAC_REG_W32(R_AX_LA_ERRFLAG, val32);
-	}
-#endif
-	return MACSUCCESS;
 }
 
 static u32 sta_sch_init(struct mac_ax_adapter *adapter,
@@ -1265,8 +265,7 @@ static u32 scheduler_init(struct mac_ax_adapter *adapter, u8 band, struct mac_ax
 		 is_chip_id(adapter, MAC_AX_CHIP_ID_8852D))
 		val32 = SET_CLR_WORD(val32, SIFS_MACTXEN_T1_V2,
 				     B_AX_SIFS_MACTXEN_T1);
-	else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		 is_chip_id(adapter, MAC_AX_CHIP_ID_8851E))
+	else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB))
 		val32 = SET_CLR_WORD(val32, SIFS_MACTXEN_T1_V1,
 				     B_AX_SIFS_MACTXEN_T1);
 	MAC_REG_W32(reg, val32);
@@ -1282,24 +281,22 @@ static u32 scheduler_init(struct mac_ax_adapter *adapter, u8 band, struct mac_ax
 #endif
 	}
 
-#if MAC_AX_ASIC_TEMP
 	reg = band == MAC_AX_BAND_1 ? R_AX_CCA_CFG_0_C1 : R_AX_CCA_CFG_0;
 	val32 = MAC_REG_R32(reg) & ~(B_AX_BTCCA_EN);
 	MAC_REG_W32(reg, val32);
-#endif
 
 	reg = band == MAC_AX_BAND_1 ? R_AX_CCA_CFG_0_C1 : R_AX_CCA_CFG_0;
 	val32 = MAC_REG_R32(reg);
-	if (adapter->env == DUT_ENV_FPGA) {
+	if (adapter->env_info.env == DUT_ENV_FPGA) {
 		if (info->trx_mode == MAC_AX_TRX_LOOPBACK) {
 			val32 = val32 & ~(B_AX_CCA_EN) & ~(B_AX_SEC20_EN) &
 				~(B_AX_SEC40_EN) & ~(B_AX_SEC80_EN) &
 				~(B_AX_EDCCA_EN);
 		}
-	} else if (adapter->env == DUT_ENV_ASIC || adapter->env == DUT_ENV_PXP) {
+	} else if (adapter->env_info.env == DUT_ENV_ASIC || adapter->env_info.env == DUT_ENV_PXP) {
 		val32 = val32;
 	} else {
-		PLTFM_MSG_ERR("[ERR]Unknown env %d\n", adapter->env);
+		PLTFM_MSG_ERR("[ERR]Unknown env %d\n", adapter->env_info.env);
 		return MACNOITEM;
 	}
 
@@ -1317,10 +314,9 @@ static u32 scheduler_init(struct mac_ax_adapter *adapter, u8 band, struct mac_ax
 		MAC_REG_W32(reg, val32);
 	}
 #endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		if (!(MAC_REG_R32(R_AX_SEC_ENG_CTRL) & B_AX_TX_PARTIAL_MODE)) {
 			reg = band == MAC_AX_BAND_1 ? R_AX_PREBKF_CFG_0_C1 : R_AX_PREBKF_CFG_0;
@@ -1343,9 +339,8 @@ static u32 scheduler_init(struct mac_ax_adapter *adapter, u8 band, struct mac_ax
 			MAC_REG_W32(R_AX_CCA_CFG_0, val32);
 #endif
 		} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
-			   is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 			   is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8852D_SUPPORT
 			val32 = MAC_REG_R32(R_AX_CCA_CFG_0);
 			val32 = SET_CLR_WORD(val32, 0x6a,
 					     B_AX_R_SIFS_AGGR_TIME_V1);
@@ -1354,18 +349,16 @@ static u32 scheduler_init(struct mac_ax_adapter *adapter, u8 band, struct mac_ax
 		}
 	}
 #else /*for NIC mode setting*/
-	if (is_poh && adapter->hw_info->intf == MAC_AX_INTF_PCIE) {
+	if (is_poh && adapter->env_info.intf == MAC_AX_INTF_PCIE) {
 		reg = band == MAC_AX_BAND_1 ?
 				R_AX_PREBKF_CFG_0_C1 : R_AX_PREBKF_CFG_0;
 		val32 = MAC_REG_R32(reg);
 		val32 = SET_CLR_WORD(val32, SCH_PREBKF_24US, B_AX_PREBKF_TIME);
 		MAC_REG_W32(reg, val32);
 
-#if (MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || \
-MAC_AX_8852D_SUPPORT)
+#if (MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT)
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 			reg = band == MAC_AX_BAND_1 ?
 					R_AX_CTN_CFG_0_C1 : R_AX_CTN_CFG_0;
@@ -1407,79 +400,6 @@ static u32 mpdu_proc_init(struct mac_ax_adapter *adapter)
 	return MACSUCCESS;
 }
 
-static u32 sec_eng_init(struct mac_ax_adapter *adapter)
-{
-	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-	u32 val32 = 0;
-	u32 ret;
-
-	ret = check_mac_en(adapter, 0, MAC_AX_DMAC_SEL);
-	if (ret != MACSUCCESS)
-		return ret;
-
-	val32 = MAC_REG_R32(R_AX_SEC_ENG_CTRL);
-	// init clock
-	val32 |= (B_AX_CLK_EN_CGCMP | B_AX_CLK_EN_WAPI | B_AX_CLK_EN_WEP_TKIP);
-	// init TX encryption
-	val32 |= (B_AX_SEC_TX_ENC | B_AX_SEC_RX_DEC);
-	val32 |= (B_AX_MC_DEC | B_AX_BC_DEC);
-	val32 |= (B_AX_BMC_MGNT_DEC | B_AX_UC_MGNT_DEC);
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-		val32 &= ~B_AX_TX_PARTIAL_MODE;
-	}
-#endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
-#if MAC_AX_USB_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-		if (adapter->hw_info->intf == MAC_AX_INTF_USB)
-			val32 &= ~B_AX_TX_PARTIAL_MODE;
-	}
-#endif
-#endif
-
-	MAC_REG_W32(R_AX_SEC_ENG_CTRL, val32);
-
-	//init MIC ICV append
-	val32 = MAC_REG_R32(R_AX_SEC_MPDU_PROC);
-	val32 |= (B_AX_APPEND_ICV | B_AX_APPEND_MIC);
-
-	// option init
-	MAC_REG_W32(R_AX_SEC_MPDU_PROC, val32);
-
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
-	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-		val32 = MAC_REG_R32(R_AX_SEC_DEBUG1);
-		val32 = SET_CLR_WORD(val32, B_AX_TX_TO, B_AX_TX_TIMEOUT_SEL);
-		MAC_REG_W32(R_AX_SEC_DEBUG1, val32);
-	}
-#endif
-
-#ifdef PHL_FEATURE_AP
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
-		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-			val32 = MAC_REG_R32(R_AX_RCR);
-			val32 = SET_CLR_WORD(val32, DRVINFO_PATCH_SIZE, B_AX_DRV_INFO_SIZE);
-			MAC_REG_W32(R_AX_RCR, val32);
-		}
-#endif
-#endif
-
-	return MACSUCCESS;
-}
-
 static u32 tmac_init(struct mac_ax_adapter *adapter, u8 band,
 		     struct mac_ax_trx_info *info)
 {
@@ -1507,6 +427,11 @@ static u32 tmac_init(struct mac_ax_adapter *adapter, u8 band,
 	val32 = MAC_REG_R32(reg);
 	val32 = SET_CLR_WORD(val32, TXDFIFO_HIGH_MCS_THRE, B_AX_TXDFIFO_HIGH_MCS_THRE);
 	val32 = SET_CLR_WORD(val32, TXDFIFO_LOW_MCS_THRE, B_AX_TXDFIFO_LOW_MCS_THRE);
+	MAC_REG_W32(reg, val32);
+
+	reg = band == MAC_AX_BAND_1 ? R_AX_TB_PPDU_CTRL_C1 : R_AX_TB_PPDU_CTRL;
+	val32 = MAC_REG_R32(reg);
+	val32 = SET_CLR_WORD(val32, MAC_AX_CMAC_AC_SEL_BK, B_AX_SW_PREFER_AC);
 	MAC_REG_W32(reg, val32);
 
 #if MAC_AX_FPGA_TEST
@@ -1570,6 +495,7 @@ static u32 trxptcl_init(struct mac_ax_adapter *adapter, u8 band,
 
 	/* refer to rx rate and cmac table, choose the smaller as resp initial rate */
 	cfg.ref_rate_sel = REF2RXRATEANDCCTBL;
+	cfg.band = band;
 	ret = p_ops->set_rrsr_cfg(adapter, &cfg);
 
 	return MACSUCCESS;
@@ -1631,9 +557,8 @@ static u32 rmac_init(struct mac_ax_adapter *adapter, u8 band,
 #endif
 	} else if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		   is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		   is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		   is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		reg = band == MAC_AX_BAND_1 ? R_AX_RCR_C1 : R_AX_RCR;
 		val8 = MAC_REG_R8(reg);
 		if (band == MAC_AX_BAND_0 &&
@@ -1671,8 +596,8 @@ static u32 rmac_init(struct mac_ax_adapter *adapter, u8 band,
 	_patch_wmac_timer_src(adapter, band);
 
 	/* Add drv_info dbg size as dummy (SDIO) */
-	if (adapter->hw_info->intf == MAC_AX_INTF_SDIO &&
-	    adapter->hw_info->chip_id == MAC_AX_CHIP_ID_8852A) {
+	if (adapter->env_info.intf == MAC_AX_INTF_SDIO &&
+	    adapter->drv_info->sw_chip_id == MAC_AX_CHIP_ID_8852A) {
 		val16 = MAC_REG_R16(R_AX_RCR);
 		MAC_REG_W16(R_AX_RCR, val16 |
 			    SET_WORD(SDIO_DRV_INFO_SIZE, B_AX_DRV_INFO_SIZE));
@@ -1748,6 +673,7 @@ static u32 ptcl_init(struct mac_ax_adapter *adapter, u8 band,
 		     struct mac_ax_trx_info *info)
 {
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
+	struct mac_ax_ampdu_cfg ampdu_cfg;
 	u32 val32;
 	u32 ret;
 	u8 val8;
@@ -1757,7 +683,7 @@ static u32 ptcl_init(struct mac_ax_adapter *adapter, u8 band,
 	if (ret != MACSUCCESS)
 		return ret;
 
-	if (adapter->hw_info->intf == MAC_AX_INTF_PCIE) {
+	if (adapter->env_info.intf == MAC_AX_INTF_PCIE) {
 		ret = is_qta_poh(adapter, info->qta_mode, &val8);
 		if (ret)
 			return ret;
@@ -1805,6 +731,20 @@ static u32 ptcl_init(struct mac_ax_adapter *adapter, u8 band,
 		val8 = SET_CLR_WORD(val8, FWD_TO_WLCPU, B_AX_SPE_RPT_PATH);
 		MAC_REG_W8(R_AX_PTCLRPT_FULL_HDL_C1, val8);
 	}
+
+	ampdu_cfg.wdbk_mode = MAC_AX_WDBK_MODE_SINGLE_BK;
+	ampdu_cfg.rty_bk_mode = MAC_AX_RTY_BK_MODE_AGG;
+	ampdu_cfg.max_agg_num = 0x40;
+	ampdu_cfg.max_agg_time_32us = adapter->hw_info->max_agg_txtime_reg;
+	if (band == MAC_AX_BAND_0)
+		ampdu_cfg.band = 0;
+	else if (band == MAC_AX_BAND_1)
+		ampdu_cfg.band = 1;
+	else
+		ampdu_cfg.band = 0;
+	ret = set_hw_ampdu_cfg(adapter, &ampdu_cfg);
+	if (ret != MACSUCCESS)
+		return ret;
 
 	_patch_vht_ampdu_max_len(adapter, band);
 
@@ -1951,14 +891,13 @@ u32 mac_sifs_chk_cca_en(struct mac_ax_adapter *adapter, u8 band, u8 en)
 	if (en) {
 		reg = band == MAC_AX_BAND_1 ? R_AX_CCA_CONTROL_C1 : R_AX_CCA_CONTROL;
 		val32 = MAC_REG_R32(reg);
-		val32 |= (B_AX_SIFS_CHK_CCA_S80 | B_AX_SIFS_CHK_CCA_S40 |
-			  B_AX_SIFS_CHK_CCA_S20 | B_AX_SIFS_CHK_EDCCA);
+		val32 |= B_AX_SIFS_CHK_EDCCA;
 		MAC_REG_W32(reg, val32);
 	} else {
 		reg = band == MAC_AX_BAND_1 ? R_AX_CCA_CONTROL_C1 : R_AX_CCA_CONTROL;
 		val32 = MAC_REG_R32(reg);
 		val32 &= ~(B_AX_SIFS_CHK_CCA_S80 | B_AX_SIFS_CHK_CCA_S40 |
-			   B_AX_SIFS_CHK_CCA_S20 | B_AX_SIFS_CHK_EDCCA);
+			   B_AX_SIFS_CHK_CCA_S20);
 		MAC_REG_W32(reg, val32);
 	}
 
@@ -1988,7 +927,7 @@ u32 dmac_init(struct mac_ax_adapter *adapter, struct mac_ax_trx_info *info,
 	      enum mac_ax_band band)
 {
 	u32 ret = 0;
-	struct mac_ax_priv_ops *p_ops;
+	struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
 
 	ret = dle_init(adapter, info->qta_mode, MAC_AX_QTA_INVALID);
 	if (ret != MACSUCCESS) {
@@ -2026,7 +965,6 @@ u32 dmac_init(struct mac_ax_adapter *adapter, struct mac_ax_trx_info *info,
 		return ret;
 	}
 
-	p_ops = adapter_to_priv_ops(adapter);
 	ret = p_ops->sec_info_tbl_init(adapter);
 	if (ret != MACSUCCESS) {
 		PLTFM_MSG_ERR("[ERR]sec info tbl init %d\n", ret);
@@ -2136,126 +1074,6 @@ u32 mac_check_access(struct mac_ax_adapter *adapter, u32 offset)
 	}
 }
 
-u32 ser_imr_config(struct mac_ax_adapter *adapter, u8 band,
-		   enum mac_ax_hwmod_sel sel)
-{
-	u32 ret;
-
-	ret = check_mac_en(adapter, band, sel);
-	if (ret) {
-		PLTFM_MSG_ERR("MAC%d band%d is not ready\n", sel, band);
-		return ret;
-	}
-
-	if (sel == MAC_AX_DMAC_SEL) {
-		ret = wdrls_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]wdrls_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = wsec_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]wsec_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = mpdu_trx_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]mpdu_trx_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = sta_sch_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]sta_sch_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = txpktctl_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]txpktctl_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = wde_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]wde_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = ple_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]ple_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = pktin_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]pktin_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = dispatcher_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]dispatcher_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = cpuio_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]cpuio_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = bbrpt_imr_enable(adapter);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]bbrpt_imr_enable %d\n", ret);
-			return ret;
-		}
-	} else if (sel == MAC_AX_CMAC_SEL) {
-		ret = scheduler_imr_enable(adapter, band);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]scheduler_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = ptcl_imr_enable(adapter, band);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]ptcl_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = cdma_imr_enable(adapter, band);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]cdma_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = phy_intf_imr_enable(adapter, band);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]phy_intf_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = rmac_imr_enable(adapter, band);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]rmac_imr_enable %d\n", ret);
-			return ret;
-		}
-
-		ret = tmac_imr_enable(adapter, band);
-		if (ret) {
-			PLTFM_MSG_ERR("[ERR]tmac_imr_enable %d\n", ret);
-			return ret;
-		}
-	} else {
-		PLTFM_MSG_ERR("illegal sel %d\n", sel);
-		return MACNOITEM;
-	}
-	return MACSUCCESS;
-}
-
 u32 mac_enable_imr(struct mac_ax_adapter *adapter, u8 band,
 		   enum mac_ax_hwmod_sel sel)
 {
@@ -2267,17 +1085,27 @@ u32 mac_enable_imr(struct mac_ax_adapter *adapter, u8 band,
 		PLTFM_MSG_ERR("[ERR]ser_imr_config : %d\n", ret);
 		return ret;
 	}
-	return MACSUCCESS;
+
+	ret = p_ops->ser_imr_config_patch(adapter, band, sel);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("[ERR]ser_imr_config_patch : %d\n", ret);
+		return ret;
+	}
+	return ret;
 }
 
 u32 mac_trx_init(struct mac_ax_adapter *adapter, struct mac_ax_trx_info *info)
 {
 	u32 ret = 0;
+#if MAC_FEAT_DBCC
 	struct mac_ax_ops *mac_ops = adapter_to_mac_ops(adapter);
-#if MAC_AX_COEX_INIT_EN
+#endif
+#if !MAC_FEAT_COEX
 	struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
 #endif
+#if MAC_FEAT_DBCC
 	u8 val8;
+#endif /* MAC_FEAT_DBCC */
 
 	/* Check TRX status is idle later. */
 	ret = dmac_init(adapter, info, MAC_AX_BAND_0);
@@ -2292,7 +1120,7 @@ u32 mac_trx_init(struct mac_ax_adapter *adapter, struct mac_ax_trx_info *info)
 		return ret;
 	}
 
-#if MAC_AX_COEX_INIT_EN
+#if !MAC_FEAT_COEX
 	ret = p_ops->coex_mac_init(adapter);
 	if (ret != MACSUCCESS) {
 		PLTFM_MSG_ERR("[ERR] update coex setting %d\n", ret);
@@ -2300,6 +1128,7 @@ u32 mac_trx_init(struct mac_ax_adapter *adapter, struct mac_ax_trx_info *info)
 	}
 #endif
 
+#if MAC_FEAT_DBCC
 	ret = is_qta_dbcc(adapter, info->qta_mode, &val8);
 	if (ret != MACSUCCESS) {
 		PLTFM_MSG_ERR("[ERR] is_qta_dbcc %d\n", ret);
@@ -2312,6 +1141,7 @@ u32 mac_trx_init(struct mac_ax_adapter *adapter, struct mac_ax_trx_info *info)
 			return ret;
 		}
 	}
+#endif /* MAC_FEAT_DBCC */
 
 	ret = mac_enable_imr(adapter, MAC_AX_BAND_0, MAC_AX_DMAC_SEL);
 	if (ret != MACSUCCESS) {

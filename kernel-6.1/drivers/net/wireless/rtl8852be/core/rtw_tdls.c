@@ -532,13 +532,17 @@ void rtw_tdls_process_ht_cap(_adapter *padapter, struct sta_info *ptdls_sta, PND
 		/* AMPDU Parameters field */
 
 		/* Get MIN of MAX AMPDU Length Exp */
-		max_AMPDU_len = GET_HT_CAP_ELE_MAX_AMPDU_LEN_EXP(pIE->data);
-		max_AMPDU_len = rtw_min((pmlmeinfo->HT_caps.u.HT_cap_element.AMPDU_para & 0x3), max_AMPDU_len);
-
+		if ((pmlmeinfo->HT_caps.u.HT_cap_element.AMPDU_para & 0x3) > (*(pIE->data + 2) & 0x3))
+			max_AMPDU_len = (*(pIE->data + 2) & 0x3);
+		else
+			max_AMPDU_len = (pmlmeinfo->HT_caps.u.HT_cap_element.AMPDU_para & 0x3);
 		/* Get MAX of MIN MPDU Start Spacing */
-		min_MPDU_spacing = GET_HT_CAP_ELE_MIN_MPDU_S_SPACE(pIE->data);
-		min_MPDU_spacing = rtw_max((pmlmeinfo->HT_caps.u.HT_cap_element.AMPDU_para & 0x1c), min_MPDU_spacing);
+		if ((pmlmeinfo->HT_caps.u.HT_cap_element.AMPDU_para & 0x1c) > (*(pIE->data + 2) & 0x1c))
+			min_MPDU_spacing = (pmlmeinfo->HT_caps.u.HT_cap_element.AMPDU_para & 0x1c);
+		else
+			min_MPDU_spacing = (*(pIE->data + 2) & 0x1c);
 		ptdls_sta->ampdu_priv.rx_ampdu_min_spacing = max_AMPDU_len | min_MPDU_spacing;
+
 
 		/* Check if sta support s Short GI 20M */
 		if ((phtpriv->sgi_20m == _TRUE) && (ptdls_sta->htpriv.ht_cap.cap_info & cpu_to_le16(IEEE80211_HT_CAP_SGI_20)))
@@ -589,7 +593,7 @@ void rtw_tdls_process_ht_cap(_adapter *padapter, struct sta_info *ptdls_sta, PND
 u8 *rtw_tdls_set_ht_cap(_adapter *padapter, u8 *pframe, struct pkt_attrib *pattrib)
 {
 	struct _ADAPTER_LINK *padapter_link = pattrib->adapter_link;
-	rtw_ht_use_default_setting(padapter, padapter_link, _TRUE);
+	rtw_ht_use_default_setting(padapter, padapter_link);
 
 	if (padapter->registrypriv.wifi_spec == 1) {
 		padapter_link->mlmepriv.htpriv.sgi_20m = _FALSE;
@@ -816,9 +820,9 @@ u8 *rtw_tdls_set_vht_cap(_adapter *padapter, u8 *pframe, struct pkt_attrib *patt
 {
 	u32 ie_len = 0;
 
-	rtw_vht_get_real_setting(padapter, pattrib->adapter_link, _TRUE);
+	rtw_vht_get_real_setting(padapter, pattrib->adapter_link);
 
-	ie_len = rtw_build_vht_cap_ie(padapter, pattrib->adapter_link, pframe, _TRUE);
+	ie_len = rtw_build_vht_cap_ie(padapter, pattrib->adapter_link, pframe);
 	pattrib->pktlen += ie_len;
 
 	return pframe + ie_len;
@@ -873,8 +877,9 @@ void rtw_tdls_process_he_cap(_adapter *padapter, struct sta_info *ptdls_sta, PND
 {
 	struct _ADAPTER_LINK *padapter_link = ptdls_sta->padapter_link;
 	struct rtw_phl_stainfo_t *phl_sta = NULL;
-	u8 supp_mcs_len = 4;
+	u8 supp_mcs_len = 0;
 	u8 *ele_start = (&(pIE->data[0]) + 1);
+	enum channel_width omn_chan_width = CHANNEL_WIDTH_MAX;
 
 	if (pIE == NULL)
 		return;
@@ -918,7 +923,8 @@ void rtw_tdls_process_he_cap(_adapter *padapter, struct sta_info *ptdls_sta, PND
 	ele_start += HE_CAP_ELE_MAC_CAP_LEN;
 
 	/* HE PHY Caps */
-	HE_phy_caps_handler(padapter, phl_sta, ele_start, &supp_mcs_len);
+	omn_chan_width = rtw_vht_get_omn_channel_width(ptdls_sta);
+	HE_phy_caps_handler(padapter, phl_sta, ele_start, &supp_mcs_len, omn_chan_width);
 	ele_start += HE_CAP_ELE_PHY_CAP_LEN;
 
 	/* HE Supp MCS Set */
@@ -983,6 +989,13 @@ u8 *rtw_tdls_set_ext_cap(u8 *pframe, struct pkt_attrib *pattrib)
 {
 	return rtw_set_ie(pframe, WLAN_EID_EXT_CAP , sizeof(TDLS_EXT_CAPIE), TDLS_EXT_CAPIE, &(pattrib->pktlen));
 }
+
+#ifdef CONFIG_TDLS_CH_SW
+u8 *rtw_tdls_set_ext_cap_chsw_sup(u8 *pframe, struct pkt_attrib *pattrib)
+{
+	return rtw_set_ie(pframe, WLAN_EID_EXT_CAP , sizeof(TDLS_EXT_CAPIE_CHSW_SUP), TDLS_EXT_CAPIE_CHSW_SUP, &(pattrib->pktlen));
+}
+#endif
 
 u8 *rtw_tdls_set_qos_cap(u8 *pframe, struct pkt_attrib *pattrib)
 {
@@ -3123,7 +3136,12 @@ void rtw_build_tdls_setup_req_ies(_adapter *padapter, struct xmit_frame *pxmitfr
 	if (pattrib->encrypt)
 		pframe = rtw_tdls_set_rsnie(ptxmgmt, pframe, pattrib,  _TRUE, ptdls_sta);
 
-	pframe = rtw_tdls_set_ext_cap(pframe, pattrib);
+#ifdef CONFIG_TDLS_CH_SW
+	if (pregistrypriv->wifi_spec)
+		pframe = rtw_tdls_set_ext_cap_chsw_sup(pframe, pattrib);
+	else
+#endif
+		pframe = rtw_tdls_set_ext_cap(pframe, pattrib);
 
 	if (pattrib->encrypt) {
 		pframe = rtw_tdls_set_ftie(ptxmgmt
@@ -3225,7 +3243,12 @@ void rtw_build_tdls_setup_rsp_ies(_adapter *padapter, struct xmit_frame *pxmitfr
 		pframe = rtw_tdls_set_rsnie(ptxmgmt, pframe, pattrib,  _FALSE, ptdls_sta);
 	}
 
-	pframe = rtw_tdls_set_ext_cap(pframe, pattrib);
+#ifdef CONFIG_TDLS_CH_SW
+	if (pregistrypriv->wifi_spec)
+		pframe = rtw_tdls_set_ext_cap_chsw_sup(pframe, pattrib);
+	else
+#endif
+		pframe = rtw_tdls_set_ext_cap(pframe, pattrib);
 
 	if (pattrib->encrypt) {
 		if (rtw_tdls_is_driver_setup(padapter) == _TRUE)
@@ -3452,7 +3475,12 @@ void rtw_build_tdls_dis_rsp_ies(_adapter *padapter, struct xmit_frame *pxmitfram
 	if (privacy)
 		pframe = rtw_tdls_set_rsnie(ptxmgmt, pframe, pattrib, _TRUE, NULL);
 
-	pframe = rtw_tdls_set_ext_cap(pframe, pattrib);
+#ifdef CONFIG_TDLS_CH_SW
+	if (pregistrypriv->wifi_spec)
+		pframe = rtw_tdls_set_ext_cap_chsw_sup(pframe, pattrib);
+	else
+#endif
+		pframe = rtw_tdls_set_ext_cap(pframe, pattrib);
 
 	if (privacy) {
 		pframe = rtw_tdls_set_ftie(ptxmgmt, pframe, pattrib, NULL, NULL);
@@ -3840,9 +3868,7 @@ void rtw_tdls_teardown_post_hdl(_adapter *padapter, struct sta_info *psta, u8 en
 		}
 	}
 
-	status = rtw_phl_cmd_update_media_status(phl, psta->phl_sta,
-						 psta->phl_sta->mac_addr, false,
-						 PHL_CMD_DIRECTLY, 0);
+	rtw_sta_hal_media_status_rpt_cmd(padapter, psta, false, RTW_CMDF_DIRECTLY);
 
 	/* Free tdls sta info */
 	rtw_free_mld_stainfo(padapter, psta->phl_sta->mld);

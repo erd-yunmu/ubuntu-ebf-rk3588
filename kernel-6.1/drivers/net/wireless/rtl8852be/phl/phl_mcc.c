@@ -340,7 +340,7 @@ void _mcc_up_fw_log_setting(struct phl_info_t *phl, struct phl_mcc_info *minfo)
 	struct phl_mcc_fw_log_info *fw_log_i = &minfo->fw_log_i;
 
 	if (fw_log_i->update) {
-		rtw_hal_en_fw_log(phl->hal, FL_COMP_MCC,
+		rtw_hal_en_fw_log_comp(phl->hal, FL_COMP_MCC,
 					fw_log_i->en_fw_mcc_log);
 		fw_log_i->update = false;
 	}
@@ -2888,25 +2888,29 @@ enum rtw_phl_status _mcc_pkt_offload_for_client(struct phl_info_t *phl, u8 macid
 			macid);
 		goto exit;
 	}
+#ifdef CONFIG_PHL_PKTOFLD
 	if (NOT_USED != phl_pkt_ofld_get_id(phl, macid,
-						PKT_TYPE_NULL_DATA)) {
+						PKT_TYPE_NULL_DATA, 0)) {
 		PHL_TRACE(COMP_PHL_MCC, _PHL_ERR_, "_mcc_pkt_offload_for_client(): macid(%d), we had already offload NULL Pkt\n",
 			macid);
 		status = RTW_PHL_STATUS_SUCCESS;
 		goto exit;
 	}
+#endif
 	_os_mem_cpy(d, &(null_info.a1[0]), &(phl_sta->mac_addr[0]),
 		MAC_ADDRESS_LENGTH);
 	_os_mem_cpy(d,&(null_info.a2[0]), &(phl_sta->wrole->mac_addr[0]),
 		MAC_ADDRESS_LENGTH);
 	_os_mem_cpy(d, &(null_info.a3[0]), &(phl_sta->mac_addr[0]),
 		MAC_ADDRESS_LENGTH);
+#ifdef CONFIG_PHL_PKTOFLD
 	if (RTW_PHL_STATUS_SUCCESS != rtw_phl_pkt_ofld_request(phl, macid,
-						PKT_TYPE_NULL_DATA, &null_token, &null_info, __func__)) {
+						PKT_TYPE_NULL_DATA, &null_token, &null_info, __func__, 0)) {
 		PHL_TRACE(COMP_PHL_MCC, _PHL_ERR_, "_mcc_pkt_offload_for_client(): Pkt offload fail, macid(%d)\n",
 			macid);
 		goto exit;
 	}
+#endif
 	PHL_TRACE(COMP_PHL_MCC, _PHL_ERR_, "_mcc_pkt_offload_for_client(): offload ok, macid(%d), null_token(%d)\n",
 		macid, null_token);
 	status = RTW_PHL_STATUS_SUCCESS;

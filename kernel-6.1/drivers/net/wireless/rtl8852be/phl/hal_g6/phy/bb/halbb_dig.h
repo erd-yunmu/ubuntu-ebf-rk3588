@@ -291,7 +291,6 @@ struct bb_dig_info {
 	bool init_dig_cr_success;
 	enum dig_op_mode 	dig_mode;
 	enum dig_op_mode 	pre_dig_mode;
-	struct bb_dig_cr_info	bb_dig_cr_i;
 	struct agc_gaincode_set max_gaincode;
 	u8			igi_rssi; //rssi_min
 	u8			ib_pbk;
@@ -328,8 +327,34 @@ struct bb_dig_info {
 	struct bb_dig_record_info bb_dig_record_i;
 	u8			rls_rssi_diff_th; /*s(8,1)*/
 	bool dig_dl_en; /*@damping limit function enable*/
+	bool			sr_coexist_en;
+	u8			igi_ofst_sr_coexist; /* igi low offset for SR coexistence */
 #endif
 };
+
+#ifdef HALBB_MCC_SUPPORT
+#if PLATFOM_IS_LITTLE_ENDIAN
+struct halbb_c2h_mr_dm {
+	u8 cur_mr_dm_en: 1;
+	u8 mrdm_err_hdl:4;
+	u8 rsvd0: 3;
+
+	u8 mrdm_switch_reg_cnt;
+	u8 central_ch;
+	u8 sw_mlo_mod;
+};
+#else
+struct halbb_c2h_mr_dm {
+	u8 rsvd0: 3;
+	u8 mrdm_err_hdl:4;
+	u8 cur_mr_dm_en: 1;
+
+	u8 mrdm_switch_reg_cnt;
+	u8 central_ch;
+	u8 sw_mlo_mod;
+};
+#endif
+#endif
 
 struct bb_info;
 /*@--------------------------[Prptotype]-------------------------------------*/
@@ -350,10 +375,11 @@ void halbb_cr_cfg_dig_init(struct bb_info *bb);
 
 void* halbb_get_dig_fa_statistic(struct bb_info *bb);
 void halbb_set_dig_pause_val(struct bb_info *bb, u32 *val_buf, u8 val_len);
-#ifdef HALBB_DIG_MCC_SUPPORT
-void Halbb_init_mccdm(struct bb_info *bb);
+#ifdef HALBB_MCC_SUPPORT
+void halbb_init_mccdm(struct bb_info *bb);
 void halbb_mccdm_switch(struct bb_info *bb);
 u32 halbb_c2h_mccdm_check(struct bb_info *bb, u16 len, u8 *c2h);
+void halbb_mccdm_ctrl(struct bb_info *bb);
 #endif
 u8 halbb_get_lna_idx(struct bb_info *bb, enum rf_path path);
 u8 halbb_get_tia_idx(struct bb_info *bb, enum rf_path path);

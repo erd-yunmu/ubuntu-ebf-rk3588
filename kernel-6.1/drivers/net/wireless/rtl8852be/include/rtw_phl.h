@@ -27,6 +27,9 @@ typedef struct rtw_phl_com_t HAL_DATA_TYPE; /*, *PHAL_DATA_TYPE;*/
 #define GET_PHY_TX_NSS_BY_BAND(_dvobj, _band) ((GET_PHY_CAP(_dvobj, _band))->txss)
 #define GET_PHY_RX_NSS_BY_BAND(_dvobj, _band) ((GET_PHY_CAP(_dvobj, _band))->rxss)
 
+#define GET_TX_PATH_NUM(_dvobj, _band) ((GET_PHY_CAP(_dvobj, _band))->tx_path_num)
+#define GET_RX_PATH_NUM(_dvobj, _band) ((GET_PHY_CAP(_dvobj, _band))->rx_path_num)
+
 #define GET_HAL_RFPATH_NUM(_dvobj) ((GET_PHL_COM(_dvobj))->rf_path_num)
 /* refer to (hal_data->version_id.RFType / registrypriv->rf_path / 8814a from efuse or registrypriv)*/
 #define GET_HAL_RFPATH(_dvobj) ((GET_PHL_COM(_dvobj))->rf_type)
@@ -128,9 +131,7 @@ void rtw_update_phl_sta_edca(struct _ADAPTER *a, struct _ADAPTER_LINK *alink, en
 #if 0
 int rtw_hw_prepare_connect(struct _ADAPTER *a, struct sta_info *sta, u8 *target_addr);
 #endif
-#ifndef CONFIG_AP_CMD_DISPR
-int rtw_hw_start_bss_network(struct _ADAPTER *a);
-#endif
+
 int rtw_hw_connect_remove_sta(struct _ADAPTER *a, struct sta_info *sta);
 int rtw_hw_connect_abort(struct _ADAPTER *a);
 int rtw_hw_connected(struct _ADAPTER *a);
@@ -143,6 +144,11 @@ void rtw_update_roch_chan_def(struct _ADAPTER_LINK *adapter_link,
 				enum band_type band);
 
 void rtw_hw_update_chan_def(_adapter *adapter, struct _ADAPTER_LINK *adapter_link);
+
+u8 rtw_sta_hal_media_status_rpt_cmd(_adapter *a, struct sta_info *sta, bool connected, u8 flag);
+u8 rtw_sta_hal_ra_mask_update_cmd(_adapter *a, struct sta_info *sta, u8 flag);
+
+u8 rtw_link_hal_core_stop_beacon(struct _ADAPTER_LINK *alink, bool stop, u8 flag);
 
 #ifdef RTW_DETECT_HANG
 void rtw_is_hang_check(struct _ADAPTER *a);
@@ -180,36 +186,25 @@ u8 rtw_hw_mcc_chk_inprogress(struct _ADAPTER *a, struct _ADAPTER_LINK *adapter_l
 void rtw_edcca_hal_update(struct dvobj_priv *dvobj);
 
 #if CONFIG_TXPWR_LIMIT
-#define TXPWR_LMT_RS_CCK	0
-#define TXPWR_LMT_RS_OFDM	1
-#define TXPWR_LMT_RS_HT		2
-#define TXPWR_LMT_RS_VHT	3
-#define TXPWR_LMT_RS_HE		4
-#define TXPWR_LMT_RS_NUM	5
-#define TXPWR_LMT_MAX_REGULATION_NUM	32
-
-#define TXPWR_LMT_MAX_BANDWIDTH_NUM	4 /* 20MHz ~ 160MHz */
-
-/* TXBF Capabilities */
-#define TXPWR_LMT_NO_TXBF	0
-#define TXPWR_LMT_TXBF		1
-#define TXPWR_LMT_TXBF_NUM	2
-
-extern const char *const _txpwr_lmt_rs_str[];
-#define txpwr_lmt_rs_str(rs) (((rs) >= TXPWR_LMT_RS_NUM) ? _txpwr_lmt_rs_str[TXPWR_LMT_RS_NUM] : _txpwr_lmt_rs_str[(rs)])
-u16 rtw_txpwr_lmt_rs_to_data_rate(int txpwr_lmt_rs);
-
 enum txpwr_lmt_reg_exc_match {
 	TXPWR_LMT_REG_EXC_MATCH_NONE = 0,
 	TXPWR_LMT_REG_EXC_MATCH_COUNTRY,
 	TXPWR_LMT_REG_EXC_MATCH_DOMAIN,
 };
 
-enum txpwr_lmt_reg_exc_match rtw_txpwr_hal_lmt_reg_exc_search(struct dvobj_priv* dvobj, const char *country, u8 domain, const char **reg_name);
+enum txpwr_lmt_reg_exc_match rtw_txpwr_hal_lmt_reg_exc_search(struct dvobj_priv* dvobj
+	, const char *country, u8 domain, const char **reg_name);
+#if CONFIG_IEEE80211_BAND_6GHZ
+enum txpwr_lmt_reg_exc_match rtw_txpwr_hal_lmt_reg_exc_6g_search(struct dvobj_priv* dvobj
+	, const char *country, u8 domain, const char **reg_name);
+#endif
 bool rtw_txpwr_hal_lmt_reg_search(struct dvobj_priv* dvobj, enum band_type band, const char *name);
 void rtw_txpwr_hal_set_current_lmt_regs_by_name(struct dvobj_priv* dvobj, char *names_of_band[], int names_len_of_band[]);
 void rtw_txpwr_hal_get_current_lmt_regs_name(struct dvobj_priv* dvobj, char *names_of_band[], int names_len_of_band[]);
 void dump_txpwr_lmt(void *sel, _adapter *adapter);
+#ifdef CONFIG_80211AX_HE
+void dump_txpwr_lmt_ru(void *sel, _adapter *adapter);
+#endif
 #endif /* CONFIG_TXPWR_LIMIT */
 
 void dump_txpwr_by_rate(void *sel, _adapter *adapter);
@@ -224,6 +219,9 @@ void rtw_dfs_hal_update_region(struct dvobj_priv *dvobj, u8 band_idx, enum rtw_d
 u8 rtw_dfs_hal_radar_detect_polling_int_ms(struct dvobj_priv *dvobj);
 #endif /* CONFIG_DFS_MASTER */
 
+#define SPF_PHL_RF_019_SAR /* for HALRF PW_LMT_REGU_EXT_PWR mechanism */
+
+bool rtw_txpwr_hal_is_txpwr_limit_needed(struct dvobj_priv *dvobj);
 bool rtw_txpwr_hal_get_pwr_lmt_en(struct dvobj_priv *dvobj);
 struct tx_power_ext_info;
 bool rtw_txpwr_hal_get_ext_info(struct dvobj_priv *dvobj, struct tx_power_ext_info *info);
@@ -231,6 +229,7 @@ void rtw_txpwr_hal_update_pwr(struct dvobj_priv *dvobj, enum phl_band_idx band_i
 
 u8 get_phy_tx_nss(_adapter *adapter, struct _ADAPTER_LINK *adapter_link);
 u8 get_phy_rx_nss(_adapter *adapter, struct _ADAPTER_LINK *adapter_link);
+bool phy_is_txpwr_user_mbm_valid(_adapter *adapter, s16 mbm);
 u8 rtw_backup_and_get_final_ss(_adapter *adapter, struct sta_info *sta, u8 chg_ss);
 void rtw_ctrl_and_backup_assoc_cap_rx_nss(_adapter *adapter, struct sta_info *sta, u8 rx_nss);
 #ifdef CONFIG_DBCC_P2P_BG_LISTEN

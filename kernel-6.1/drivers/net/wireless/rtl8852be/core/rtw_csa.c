@@ -424,6 +424,7 @@ static void rtw_ecsa_update_sta_chan_info(struct _ADAPTER *a,
 {
 	struct dvobj_priv *d = adapter_to_dvobj(a);
 	struct rtw_chset *chset = dvobj_to_chset(d);
+	u8 new_band = new_chan_def.band;
 	u8 new_ch = new_chan_def.chan;
 	u8 new_bw = (u8)new_chan_def.bw;
 	u8 new_offset = (u8)new_chan_def.offset;
@@ -433,7 +434,7 @@ static void rtw_ecsa_update_sta_chan_info(struct _ADAPTER *a,
 	struct link_mlme_priv *pmlmepriv = &alink->mlmepriv;
 	u32 csa_wait_bcn_ms;
 
-	pmlmeext->chandef.band= new_chan_def.band;
+	pmlmeext->chandef.band= new_band;
 	pmlmeext->chandef.chan= new_ch;
 	pmlmeext->chandef.bw = new_bw;
 	pmlmeext->chandef.offset = new_offset;
@@ -451,7 +452,11 @@ static void rtw_ecsa_update_sta_chan_info(struct _ADAPTER *a,
 
 	set_fwstate(&a->mlmepriv, WIFI_CSA_UPDATE_BEACON);
 
-	if (rtw_chset_is_dfs_chbw(chset, new_ch, new_bw, new_offset))
+	#ifdef CONFIG_80211D
+	rtw_alink_csa_update_regulatory(alink, new_band, new_ch);
+	#endif
+
+	if (rtw_chset_is_dfs_bchbw(chset, new_band, new_ch, new_bw, new_offset))
 		csa_wait_bcn_ms = CAC_TIME_MS + 10000;
 	else
 		csa_wait_bcn_ms = WAIT_BCN_TIMES * 2 * 1000;
@@ -773,7 +778,7 @@ void rtw_ecsa_complete(void *priv, struct rtw_wifi_role_t *role)
 		rtw_rfctl_update_op_mode(adapter_to_rfctl(a),
 			parm->ifbmp, 1, parm->excl_ifbmp);
 		rtw_core_ap_start(a, parm);
-		rtw_ap_update_clients_rainfo(a, PHL_CMD_NO_WAIT);
+		rtw_ap_update_clients_rainfo(a, 0);
 		rtw_mfree((u8 *)parm, sizeof(struct createbss_parm));
 	}
 
@@ -805,71 +810,45 @@ static void rtw_ap_send_csa_action_frame(struct _ADAPTER *a, struct _ADAPTER_LIN
 }
 
 /* Get ch/bw/offset of CSA from adapter, and check these parameters is valid or not */
-static bool rtw_sta_get_ecsa_setting(struct _ADAPTER *a, s16 *req_ch, u8 *req_bw, u8 *req_offset)
+static bool rtw_sta_get_ecsa_setting(struct _ADAPTER *a)
 {
 	struct rtw_chset *chset = adapter_to_chset(a);
 	struct core_ecsa_info *ecsa_info = &(a->ecsa_info);
 	struct rtw_phl_ecsa_param *ecsa_param = &(ecsa_info->phl_ecsa_param);
-	u8 ifbmp_m = rtw_mi_get_ap_mesh_ifbmp(a);
-	u8 band = ecsa_param->new_chan_def.band;
+	struct rtw_chan_def chan_def;
+	u8 csa_band = ecsa_param->new_chan_def.band;
 	u8 csa_chan = ecsa_param->new_chan_def.chan;
 	u8 csa_offset = ecsa_param->new_chan_def.offset;
-	bool valid = _TRUE;
+	u8 csa_op_class = ecsa_param->op_class;
+	bool get_bw_offset_from_opclass;
+	u8 req_band, req_ch, req_bw, req_offset;
+	u8 i, r_offset[2], r_offset_num;
+	bool valid_offset = false;
 
-	*req_ch = REQ_CH_NONE;
-	*req_bw = CHANNEL_WIDTH_20;
-	*req_offset = CHAN_OFFSET_NO_EXT;
+	req_band = csa_band;
+	req_ch = csa_chan;
+	req_bw = CHANNEL_WIDTH_20;
+	req_offset = CHAN_OFFSET_NO_EXT;
 
-	if (rtw_chset_search_ch(chset, csa_chan) >= 0
-		&& !rtw_chset_is_ch_non_ocp(chset, csa_chan)
-	) {
-		/* CSA channel available and valid */
-		*req_ch = csa_chan;
-		RTW_INFO("CSA : "FUNC_ADPT_FMT" valid CSA ch%u\n", FUNC_ADPT_ARG(a), csa_chan);
-	} else if (ifbmp_m) {
-		/* no available or valid CSA channel, having AP/MESH ifaces */
-		*req_ch = REQ_CH_NONE;
-		valid = _FALSE;
-		RTW_INFO("CSA : "FUNC_ADPT_FMT" ch sel by AP/MESH ifaces\n", FUNC_ADPT_ARG(a));
-		goto exit;
-	} else {
-		/* no available or valid CSA channel and no AP/MESH ifaces */
-		/* TODO : DFS slave may need to switch channel as soon as possible before disconnect */
-		#if 0
-		if (!is_supported_24g(adapter_to_regsty(a)->band_type))
-			*req_ch = 36;
-		else
-			*req_ch = 1;
-		#endif
-		valid = _FALSE;
-		RTW_INFO("CSA : "FUNC_ADPT_FMT" switch to ch %d, then disconnect with AP\n",
-			FUNC_ADPT_ARG(a), *req_ch);
-		goto exit;
+	if (rtw_chset_search_bch(chset, csa_band, csa_chan) < 0
+		|| rtw_chset_is_bch_non_ocp(chset, csa_band, csa_chan)) {
+		RTW_INFO("CSA : channel %u is not supported, so do not switching channel\n", csa_chan);
+		return false;
 	}
 
-	if (ecsa_param->op_class != 0) {
-		/* Get chan_def by operating class */
-		rtw_phl_get_chandef_from_operating_class(*req_ch,
-			ecsa_param->op_class, &ecsa_param->new_chan_def);
+	get_bw_offset_from_opclass = rtw_phl_get_chandef_from_operating_class(req_ch,
+			csa_op_class, &chan_def);
 
-		*req_bw = ecsa_param->new_chan_def.bw;
-		*req_offset = ecsa_param->new_chan_def.offset;
-
-		/* Get correct offset and check ch/bw/offset is valid or not */
-		if (*req_offset == CHAN_OFFSET_NO_DEF) {
-			if (!rtw_get_offset_by_chbw(*req_ch, *req_bw, req_offset)) {
-				*req_bw = CHANNEL_WIDTH_20;
-				*req_offset = CHAN_OFFSET_NO_EXT;
-			}
-			ecsa_param->new_chan_def.bw = *req_bw;
-			ecsa_param->new_chan_def.offset = *req_offset;
-		}
+	if (get_bw_offset_from_opclass) {
+		req_band = chan_def.band;
+		req_bw = chan_def.bw;
+		req_offset = chan_def.offset;
 	} else {
 		/* Transform channel_width to bandwidth 20/40/80M */
 		switch (ecsa_info->channel_width) {
 		case CH_WIDTH_80_160M:
-			*req_bw = CHANNEL_WIDTH_80;
-			*req_offset = csa_offset;
+			req_bw = CHANNEL_WIDTH_80;
+			req_offset = csa_offset;
 			break;
 		case CH_WIDTH_20_40M:
 			/*
@@ -877,40 +856,55 @@ static bool rtw_sta_get_ecsa_setting(struct _ADAPTER *a, s16 *req_ch, u8 *req_bw
 			* if offset is CHAN_OFFSET_NO_EXT and bandwidth is 40MHz,
 			* so force its bandwidth to 20MHz
 			*/
-			if ((band == BAND_ON_24G && *req_ch >= 5 && *req_ch <=9) &&
+			if ((csa_band == BAND_ON_24G && req_ch >= 5 && req_ch <=9) &&
 			   csa_offset == CHAN_OFFSET_NO_EXT)
-				*req_bw = CHANNEL_WIDTH_20;
+				req_bw = CHANNEL_WIDTH_20;
 			else
-				*req_bw = CHANNEL_WIDTH_40;
-			*req_offset = csa_offset;
+				req_bw = CHANNEL_WIDTH_40;
+			req_offset = csa_offset;
 			break;
 		default:
-			*req_bw = CHANNEL_WIDTH_20;
-			*req_offset = CHAN_OFFSET_NO_EXT;
+			req_bw = CHANNEL_WIDTH_20;
+			req_offset = CHAN_OFFSET_NO_EXT;
 			break;
 		}
+	}
 
-		/* Get correct offset and check ch/bw/offset is valid or not */
-		if (!rtw_get_offset_by_chbw(*req_ch, *req_bw, req_offset)) {
-			*req_bw = CHANNEL_WIDTH_20;
-			*req_offset = CHAN_OFFSET_NO_EXT;
+	/* Get correct offset and check ch/bw/offset is valid or not */
+	if (req_bw > CHANNEL_WIDTH_20 &&
+	  (req_offset == CHAN_OFFSET_NO_EXT || req_offset == CHAN_OFFSET_NO_DEF)) {
+		if (rtw_get_offsets_by_bchbw(req_band, req_ch, req_bw, r_offset, &r_offset_num)) {
+			for (i = 0; i < r_offset_num; i++) {
+				req_offset = r_offset[i];
+				/* choose first valid offset */
+				if (rtw_chset_is_bchbw_valid(chset, req_band, req_ch, req_bw, req_offset, 0, 0)) {
+					valid_offset = true;
+					break;
+				}
+			}
 		}
 
-		/* Update result to ecsa_param */
-		ecsa_param->new_chan_def.chan = *req_ch;
-		ecsa_param->new_chan_def.bw = *req_bw;
-		ecsa_param->new_chan_def.offset = *req_offset;
+		if (!valid_offset) {
+			req_bw = CHANNEL_WIDTH_20;
+			req_offset = CHAN_OFFSET_NO_EXT;
+		}
 	}
 
+	ecsa_param->new_chan_def.band = req_band;
+	ecsa_param->new_chan_def.chan = req_ch;
+	ecsa_param->new_chan_def.bw = req_bw;
+	ecsa_param->new_chan_def.offset = req_offset;
+
+	/* bw/offset is limited by SW capability */
 	if (rtw_adjust_bchbw(a, ecsa_param->new_chan_def.band,
-		   ecsa_param->new_chan_def.chan, (u8 *)&ecsa_param->new_chan_def.bw,
-		    (u8 *)&ecsa_param->new_chan_def.offset)) {
-			RTW_INFO("CSA : "FUNC_ADPT_FMT" limit by cap bw(%u)to(%u) \n",
-				 FUNC_ADPT_ARG(a), *req_bw, ecsa_param->new_chan_def.bw);
+		ecsa_param->new_chan_def.chan,
+		(u8 *)&ecsa_param->new_chan_def.bw,
+		(u8 *)&ecsa_param->new_chan_def.offset)) {
+			RTW_INFO("CSA : "FUNC_ADPT_FMT" limit by cap bw (%u) to (%u)\n",
+				FUNC_ADPT_ARG(a), req_bw, ecsa_param->new_chan_def.bw);
 	}
 
-exit:
-	return valid;
+	return true;
 }
 
 static void rtw_sta_ecsa_invalid_hdl(struct _ADAPTER *a)
@@ -928,19 +922,11 @@ static void rtw_sta_ecsa_invalid_hdl(struct _ADAPTER *a)
 	set_fwstate(&a->mlmepriv,  WIFI_OP_CH_SWITCHING);
 	issue_deauth(a, get_bssid(&a->mlmepriv), WLAN_REASON_DEAUTH_LEAVING);
 
-	/* Decide whether enable DFS slave radar detection or not */
-	#if CONFIG_DFS && CONFIG_IEEE80211_BAND_5GHZ
-	rtw_dfs_rd_en_dec_on_mlme_act(a, GET_PRIMARY_LINK(a), MLME_OPCH_SWITCH, ifbmp_s);
-	#endif
-
 	/* TODO : DFS slave may need to switch channel as soon as possible before disconnect */
 
 	/* This context can't I/O, so use RTW_CMDF_DIRECTLY */
 	rtw_disassoc_cmd(a, 0, RTW_CMDF_DIRECTLY);
-	rtw_indicate_disconnect(a, 0, _FALSE);
-	#ifndef CONFIG_STA_CMD_DISPR
-	rtw_free_assoc_resources(a, _TRUE);
-	#endif
+	rtw_indicate_disconnect(a, 0, _TRUE);
 	rtw_free_network_queue(a, _TRUE);
 	rtw_free_mld_network_queue(a, _TRUE);
 	RTW_INFO("CSA : "FUNC_ADPT_FMT" disconnect with AP\n", FUNC_ADPT_ARG(a));
@@ -950,6 +936,8 @@ static void rtw_sta_ecsa_invalid_hdl(struct _ADAPTER *a)
 	pmlmeinfo->wifi_reason_code = WLAN_REASON_DEAUTH_LEAVING;
 
 	rtw_mi_os_xmit_schedule(a);
+
+	reset_ecsa_param(a);
 }
 
 static enum ecsa_mr_case rtw_ecsa_mr_check(struct _ADAPTER *execute_iface)
@@ -1094,8 +1082,6 @@ bool rtw_trigger_phl_ecsa_start(struct _ADAPTER *trigger_iface,
 	struct rtw_phl_ecsa_param *ecsa_param = &(ecsa_info->phl_ecsa_param);
 	struct rtw_chan_def n_chdef;
 	enum ecsa_mr_case mr_case;
-	s16 req_ch;
-	u8 req_bw, req_offset;
 	u8 is_vht = alink->mlmepriv.vhtpriv.vht_option;
 
 	switch (trigger_type) {
@@ -1114,10 +1100,10 @@ bool rtw_trigger_phl_ecsa_start(struct _ADAPTER *trigger_iface,
 		break;
 
 	case CSA_STA_RX_CSA_IE:
-		if (!rtw_sta_get_ecsa_setting(execute_iface, &req_ch, &req_bw, &req_offset)) {
+		if (!rtw_sta_get_ecsa_setting(execute_iface)) {
 			/* we should handle error case by core layer self */
 			rtw_sta_ecsa_invalid_hdl(execute_iface);
-			goto err_hdl;
+			return false;
 		}
 
 		mr_case = rtw_ecsa_mr_check(execute_iface);

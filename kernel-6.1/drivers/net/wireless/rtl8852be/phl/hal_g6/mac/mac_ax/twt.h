@@ -37,7 +37,9 @@
  * @return Please Place Description here.
  * @retval u32
  */
+#if MAC_FEAT_TWT_STA || MAC_FEAT_TWTAP
 u32 twt_info_init(struct mac_ax_adapter *adapter);
+#endif
 /**
  * @}
  * @}
@@ -57,7 +59,9 @@ u32 twt_info_init(struct mac_ax_adapter *adapter);
  * @return Please Place Description here.
  * @retval u32
  */
+#if MAC_FEAT_TWT_STA || MAC_FEAT_TWTAP
 u32 twt_info_exit(struct mac_ax_adapter *adapter);
+#endif
 /**
  * @}
  * @}
@@ -78,8 +82,10 @@ u32 twt_info_exit(struct mac_ax_adapter *adapter);
  * @return Please Place Description here.
  * @retval u32
  */
+#if MAC_FEAT_TWT_STA || MAC_FEAT_TWTAP
 u32 mac_twt_info_upd_h2c(struct mac_ax_adapter *adapter,
 			 struct mac_ax_twt_para *info);
+#endif
 /**
  * @}
  * @}
@@ -100,8 +106,10 @@ u32 mac_twt_info_upd_h2c(struct mac_ax_adapter *adapter,
  * @return Please Place Description here.
  * @retval u32
  */
+#if MAC_FEAT_TWT_STA || MAC_FEAT_TWTAP
 u32 mac_twt_act_h2c(struct mac_ax_adapter *adapter,
 		    struct mac_ax_twtact_para *info);
+#endif
 /**
  * @}
  * @}
@@ -122,8 +130,10 @@ u32 mac_twt_act_h2c(struct mac_ax_adapter *adapter,
  * @return Please Place Description here.
  * @retval u32
  */
+#if MAC_FEAT_TWTAP
 u32 mac_twt_staanno_h2c(struct mac_ax_adapter *adapter,
 			struct mac_ax_twtanno_para *info);
+#endif
 /**
  * @}
  * @}
@@ -145,8 +155,10 @@ u32 mac_twt_staanno_h2c(struct mac_ax_adapter *adapter,
  * @return Please Place Description here.
  * @retval void
  */
+#if MAC_FEAT_TWTAP
 void mac_twt_wait_anno(struct mac_ax_adapter *adapter,
 		       u8 *c2h_content, u8 *upd_addr);
+#endif
 /**
  * @}
  * @}

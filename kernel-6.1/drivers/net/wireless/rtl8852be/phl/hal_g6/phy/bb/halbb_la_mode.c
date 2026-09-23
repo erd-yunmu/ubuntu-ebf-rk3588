@@ -225,51 +225,93 @@ bool halbb_la_mac_cfg_buf(struct bb_info *bb, enum la_buff_mode_t mode)
 	u32 addr_start = 0;
 	u32 addr_end = 0;
 	u32 buf_size_tmp = 0;
+	u8 buf_sel = 0;
+
+	#ifdef HALBB_COMPILE_BE_SERIES
+	if (mode == LA_BUFF_DEFAULT) {
+		rtw_hal_mac_lamode_query_buf (bb->hal_com, &buf_sel);
+		BB_TRACE("[%s] buf_sel : %d\n", __func__, buf_sel);
+	}
+	#endif
 
 	switch (bb->ic_type) {
 	case BB_RTL8852A:
-		if (mode == LA_BUFF_256K)
+		if (mode == LA_BUFF_256K || mode == LA_BUFF_DEFAULT){
+			if(mode == LA_BUFF_DEFAULT)
+				la->la_mac_cfg_i.mac_la_buf_sel = LA_BUFF_256K;
 			buf->buffer_size = 0x40000; /*2^18=(2^8)*(2^10)=256K Byte*/
+		}
 		else if(mode == LA_BUFF_192K)
 			buf->buffer_size = 0x30000;
 		else
 			buf->buffer_size = 0;
 		break;
 	case BB_RTL8852B:
-		if (mode == LA_BUFF_128K && bb->hal_com->cv == CAV)
-			buf->buffer_size = 0x20000; /*2^17=(2^7)*(2^10)=128K Byte*/
-		else if (mode == LA_BUFF_64K && bb->hal_com->cv >= CBV)
-			buf->buffer_size = 0x10000; /*2^16=(2^6)*(2^10)=64K Byte*/
-		else
-			buf->buffer_size = 0;
+		if ((bb->ic_sub_type == BB_IC_SUB_TYPE_8852B_8852BT) || (bb->ic_sub_type == BB_IC_SUB_TYPE_8852B_8852BPT)) {
+			if (mode == LA_BUFF_256K || mode == LA_BUFF_DEFAULT){
+				if (mode == LA_BUFF_DEFAULT)
+					la->la_mac_cfg_i.mac_la_buf_sel = LA_BUFF_256K;
+				buf->buffer_size = 0x40000; /*2^18=(2^8)*(2^10)=256K Byte*/
+			} else if (mode == LA_BUFF_128K)
+				buf->buffer_size = 0x20000; /*2^17=(2^7)*(2^10)=128K Byte*/
+			else
+				buf->buffer_size = 0;
+		} else {
+			if ((mode == LA_BUFF_128K || mode == LA_BUFF_DEFAULT) && bb->hal_com->cv == CAV){
+				if(mode == LA_BUFF_DEFAULT)
+					la->la_mac_cfg_i.mac_la_buf_sel = LA_BUFF_128K;
+				buf->buffer_size = 0x20000; /*2^17=(2^7)*(2^10)=128K Byte*/
+			} else if (mode == LA_BUFF_64K && bb->hal_com->cv >= CBV)
+				buf->buffer_size = 0x10000; /*2^16=(2^6)*(2^10)=64K Byte*/
+			else
+				buf->buffer_size = 0;
+		}
 		break;
 	case BB_RTL8852C:
-		if (mode == LA_BUFF_256K)
+		if (mode == LA_BUFF_256K || mode == LA_BUFF_DEFAULT){
+			if(mode == LA_BUFF_DEFAULT)
+				la->la_mac_cfg_i.mac_la_buf_sel = LA_BUFF_256K;
 			buf->buffer_size = 0x40000; /*2^18=(2^8)*(2^10)=256K Byte*/
+		}
+
 		else if (mode == LA_BUFF_128K)
 			buf->buffer_size = 0x20000; /*2^17=(2^7)*(2^10)=128K Byte*/
 		else
 			buf->buffer_size = 0;
 		break;
 	case BB_RTL8192XB:
-		if (mode == LA_BUFF_256K)
+		if (mode == LA_BUFF_256K || mode == LA_BUFF_DEFAULT){
+			if(mode == LA_BUFF_DEFAULT)
+				la->la_mac_cfg_i.mac_la_buf_sel = LA_BUFF_256K;
 			buf->buffer_size = 0x40000; /*2^18=(2^8)*(2^10)=256K Byte*/
+		}
 		else
 			buf->buffer_size = 0;
 		break;
 	case BB_RTL8851B:
-		if (mode == LA_BUFF_64K)
+		if (mode == LA_BUFF_64K || mode == LA_BUFF_DEFAULT){
+			if(mode == LA_BUFF_DEFAULT)
+				la->la_mac_cfg_i.mac_la_buf_sel = LA_BUFF_64K;
 			buf->buffer_size = 0x10000; /*2^16=(2^6)*(2^10)=64K Byte*/
+		}
 		else
 			buf->buffer_size = 0;
 		break;
+	#ifdef HALBB_COMPILE_BE_SERIES
 	case BB_RLE1115:
 	case BB_RTL8922A:
-		if (mode == LA_BUFF_256K)
+	case BB_RTL8934A:
+	case BB_RTL8952A:
+		if (mode == LA_BUFF_DEFAULT) {
+			la->la_mac_cfg_i.mac_la_buf_sel = buf_sel;
+			buf->buffer_size = (buf_sel+1)<<16;
+		} else if (mode == LA_BUFF_256K){
 			buf->buffer_size = 0x40000; /*2^18=(2^8)*(2^10)=256K Byte*/
+		}
 		else
 			buf->buffer_size = 0;
 		break;
+	#endif
 	default:
 		BB_WARNING("[%s] IC\n", __func__);
 		buf->buffer_size = 0;
@@ -280,7 +322,6 @@ bool halbb_la_mac_cfg_buf(struct bb_info *bb, enum la_buff_mode_t mode)
 		BB_WARNING("[%s] Buf=0\n", __func__);
 		return false;
 	}
-
 	rtw_hal_mac_lamode_cfg_buf(bb->hal_com, cfg->mac_la_buf_sel, &addr_start, &addr_end);
 
 	buf->start_pos = addr_start;
@@ -298,51 +339,6 @@ bool halbb_la_mac_cfg_buf(struct bb_info *bb, enum la_buff_mode_t mode)
 		 buf->start_pos, buf->end_pos, (buf->buffer_size >> 10),
 		 buf->smp_number_max);
 	return true;
-}
-
-void halbb_la_mac_cfg_buf_default(struct bb_info *bb)
-{
-	struct bb_la_mode_info *la = &bb->bb_cmn_hooker->bb_la_mode_i;
-	struct la_string_info *buf = &la->la_string_i;
-	enum la_buff_mode_t mode = LA_BUFF_256K;
-
-	switch (bb->ic_type) {
-	case BB_RTL8852A:
-		mode = LA_BUFF_256K;
-		buf->buffer_size = 0x40000; /*2^18=(2^8)*(2^10)=256K Byte*/
-		break;
-	case BB_RTL8852B:
-		if (bb->hal_com->cv == CAV) {
-			mode = LA_BUFF_128K;
-			buf->buffer_size = 0x20000; /*2^17=(2^7)*(2^10)=128K Byte*/
-		} else {
-			mode = LA_BUFF_64K;
-			buf->buffer_size = 0x10000; /*2^16=(2^6)*(2^10)=64K Byte*/
-		}
-		break;
-	case BB_RTL8852C:
-		mode = LA_BUFF_256K;
-		buf->buffer_size = 0x40000; /*2^18=(2^8)*(2^10)=256K Byte*/
-		break;
-	case BB_RTL8192XB:
-		mode = LA_BUFF_256K;
-		buf->buffer_size = 0x40000; /*2^18=(2^8)*(2^10)=256K Byte*/
-		break;
-	case BB_RTL8851B:
-		mode = LA_BUFF_64K;
-		buf->buffer_size = 0x10000; /*2^16=(2^6)*(2^10)=64K Byte*/
-		break;
-	case BB_RLE1115:
-		mode = LA_BUFF_256K;
-		buf->buffer_size = 0x40000; /*2^18=(2^8)*(2^10)=256K Byte*/
-		break;
-	default:
-		BB_WARNING("[%s]\n", __func__);
-	}
-	la->la_mac_cfg_i.mac_la_buf_sel = mode;
-	//BB_TRACE("Auto Init MAC BUF CR, mode=(%d)K\n", 64 * (mode + 1));
-
-	buf->smp_number_max = buf->buffer_size >> 3;
 }
 
 void halbb_la_mac_cfg_cmn(struct bb_info *bb)
@@ -598,14 +594,14 @@ void halbb_la_bb_set_cmn_reset(struct bb_info *bb)
 	u32 trig_time_cca = 0;
 
 	/*Trig Time*/
-	if (bw < CHANNEL_WIDTH_MAX) {
+	if (bw <= CHANNEL_WIDTH_160) {
 		trig_time_cca = ((la->la_string_i.smp_number_max >> (bw + 1)) / 10)
-				- (2 << (2 - bw)) - (2 - bw);
+				- (2 << (u32)(CHANNEL_WIDTH_160 - bw)) - (u32)(CHANNEL_WIDTH_160 - bw);
 		BB_TRACE("bw=%dM, default trig_time_cca =%d\n", 20 << bw, trig_time_cca);
 
 		la->la_mac_cfg_i.la_trigger_time = trig_time_cca - 10;
 	} else {
-		la->la_mac_cfg_i.la_trigger_time = 390;
+		la->la_mac_cfg_i.la_trigger_time = 195;
 	}
 
 	la->la_trigger_cnt = 0;
@@ -919,7 +915,7 @@ void halbb_la_main(struct bb_info *bb)
 	u8 mac_rpt_state = LA_HW_IDLE;
 	u32 mac_trig_fail;
 	u8 tmp_u1b = 0;
-	u8 i = 0;
+	u8 i = 0, la_hw_finish_cnt = 0;
 	u16 finish_ofst = 0;
 	bool round_up = 0;
 	bool loss_data;
@@ -962,8 +958,9 @@ void halbb_la_main(struct bb_info *bb)
 				BB_TRACE("[Restart]\n");
 				break;
 			} else if (mac_rpt_state == LA_HW_FINISH_STOP) {
-				BB_TRACE("[LA Query OK]\n");
-				break;
+				BB_TRACE("[LA Query OK] cnt:%d\n", ++la_hw_finish_cnt);
+				if (la_hw_finish_cnt >= 2)
+					break;
 			} else if (mac_rpt_state == LA_HW_START) {
 				halbb_delay_ms(bb, 100);
 				i++;
@@ -1006,6 +1003,8 @@ void halbb_la_main(struct bb_info *bb)
 void halbb_la_re_trig_watchdog(struct bb_info *bb)
 {
 	struct bb_la_mode_info *la = &bb->bb_cmn_hooker->bb_la_mode_i;
+
+	halbb_show_cr_cnt(bb, BB_WD_LA_MODE);
 
 	if (la->la_mode_state != LA_STATE_WAIT_RESTART) {
 		return;
@@ -1093,7 +1092,7 @@ void halbb_la_init(struct bb_info *bb)
 	la->la_print_i.print_buff_opt = 0;
 	halbb_la_reset(bb);
 	halbb_mem_set(bb, la->la_ptrn_chk_i, 0, sizeof(struct la_ptrn_chk_info) * LA_CHK_PTRN_NUM);
-	halbb_la_mac_cfg_buf_default(bb);
+	la->la_mac_cfg_i.mac_alloc_success = halbb_la_mac_cfg_buf(bb, LA_BUFF_DEFAULT);
 }
 
 void halbb_cr_cfg_la_init(struct bb_info *bb)
@@ -1824,7 +1823,7 @@ void halbb_cr_cfg_la_init(struct bb_info *bb)
 		cr->dma_hdr_sel_59 = LA_HDR_SEL_59_BE1;
 		cr->dma_hdr_sel_59_m = LA_HDR_SEL_59_BE1_M;
 		cr->dma_hdr_sel_58 = LA_HDR_SEL_58_BE1;
-		cr->dma_hdr_sel_58_m = LA_HDR_SEL_57_BE1_M;
+		cr->dma_hdr_sel_58_m = LA_HDR_SEL_58_BE1_M;
 		cr->dma_hdr_sel_57 = LA_HDR_SEL_57_BE1;
 		cr->dma_hdr_sel_57_m = LA_HDR_SEL_57_BE1_M;
 		cr->dma_hdr_sel_56 = LA_HDR_SEL_56_BE1;
@@ -1874,9 +1873,10 @@ void halbb_cr_cfg_la_init(struct bb_info *bb)
 void halbb_la_cr_dump(struct bb_info *bb)
 {
 	struct bb_la_cr_info *cr = &bb->bb_cmn_hooker->bb_la_mode_i.bb_la_cr_i;
+#if 0
 	u32 cr_table[18];
 	u8 cr_len = sizeof(cr_table) / sizeof(u32);
-	struct bb_dbg_cr_info *cr_dbg_prt = &bb->bb_dbg_i.bb_dbg_cr_i;
+	struct bb_dbg_cr_info *cr_dbg_prt = &bb->bb_cmn_hooker->bb_dbg_cr_i;
 
 	BB_TRACE("[%s]\n", __func__);
 
@@ -1902,6 +1902,10 @@ void halbb_la_cr_dump(struct bb_info *bb)
 	cr_table[17] = cr->la_adc_320up;
 
 	halbb_cr_table_dump(bb, cr_table, cr_len);
+#else
+	BB_TRACE("[%s]\n", __func__);
+	halbb_cr_struc_dump(bb, (u32 *)cr, (sizeof(struct bb_la_cr_info) >> 2));
+#endif
 }
 
 void halbb_la_buffer_print(struct bb_info *bb, char input[][16], u32 *_used,
@@ -1945,8 +1949,13 @@ void halbb_la_buffer_print(struct bb_info *bb, char input[][16], u32 *_used,
 		BB_DBG_CNSL2(print->print_buff_opt, *_out_len, *_used, output + *_used, *_out_len - *_used,
 			     "dbg_port_ext=0x%x, base_n_ext=0x%d\n",
 			     la->la_dbg_port_ext, dma->dma_dbgport_ext_base_n);
-
+	} else {
+		BB_DBG_CNSL2(print->print_buff_opt, *_out_len, *_used, output + *_used, *_out_len - *_used,
+			     "dbg_port_ext=0x0, base_n_ext=0x0\n");
 	}
+#else
+	BB_DBG_CNSL2(print->print_buff_opt, *_out_len, *_used, output + *_used, *_out_len - *_used,
+			     "dbg_port_ext=0x0, base_n_ext=0x0\n");
 #endif
 	BB_DBG_CNSL2(print->print_buff_opt, *_out_len, *_used, output + *_used, *_out_len - *_used,
 		     "hdr_sel {B63:%d} {B62:%d} {B61:%d} {B60:%d}\n",
@@ -1959,7 +1968,13 @@ void halbb_la_buffer_print(struct bb_info *bb, char input[][16], u32 *_used,
 				     "hdr_sel {B59:%d} {B58:%d} {B57:%d} {B56:%d}\n",
 				     dma->dma_hdr_sel_59, dma->dma_hdr_sel_58,
 				     dma->dma_hdr_sel_57, dma->dma_hdr_sel_56);
+		} else {
+			BB_DBG_CNSL2(print->print_buff_opt, *_out_len, *_used, output + *_used, *_out_len - *_used,
+				     "hdr_sel {B59:0} {B58:0} {B57:0} {B56:0}\n");
 		}
+#else
+	BB_DBG_CNSL2(print->print_buff_opt, *_out_len, *_used, output + *_used, *_out_len - *_used,
+				     "hdr_sel {B59:0} {B58:0} {B57:0} {B56:0}\n");
 #endif
 
 	BB_DBG_CNSL2(print->print_buff_opt, *_out_len, *_used, output + *_used, *_out_len - *_used,
@@ -2216,6 +2231,9 @@ void halbb_la_cmd_bb_cmn(struct bb_info *bb, char input[][16], u32 *_used,
 		}
 		return;
 	}
+#else
+	if (_os_strcmp(input[2], "gen2") == 0)
+		return;
 #endif
 
 	HALBB_SCAN(input[2], DCMD_DECIMAL, &val[0]);
@@ -2239,33 +2257,36 @@ void halbb_la_cmd_bb_dma(struct bb_info *bb, char input[][16], u32 *_used,
 	u32 val[10] = {0};
 
 #ifdef HALBB_COMPILE_LA_MODE_GEN2
-		if (_os_strcmp(input[2], "gen2") == 0 &&
-		    (bb->ic_type & BB_IC_LA_MODE_GEN2)) {
-			if (_os_strcmp(input[3], "base_n_ext") == 0) {
-				HALBB_SCAN(input[4], DCMD_DECIMAL, &val[0]);
-				dma->dma_dbgport_ext_base_n = (u8)val[0];
-				BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-					    "base_n_ext {N:%d}\n",
-					    dma->dma_dbgport_ext_base_n);
-			} else if (_os_strcmp(input[3], "hdr_sel_2") == 0) {
-				HALBB_SCAN(input[4], DCMD_DECIMAL, &val[0]);
-				HALBB_SCAN(input[5], DCMD_DECIMAL, &val[1]);
-				HALBB_SCAN(input[6], DCMD_DECIMAL, &val[2]);
-				HALBB_SCAN(input[7], DCMD_DECIMAL, &val[3]);
-				dma->dma_hdr_sel_59 = (enum la_hdr_sel_t)val[0];
-				dma->dma_hdr_sel_58 = (enum la_hdr_sel_t)val[1];
-				dma->dma_hdr_sel_57 = (enum la_hdr_sel_t)val[2];
-				dma->dma_hdr_sel_56 = (enum la_hdr_sel_t)val[3];
-				BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-					    "hdr_sel_2 {B59:%d} {B58:%d} {B57:%d} {B56:%d}\n",
-					    dma->dma_hdr_sel_59, dma->dma_hdr_sel_58,
-					    dma->dma_hdr_sel_57, dma->dma_hdr_sel_56);
-			} else {
-				BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
-				    "Err\n");
-			}
-			return;
+	if (_os_strcmp(input[2], "gen2") == 0 &&
+		(bb->ic_type & BB_IC_LA_MODE_GEN2)) {
+		if (_os_strcmp(input[3], "base_n_ext") == 0) {
+			HALBB_SCAN(input[4], DCMD_DECIMAL, &val[0]);
+			dma->dma_dbgport_ext_base_n = (u8)val[0];
+			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+					"base_n_ext {N:%d}\n",
+					dma->dma_dbgport_ext_base_n);
+		} else if (_os_strcmp(input[3], "hdr_sel_2") == 0) {
+			HALBB_SCAN(input[4], DCMD_DECIMAL, &val[0]);
+			HALBB_SCAN(input[5], DCMD_DECIMAL, &val[1]);
+			HALBB_SCAN(input[6], DCMD_DECIMAL, &val[2]);
+			HALBB_SCAN(input[7], DCMD_DECIMAL, &val[3]);
+			dma->dma_hdr_sel_59 = (enum la_hdr_sel_t)val[0];
+			dma->dma_hdr_sel_58 = (enum la_hdr_sel_t)val[1];
+			dma->dma_hdr_sel_57 = (enum la_hdr_sel_t)val[2];
+			dma->dma_hdr_sel_56 = (enum la_hdr_sel_t)val[3];
+			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+					"hdr_sel_2 {B59:%d} {B58:%d} {B57:%d} {B56:%d}\n",
+					dma->dma_hdr_sel_59, dma->dma_hdr_sel_58,
+					dma->dma_hdr_sel_57, dma->dma_hdr_sel_56);
+		} else {
+			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+				"Err\n");
 		}
+		return;
+	}
+#else
+	if (_os_strcmp(input[2], "gen2") == 0)
+		return;
 #endif
 
 	HALBB_SCAN(input[2], DCMD_DECIMAL, &val[0]);
@@ -2354,9 +2375,14 @@ void halbb_la_cmd_bb_trig(struct bb_info *bb, char input[][16], u32 *_used,
 		} else {
 			BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "Err\n");
+			return;
 		}
+		adv->adv_trig_en = true;
 		return;
 	}
+#else
+	if (_os_strcmp(input[2], "gen2") == 0)
+		return;
 #endif
 
 	HALBB_SCAN(input[2], DCMD_HEX, &val[0]);
@@ -2440,12 +2466,16 @@ void halbb_la_cmd_bb_re_trig(struct bb_info *bb, char input[][16], u32 *_used,
 		}
 		return;
 	}
+#else
+	if (_os_strcmp(input[2], "gen2") == 0)
+		return;
 #endif
 
 	HALBB_SCAN(input[2], DCMD_DECIMAL, &val[0]);
 	HALBB_SCAN(input[3], DCMD_DECIMAL, &val[1]);
 	HALBB_SCAN(input[4], DCMD_DECIMAL, &val[2]);
 	HALBB_SCAN(input[5], DCMD_DECIMAL, &val[3]);
+	HALBB_SCAN(input[6], DCMD_DECIMAL, &val[4]);
 
 	la->la_mac_cfg_i.mac_la_restart_en = (u8)val[0];
 	re->re_trig_en = (bool)val[0];
@@ -2518,8 +2548,12 @@ void halbb_la_cmd_rtl_test(struct bb_info *bb, char input[][16], u32 *_used,
 	halbb_la_reset(bb);
 
 	/*Trig Time*/
-	trig_time_cca = ((la->la_string_i.smp_number_max >> (bw + 1)) / 10)
-			- (2 << (2 - bw)) - (2 - bw);
+	if (bw <= CHANNEL_WIDTH_160) {
+		trig_time_cca = ((la->la_string_i.smp_number_max >> (bw + 1)) / 10)
+				- (2 << (u32)(CHANNEL_WIDTH_160 - bw)) - (u32)(CHANNEL_WIDTH_160 - bw);
+	} else {
+		la->la_mac_cfg_i.la_trigger_time = 195;
+	}
 
 	/*--- Basic Trigger Setting --------------------------------*/
 	la->la_mac_cfg_i.la_trigger_time = trig_time_cca;
@@ -2706,6 +2740,9 @@ void halbb_la_cmd_mac_trig(struct bb_info *bb, char input[][16], u32 *_used,
 		}
 		return;
 	}
+#else
+	if (_os_strcmp(input[2], "gen2") == 0)
+		return;
 #endif
 
 	HALBB_SCAN(input[2], DCMD_DECIMAL, &val[0]);
@@ -2759,6 +2796,8 @@ void halbb_la_cmd_fast(struct bb_info *bb, char input[][16], u32 *_used,
 			    "agc_type {lgcy/ht/vht/eht}\n");
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "bw320: 1115 only, 160M + DMA13\n");
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "rx_rate {ht/vht/he/eht} SS MCS\n");
 		return;
 	}
 
@@ -2890,7 +2929,49 @@ void halbb_la_cmd_fast(struct bb_info *bb, char input[][16], u32 *_used,
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "la_1115_320up_clk_en = %d\n", la->la_1115_320up_clk_en);
 #endif
-		
+	} else if (_os_strcmp(input[2],"rx_rate") == 0){
+		if (bw <= CHANNEL_WIDTH_160) {
+		trig_time_cca = ((la->la_string_i.smp_number_max >> (bw + 1)) / 10)
+				- (2 << (u32)(CHANNEL_WIDTH_160 - bw)) - (u32)(CHANNEL_WIDTH_160 - bw);
+
+		la->la_mac_cfg_i.la_trigger_time = trig_time_cca - 50;
+	} else {
+		la->la_mac_cfg_i.la_trigger_time = 195;
+	}
+		/*DBG_PORT*/
+		la->la_dbg_port = 0x1029f;
+		/*DMA SEL*/
+		dma->dma_data_type = DMA01_NRML_2s_12b;
+		dma->dma_hdr_sel_63 = LA_HDR_CCA;
+		dma->dma_hdr_sel_62 = LA_HDR_AGC_RDY;
+		dma->dma_hdr_sel_61 = LA_HDR_RXHE_OFDMA;
+		dma->dma_hdr_sel_60 = LA_HDR_ORI;
+		/*AND_0*/
+		la->la_and0_disable = true;
+		/*AND_1~AND_7*/
+		adv->adv_trig_en = true;
+
+		HALBB_SCAN(input[4], DCMD_HEX, &val[0]); //SS
+		HALBB_SCAN(input[5], DCMD_HEX, &val[1]); //MCS
+		if (_os_strcmp(input[3], "ht") == 0) {
+			adv->la_and4_en = 1;
+			adv->la_and4_inv = 0;
+			adv->la_and4_rate = (u16)(0x100+(val[0]<<5)+val[1]);
+		} else if (_os_strcmp(input[3], "vht") == 0) {
+			adv->la_and4_en = 1;
+			adv->la_and4_inv = 0;
+			adv->la_and4_rate = (u16)(0x200+(val[0]<<5)+val[1]);
+		} else if (_os_strcmp(input[3], "he") == 0) {
+			adv->la_and4_en = 1;
+			adv->la_and4_inv = 0;
+			adv->la_and4_rate = (u16)(0x300+(val[0]<<5)+val[1]);
+		} else if (_os_strcmp(input[3], "eht") == 0) {
+			adv->la_and4_en = 1;
+			adv->la_and4_inv = 0;
+			adv->la_and4_rate = (u16)(0x400+(val[0]<<5)+val[1]);
+		} else {
+			BB_TRACE("Err Setting\n");
+		}
 	} else {
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			 "Not Support\n");

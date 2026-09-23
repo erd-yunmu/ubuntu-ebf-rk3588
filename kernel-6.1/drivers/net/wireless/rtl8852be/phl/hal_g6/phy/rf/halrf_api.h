@@ -73,7 +73,8 @@ enum halrf_event_idx {
 	RF_EVENT_IQK = 1,
 	RF_EVENT_DPK = 2,
 	RF_EVENT_TXGAPK = 3,
-	RF_EVENT_DACK = 4
+	RF_EVENT_DACK = 4,
+	RF_EVENT_RXDCK = 5
 };
 
 enum halrf_event_func {
@@ -158,4 +159,8 @@ void halrf_ops_adie_pow_ctrl(struct rf_info *rf, bool rf_off, bool others_off);
 void halrf_ops_afe_pow_ctrl(struct rf_info *rf, bool adda_off, bool pll_off);
 void halrf_ops_set_gpio_by_ch(struct rf_info *rf, enum phl_phy_idx phy, enum band_type band);
 void halrf_rpt_rt_rfk_info(struct rf_info *rf, enum phl_phy_idx phy, u32 type);
+void halrf_bb_reset(struct rf_info *rf, enum phl_phy_idx phy_idx);
+bool halrf_chlk_reload_check(struct rf_info *rf, enum phl_phy_idx phy);
+void halrf_long_pkt_comp(struct rf_info *rf, enum phl_phy_idx phy_idx);
+void halrf_rfk_dz_err_notify(struct rf_info *rf, u32 err_code, u32 err_type);
 #endif

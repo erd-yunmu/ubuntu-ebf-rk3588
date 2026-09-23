@@ -71,7 +71,6 @@ struct _ADAPTER_LINK;
 #endif
 
 #include <recv_osdep.h>
-#include <rtw_sreset.h>
 
 /*CONFIG_PHL_ARCH*/
 #include "rtw_cmd.h"
@@ -85,10 +84,11 @@ struct _ADAPTER_LINK;
 
 #include "platform_ops.h"
 #include "rtw_scan.h"
+#include <rtw_fsm.h>
 #ifdef CONFIG_RTW_80211R
 #include <rtw_ft.h>
 #endif
-#if defined(CONFIG_RTW_WNM) || defined(CONFIG_RTW_80211K)
+#if defined(CONFIG_RTW_WNM) || defined(CONFIG_RTW_80211K) || defined(CONFIG_RTW_FSM_RRM)
 #include <rtw_wnm.h>
 #endif
 #ifdef CONFIG_RTW_MBO
@@ -222,11 +222,26 @@ struct registry_priv {
 #ifdef CONFIG_POWER_SAVE
 #ifdef CONFIG_RTW_IPS
 	u8	ips_mode;
+	u8	ips_cap;
 #endif /* CONFIG_RTW_IPS */
 #ifdef CONFIG_RTW_LPS
 	u8	lps_mode;
 	u8	lps_cap;
+	enum rtw_lps_listen_bcn_mode lps_listen_bcn_mode;
+	u8	lps_awake_interval;
 #endif /* CONFIG_RTW_LPS */
+#ifdef CONFIG_WOWLAN
+#ifdef CONFIG_RTW_IPS_WOW
+	u8	ips_wow_mode;
+	u8	ips_wow_cap;
+#endif /* CONFIG_RTW_IPS_WOW */
+#ifdef CONFIG_RTW_LPS_WOW
+	u8	lps_wow_mode;
+	u8	lps_wow_cap;
+	enum rtw_lps_listen_bcn_mode lps_wow_listen_bcn_mode;
+	u8	lps_wow_awake_interval;
+#endif /* CONFIG_RTW_LPS_WOW */
+#endif /* CONFIG_WOWLAN */
 #endif /* CONFIG_POWER_SAVE */
 	u8	smart_ps;
 	u8   usb_rxagg_mode;
@@ -257,6 +272,7 @@ struct registry_priv {
 
 	u16 tx_bw_mode;
 #ifdef CONFIG_AP_MODE
+	u8 max_ap_assoc_sta;
 	u8 bmc_tx_rate;
 	#if CONFIG_RTW_AP_DATA_BMC_TO_UC
 	u8 ap_src_b2u_flags;
@@ -349,6 +365,7 @@ struct registry_priv {
 
 #ifdef CONFIG_REGD_SRC_FROM_OS
 	enum regd_src_t regd_src;
+	bool regd_src_os_11d;
 #endif
 	bool init_regd_always_apply;
 	bool user_regd_always_apply;
@@ -358,20 +375,13 @@ struct registry_priv {
 #if CONFIG_IEEE80211_BAND_6GHZ
 	u8 channel_plan_6g;
 	u8 excl_chs_6g[MAX_CHANNEL_NUM_6G];
+	enum rtw_env_t env;
 #endif
 	u8 dis_ch_flags;
 	u32 bcn_hint_valid_ms;
 
 	u8	full_ch_in_p2p_handshake; /* 0: reply only softap channel, 1: reply full channel list*/
 
-#ifdef CONFIG_BTC
-	u8	btcoex;
-	u8	bt_iso;
-	u8	bt_sco;
-	u8	bt_ampdu;
-	u8	ant_num;
-	u8	single_ant_path;
-#endif
 	BOOLEAN	bAcceptAddbaReq;
 
 	u8	antdiv_cfg;
@@ -564,6 +574,7 @@ struct registry_priv {
 #ifdef CONFIG_DBCC_P2P_BG_LISTEN_SIM
 	u8 dbcc_lg_sim;
 #endif
+	u8 dis_turboedca;
 };
 
 /* For registry parameters */
@@ -605,8 +616,10 @@ struct registry_priv {
 
 #ifdef CONFIG_REGD_SRC_FROM_OS
 #define REGSTY_REGD_SRC_FROM_OS(regsty) ((regsty)->regd_src == REGD_SRC_OS)
+#define REGSTY_REGD_SRC_OS_11D(regsty) (REGSTY_REGD_SRC_FROM_OS(regsty) && (regsty)->regd_src_os_11d)
 #else
 #define REGSTY_REGD_SRC_FROM_OS(regsty) 0
+#define REGSTY_REGD_SRC_OS_11D(regsty) 0
 #endif
 
 #ifdef CONFIG_SDIO_HCI
@@ -805,7 +818,12 @@ struct fw_hang_info {
 struct rxff_hang_info {
 	u8 dbg_is_rxff_hang;
 	u8 rx_ff_hang_cnt;
-	/* increase when HCI Rx */
+	/* USB : Counter increments in rtw_usb_read_port_complete.
+	 *       This counter stops counting when RTW_CANNOT_RX == _TRUE
+	 * SDIO: Counter increments in sd_sync_int_hdl.
+	 *       This interrupt counter not only counts rx interrupts, but also
+	 *       stops counting when RTW_CANNOT_RUN is _TRUE
+	 */
 	u16 rx_cnt;
 	/* record in rtw_is_rxff_hang() */
 	u16 last_rx_cnt;
@@ -848,7 +866,6 @@ struct debug_priv {
 	u32 dbg_poll_fail_cnt;
 	u32 dbg_rpwm_toogle_cnt;
 	u32 dbg_rpwm_timeout_fail_cnt;
-	u32 dbg_sreset_cnt;
 	u32 dbg_fw_mem_dl_error_cnt;
 	u64 dbg_rx_fifo_last_overflow;
 	u64 dbg_rx_fifo_curr_overflow;
@@ -950,9 +967,10 @@ struct rf_ctl_t {
 	u8 domain_code;
 #if CONFIG_IEEE80211_BAND_6GHZ
 	u8 domain_code_6g;
+	u8 env_bmp;
 #endif
 
-#if defined(CONFIG_80211AX_HE) || defined(CONFIG_80211AC_VHT) || CONFIG_IEEE80211_BAND_5GHZ
+#ifdef CONFIG_CHPLAN_PROTO_EN
 	u8 proto_en;
 #endif
 	u8 dis_ch_flags;
@@ -979,16 +997,26 @@ struct rf_ctl_t {
 	u8 cis_en_ifbmp; /* per link cis enable iface bitmap, used when CISF_ENV_BSS is not set */
 	u32 cis_scan_int_ms; /* 0 means no env BSS scan triggerred by driver self, used when CISF_ENV_BSS is set */
 
+	bool init_user_req_is_ww;
 	bool cis_enabled; /* enable status */
+	bool collect_link_cisr;
+	bool collect_network_cisr;
 
-	/* per link cis status, used when CISF_ENV_BSS is not set */
+	/* per link cis status */
 	u8 *recv_country_ie[CONFIG_IFACE_NUMBER][RTW_RLINK_MAX];
 	u32 recv_country_ie_len[CONFIG_IFACE_NUMBER][RTW_RLINK_MAX];
+	#if CONFIG_IEEE80211_BAND_6GHZ
+	enum country_ie_slave_6g_reg_info recv_6g_reg_info[CONFIG_IFACE_NUMBER][RTW_RLINK_MAX];
+	#endif
 	struct country_ie_slave_record cisr[CONFIG_IFACE_NUMBER][RTW_RLINK_MAX];
 
-	/* effected one, used when CISF_INTERSECT is not set */
-	struct country_ie_slave_record *effected_cisr;
-	struct country_ie_slave_record effected_cisr_cont; /*  valid when effected_cisr != NULL */
+	#if CONFIG_IEEE80211_BAND_6GHZ
+	u8 default_chplan_cate_6g_map; /* bitmap of CHPLAN_6G_CATE_XXX */
+
+	/* txpwr_lmt_6g_cate_map intersection of links */
+	u8 txpwr_lmt_6g_cate_map_int_link_num;
+	u8 txpwr_lmt_6g_cate_map_int_all_link;
+	#endif
 #endif
 
 	struct rtw_chset chset;
@@ -1019,8 +1047,9 @@ struct rf_ctl_t {
 	u8 tpc_mode;
 	u16 tpc_manual_constraint; /* mB */
 
-	bool ch_sel_within_same_band;
+	u8 ch_sel_within_same_band; /* RTW_CHSEL_BAND_XXX */
 
+	u8 edcca_mode_sel;
 	u8 edcca_mode_2g;
 #if CONFIG_IEEE80211_BAND_5GHZ
 	u8 edcca_mode_5g;
@@ -1076,6 +1105,12 @@ struct rf_ctl_t {
 #endif
 };
 
+#ifdef CONFIG_REGD_SRC_FROM_OS
+#define RFCTL_REGD_SRC_FROM_OS(rfctl) ((rfctl)->regd_src == REGD_SRC_OS)
+#else
+#define RFCTL_REGD_SRC_FROM_OS(rfctl) false
+#endif
+
 #define RFCTL_REG_WORLDWIDE(rfctl)	(IS_ALPHA2_WORLDWIDE(rfctl->alpha2))
 #define RFCTL_REG_ALPHA2_UNSPEC(rfctl)	(IS_ALPHA2_UNSPEC(rfctl->alpha2)) /* ex: only domain code is specified */
 #define RFCTL_REG_INTERSECTED(rfctl)	(IS_ALPHA2_INTERSECTED(rfctl->alpha2))
@@ -1096,6 +1131,18 @@ struct rf_ctl_t {
 #define RFCTL_REG_EN_11AX(rfctl) (((rfctl)->proto_en & CHPLAN_PROTO_EN_AX) ? true : false)
 #else
 #define RFCTL_REG_EN_11AX(rfctl) false
+#endif
+
+#ifdef CONFIG_80211BE_EHT
+#define RFCTL_REG_EN_11BE(rfctl) (((rfctl)->proto_en & CHPLAN_PROTO_EN_BE) ? true : false)
+#else
+#define RFCTL_REG_EN_11BE(rfctl) false
+#endif
+
+#if defined(CONFIG_80211D) && CONFIG_IEEE80211_BAND_6GHZ
+#define RFCTL_RECV_6G_REG_INFO(rfctl, iface_id, alink_id) ((rfctl)->recv_6g_reg_info[iface_id][alink_id])
+#else
+#define RFCTL_RECV_6G_REG_INFO(rfctl, iface_id, alink_id) CIS_6G_REG_RSVD
 #endif
 
 #ifdef CONFIG_DFS_MASTER
@@ -1197,12 +1244,12 @@ struct dvobj_priv {
 	#endif
 
 	struct rf_ctl_t rf_ctl;
+#if 0
 	/* move to phl */
 	/* struct macid_ctl_t macid_ctl; *//*shared HW resource*/
 	struct cam_ctl_t cam_ctl;/*sec-cam shared HW resource*/
 	struct sec_cam_ent cam_cache[SEC_CAM_ENT_NUM_SW_LIMIT];
-
-
+#endif
 	/****** Band info may be x 2*********/
 	/* saved channel info when call set_channel_bw */
 	systime on_oper_ch_time;
@@ -1315,7 +1362,17 @@ struct dvobj_priv {
 #ifdef CONFIG_DBCC_SUPPORT
 	u8 dis_dbcc_scan;
 #endif
+#ifdef CONFIG_SELF_DIAG_INFO
+	u8 bb_self_diag_en;
+#endif
 };
+
+#ifdef CONFIG_MCC_MODE
+#define DEV_MCC_CAPABLE(dvobj) (GET_PHL_COM(dvobj)->dev_cap.mcc_sup)
+#else
+#define DEV_MCC_CAPABLE(dvobj) false
+#endif
+
 #define HWBAND_STA_NUM(_dvobj, _band_idx)		((_band_idx) >= HW_BAND_MAX ? 0 : MSTATE_STA_NUM(&((_dvobj)->iface_state[_band_idx])))
 #define HWBAND_STA_LD_NUM(_dvobj, _band_idx)		((_band_idx) >= HW_BAND_MAX ? 0 : MSTATE_STA_LD_NUM(&((_dvobj)->iface_state[_band_idx])))
 #define HWBAND_STA_LG_NUM(_dvobj, _band_idx)		((_band_idx) >= HW_BAND_MAX ? 0 : MSTATE_STA_LG_NUM(&((_dvobj)->iface_state[_band_idx])))
@@ -1340,8 +1397,8 @@ struct dvobj_priv {
 #define dvobj_to_wowlan(dvobj) (&(dvobj->wowlan_priv))
 #endif /* CONFIG_WOWLAN */
 #define pwrctl_to_dvobj(pwrctl) container_of(pwrctl, struct dvobj_priv, pwrctl_priv)
-#define dvobj_to_macidctl(dvobj) (&(dvobj->macid_ctl))
-#define dvobj_to_sec_camctl(dvobj) (&(dvobj->cam_ctl))
+/*#define dvobj_to_macidctl(dvobj) (&(dvobj->macid_ctl))*/
+/*#define dvobj_to_sec_camctl(dvobj) (&(dvobj->cam_ctl))*/
 #define dvobj_to_regsty(dvobj) (&(dvobj->padapters[IFACE_ID0]->registrypriv))
 #if defined(CONFIG_IOCTL_CFG80211)
 #define dvobj_to_wiphy(dvobj) ((dvobj)->wiphy)
@@ -1582,6 +1639,11 @@ enum _DIS_TURBO_EDCA {
 	EN_TURBO = 0,
 	DIS_TURBO,
 	DIS_TURBO_USE_MANUAL,
+	DIS_TURBO_EDCA_NUM,
+};
+
+enum _DIS_RT_CAP {
+	DIS_MBO = 0,
 };
 
 struct _ADAPTER_LINK {
@@ -1646,6 +1708,9 @@ struct _ADAPTER {
 	#ifdef CONFIG_RTW_80211K
 	struct rm_priv	rmpriv;
 	#endif
+	#ifdef CONFIG_RTW_FSM
+	struct fsm_priv fsmpriv;
+	#endif
 
 	#ifdef CONFIG_MP_INCLUDED
 	struct mp_priv	mppriv;
@@ -1654,7 +1719,7 @@ struct _ADAPTER {
 	#ifdef CONFIG_AP_MODE
 	struct hostapd_priv	*phostapdpriv;
 	u8 bmc_tx_rate;
-	#ifdef CONFIG_AP_CMD_DISPR
+
 	struct ap_cmd_dispr_priv *apcmd_dipsr_priv;
 	u32 ap_stop_cmd_token;
 	enum phl_band_idx ap_start_cmd_bidx;
@@ -1677,7 +1742,7 @@ struct _ADAPTER {
 #define ADD_DEL_STA_ST_ACQUIRED		3
 	u32 ap_add_del_sta_cmd_token;
 	u8 ap_add_del_sta_cmd_state;
-	#endif
+
 	#if CONFIG_RTW_AP_DATA_BMC_TO_UC
 	u8 b2u_flags_ap_src;
 	u8 b2u_flags_ap_fwd;
@@ -1898,10 +1963,11 @@ struct _ADAPTER {
 #endif
 	u8 dis_turboedca;/*	1: disable turboedca,
 					2. disable turboedca,and setting EDCA parameter based on the input parameter*/
+	u32 dis_rt_cap; /* runtime disable CAP for testing */
 	u32 edca_param_mode;
 	u32 last_edca;
 	u8 edca_reset;/*1:be reset 0:not reset*/
-#ifdef CONFIG_STA_CMD_DISPR
+
 	_lock connect_st_lock;
 	u8 connect_state;
 #define CONNECT_ST_IDLE		0
@@ -1921,7 +1987,6 @@ struct _ADAPTER {
 	u32 disconnect_token;
 	enum phl_band_idx disconnect_bidx;/*disconnect band idx*/
 	struct cmd_obj *discon_cmd;
-#endif /* CONFIG_STA_CMD_DISPR */
 
 #ifdef CONFIG_ECSA_PHL
 	struct core_ecsa_info ecsa_info;
@@ -1939,7 +2004,6 @@ struct _ADAPTER {
 #define adapter_to_wiphy(adapter) dvobj_to_wiphy(adapter_to_dvobj(adapter))
 
 #define adapter_to_rfctl(adapter) dvobj_to_rfctl(adapter_to_dvobj((adapter)))
-#define adapter_to_macidctl(adapter) dvobj_to_macidctl(adapter_to_dvobj((adapter)))
 
 #ifdef CONFIG_RTW_WDS
 #define adapter_use_wds(adapter) (adapter->use_wds)
@@ -1963,6 +2027,8 @@ struct _ADAPTER {
 #endif
 
 #define adapter_to_chset(adapter) (&adapter_to_rfctl((adapter))->chset)
+
+#define ADAPTER_GET_LINK_NUM(adapter) ((adapter)->adapter_link_num)
 
 #define mlme_to_adapter(mlme) container_of((mlme), _adapter, mlmepriv)
 #define tdls_info_to_adapter(tdls) container_of((tdls), _adapter, tdlsinfo)

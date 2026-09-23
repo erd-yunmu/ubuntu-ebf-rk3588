@@ -26,6 +26,74 @@
 #include "halrf_hwimg_raw_data_8852b.h"
 #include "halrf_hwimg_nctl_raw_data_8852b.h"
 
+#ifdef RF_8852B_SUPPORT
+
+u32 _halrf_power_by_rate_table_size_8852b(struct rf_info *rf)
+{
+	u8 rfe_type = rf->phl_com->dev_cap.rfe_type;
+
+	if (rfe_type == 11)
+		return sizeof(array_mp_8852b_txpwr_byrate_type11);
+	else if  (rfe_type == 12)
+		return sizeof(array_mp_8852b_txpwr_byrate_type12);
+	else
+		return sizeof(array_mp_8852b_txpwr_byrate);
+}
+
+u32 * _halrf_power_by_rate_table_addr_8852b(struct rf_info *rf)
+{
+	u8 rfe_type = rf->phl_com->dev_cap.rfe_type;
+
+	if (rfe_type == 11)
+		return (u32 *)array_mp_8852b_txpwr_byrate_type11;
+	else if (rfe_type == 12)
+		return (u32 *)array_mp_8852b_txpwr_byrate_type12;
+	else
+		return (u32 *)array_mp_8852b_txpwr_byrate;
+}
+
+u32 _halrf_power_limit_table_size_8852b(struct rf_info *rf, u8 ru, u8 band)
+{
+	u8 rfe_type = rf->phl_com->dev_cap.rfe_type;
+
+	if (ru == PW_LMT_TBL_NONE_RU) {
+		if (rfe_type == 11)
+			return sizeof(array_mp_8852b_txpwr_lmt_type11);
+		else if (rfe_type == 12)
+			return sizeof(array_mp_8852b_txpwr_lmt_type12);
+		else
+			return sizeof(array_mp_8852b_txpwr_lmt);
+	} else {
+		if (rfe_type == 11)
+			return sizeof(array_mp_8852b_txpwr_lmt_ru_type11);
+		else if (rfe_type == 12)
+			return sizeof(array_mp_8852b_txpwr_lmt_ru_type12);
+		else
+			return sizeof(array_mp_8852b_txpwr_lmt_ru);
+	}
+}
+
+void * _halrf_power_limit_table_addr_8852b(struct rf_info *rf, u8 ru, u8 band)
+{
+	u8 rfe_type = rf->phl_com->dev_cap.rfe_type;
+
+	if (ru == PW_LMT_TBL_NONE_RU) {
+		if (rfe_type == 11)
+			return (void *) array_mp_8852b_txpwr_lmt_type11;
+		else if (rfe_type == 12)
+			return (void *) array_mp_8852b_txpwr_lmt_type12;
+		else
+			return (void *) array_mp_8852b_txpwr_lmt;
+	} else {
+		if (rfe_type == 11)
+			return (void *) array_mp_8852b_txpwr_lmt_ru_type11;
+		else if (rfe_type == 12)
+			return (void *) array_mp_8852b_txpwr_lmt_ru_type12;
+		else
+			return (void *) array_mp_8852b_txpwr_lmt_ru;
+	}
+}
+
 bool halrf_check_cond_8852b(struct rf_info *rf, u32 para_opt)
 {
 	struct rtw_hal_com_t *hal = rf->hal_com;
@@ -863,33 +931,21 @@ halrf_config_8852b_store_power_by_rate(struct rf_info *rf,
 	u32 array_len = 0;
 	u32 *array = NULL;
 
-	bool is_form_folder;
-	u32 folder_len;
-	u32 *folder_array;
-
 	phy_reg_info = &rf->phl_com->phy_sw_cap[phy].rf_txpwr_byrate_info;
 
-	is_form_folder = phy_reg_info->para_src;
-	folder_len = phy_reg_info->para_data_len;
-	folder_array = phy_reg_info->para_data;
+	if (!rtw_hal_txpwr_by_rate_store_from_external(rf->hal_com, phy_reg_info)) {
+		array_len = _halrf_power_by_rate_table_size_8852b(rf) / sizeof(u32);
+		array = (u32 *) _halrf_power_by_rate_table_addr_8852b(rf);
 
-	RF_DBG(rf, DBG_RF_INIT, "======> %s   folder_len=%d\n", __func__, folder_len);
+		for (i = 0; i < array_len; i += 4) {
+			u32	band = array[i];
+			u32	tx_num = array[i + 1];
+			u32	rate_id = array[i + 2];
+			u32	data = array[i + 3];
 
-	if (is_form_folder) {
-		array_len = folder_len;
-		array = folder_array;
-	} else {
-		array_len = sizeof(array_mp_8852b_txpwr_byrate) / sizeof(u32);
-		array = (u32 *)array_mp_8852b_txpwr_byrate;
-	}
+			halrf_power_by_rate_store_to_array(rf, band, tx_num, rate_id, data);
+		}
 
-	for (i = 0; i < array_len; i += 4) {
-		u32	band = array[i];
-		u32	tx_num = array[i + 1];
-		u32	rate_id = array[i + 2];
-		u32	data = array[i + 3];
-
-		halrf_power_by_rate_store_to_array(rf, band, tx_num, rate_id, data);
 	}
 
 	for (i = 0; i < PW_LMT_MAX_BAND; i++)
@@ -907,61 +963,17 @@ halrf_config_8852b_store_power_limit(struct rf_info *rf,
 	enum phl_phy_idx phy)
 {
 	const struct halrf_tx_pw_lmt *array = NULL;
-	struct halrf_tx_pw_lmt *parray = NULL;
 	struct halrf_pwr_info *pwr = &rf->pwr_info;
 	struct rtw_para_pwrlmt_info_t *pwrlmt_info = NULL;
 	u32 i;
 	u32 array_len = 0;
 	u8 band, bandwidth, tx_num, rate, beamforming, regulation, chnl, val;
 
-	bool is_form_folder;
-	u32 folder_len;
-	u32 *folder_array;
-
 	pwrlmt_info = &rf->phl_com->phy_sw_cap[phy].rf_txpwrlmt_info;
 
-	is_form_folder = pwrlmt_info->para_src;
-	folder_len = pwrlmt_info->para_data_len;
-	folder_array = pwrlmt_info->para_data;
-
-	RF_DBG(rf, DBG_RF_INIT, "======> %s   is_form_folder=%d   folder_len=%d\n", __func__,
-		is_form_folder, folder_len);
-
-	if (is_form_folder) {
-		array_len = folder_len;
-		parray = (struct halrf_tx_pw_lmt *) folder_array;
-
-		for (i = 0; i < array_len; i++) {
-			array = (struct halrf_tx_pw_lmt *)&parray[i];
-			band = array->band;
-			bandwidth = array->bw;
-			tx_num = array->ntx;
-			rate = array->rs;
-			beamforming = array->bf;
-			regulation = array->reg;
-			chnl = array->ch;
-			val = array->val;
-
-			pwr->regulation[band][regulation] = true;
-
-			if (rate == PW_LMT_RS_CCK) {
-				pwr->tx_shap_idx[band][TX_SHAPE_CCK][regulation] = array->tx_shap_idx;
-				RF_DBG(rf, DBG_RF_INIT, "======>%s pwr->tx_shap_idx[%d][CCK][%d]=%d\n",
-					__func__, band, regulation,
-					pwr->tx_shap_idx[band][TX_SHAPE_CCK][regulation]);
-			} else {
-				pwr->tx_shap_idx[band][TX_SHAPE_OFDM][regulation] = array->tx_shap_idx;
-				RF_DBG(rf, DBG_RF_INIT, "======>%s pwr->tx_shap_idx[%d][OFDM][%d]=%d\n",
-					__func__, band, regulation,
-					pwr->tx_shap_idx[band][TX_SHAPE_OFDM][regulation]);
-			}
-
-			halrf_power_limit_store_to_array(rf, regulation, band, bandwidth,
-					rate, tx_num, beamforming, chnl, val);
-		}
-	} else {
-		array_len = sizeof(array_mp_8852b_txpwr_lmt) / sizeof(struct halrf_tx_pw_lmt);
-		array = array_mp_8852b_txpwr_lmt;
+	if (!rtw_hal_txpwr_lmt_store_from_external(rf->hal_com, pwrlmt_info)) {
+		array_len = _halrf_power_limit_table_size_8852b(rf, PW_LMT_TBL_NONE_RU, PW_LMT_TBL) / sizeof(struct halrf_tx_pw_lmt);
+		array = (struct halrf_tx_pw_lmt *) _halrf_power_limit_table_addr_8852b(rf, PW_LMT_TBL_NONE_RU, PW_LMT_TBL);
 
 		for (i = 0; i < array_len; i++) {
 			band = array[i].band;
@@ -1001,58 +1013,17 @@ halrf_config_8852b_store_power_limit_ru(struct rf_info *rf,
 	enum phl_phy_idx phy)
 {
 	const struct halrf_tx_pw_lmt_ru *array = NULL;
-	struct halrf_tx_pw_lmt_ru *parray = NULL;
 	struct halrf_pwr_info *pwr = &rf->pwr_info;
 	struct rtw_para_pwrlmt_info_t *pwrlmt_info = NULL;
 	u32 i;
 	u32 array_len = 0;
 	u8 band, bandwidth, tx_num, rate, regulation, chnl, val;
 
-	bool is_form_folder;
-	u32 folder_len;
-	u32 *folder_array;
-
 	pwrlmt_info = &rf->phl_com->phy_sw_cap[phy].rf_txpwrlmt_ru_info;
 
-	is_form_folder = pwrlmt_info->para_src;
-	folder_len = pwrlmt_info->para_data_len;
-	folder_array = pwrlmt_info->para_data;
-
-	RF_DBG(rf, DBG_RF_INIT, "======> %s   is_form_folder=%d   folder_len=%d\n", __func__,
-		is_form_folder, folder_len);
-
-	if (is_form_folder) {
-		array_len = folder_len;
-		parray = (struct halrf_tx_pw_lmt_ru *) folder_array;
-
-		for (i = 0; i < array_len; i++) {
-			array = (struct halrf_tx_pw_lmt_ru *)&parray[i];
-			band = array->band;
-			bandwidth = array->bw;
-			tx_num = array->ntx;
-			rate = array->rs;
-			regulation = array->reg;
-			chnl = array->ch;
-			val = array->val;
-
-			if (rate == PW_LMT_RS_CCK) {
-				pwr->tx_shap_idx_ru[band][TX_SHAPE_CCK][regulation] = array->tx_shap_idx;
-				RF_DBG(rf, DBG_RF_INIT, "======>%s pwr->tx_shap_idx_ru[%d][CCK][%d]=%d\n",
-					__func__, band, regulation,
-					pwr->tx_shap_idx_ru[band][TX_SHAPE_CCK][regulation]);
-			} else {
-				pwr->tx_shap_idx_ru[band][TX_SHAPE_OFDM][regulation] = array->tx_shap_idx;
-				RF_DBG(rf, DBG_RF_INIT, "======>%s pwr->tx_shap_idx_ru[%d][OFDM][%d]=%d\n",
-					__func__, band, regulation,
-					pwr->tx_shap_idx_ru[band][TX_SHAPE_OFDM][regulation]);
-			}
-
-			halrf_power_limit_ru_store_to_array(rf, band, bandwidth, tx_num,
-						rate, regulation, chnl, val);
-		}
-	} else {
-		array_len = sizeof(array_mp_8852b_txpwr_lmt_ru) / sizeof(struct halrf_tx_pw_lmt_ru);
-		array = array_mp_8852b_txpwr_lmt_ru;
+	if (!rtw_hal_txpwr_lmt_ru_store_from_external(rf->hal_com, pwrlmt_info)) {
+		array_len = _halrf_power_limit_table_size_8852b(rf, PW_LMT_TBL_RU, PW_LMT_TBL) / sizeof(struct halrf_tx_pw_lmt_ru);
+		array = (struct halrf_tx_pw_lmt_ru *) _halrf_power_limit_table_addr_8852b(rf, PW_LMT_TBL_RU, PW_LMT_TBL);
 
 		for (i = 0; i < array_len; i++) {
 			band = array[i].band;
@@ -1232,3 +1203,4 @@ halrf_config_8852b_store_xtal_track(struct rf_info *rf,
 #endif
 }
 
+#endif

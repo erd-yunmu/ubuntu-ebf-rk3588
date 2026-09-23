@@ -15,18 +15,45 @@
 #define _PHL_TXPWR_C_
 #include "phl_headers.h"
 
+u8 rtw_phl_get_pw_lmt_regu_type(void *phl, enum band_type band)
+{
+	struct	phl_info_t *phl_info = (struct phl_info_t *)phl;
+
+	return rtw_hal_get_pw_lmt_regu_type(phl_info->hal, band);
+}
+
 int rtw_phl_get_pw_lmt_regu_type_from_str(void *phl, const char *str)
 {
+	/* 2G/5G only, TOBE REMOVED */
 	struct phl_info_t *phl_info = phl;
 
-	return rtw_hal_get_pw_lmt_regu_type_from_str(phl_info->hal, str);
+	return rtw_hal_get_pw_lmt_regu_type_from_str(phl_info->hal
+		, BAND_ON_24G/* 2G and 5G use same array */, str);
 }
 
 const char *rtw_phl_get_pw_lmt_regu_str_from_type(void *phl, u8 regu)
 {
+	/* 2G/5G only, TOBE REMOVED */
 	struct phl_info_t *phl_info = phl;
 
-	return rtw_hal_get_pw_lmt_regu_str_from_type(phl_info->hal, regu);
+	return rtw_hal_get_pw_lmt_regu_str_from_type(phl_info->hal
+		, BAND_ON_24G/* 2G and 5G use same array */, regu);
+}
+
+int rtw_phl_get_pw_lmt_regu_type_of_band_from_str(void *phl
+	, enum band_type band, const char *str)
+{
+	struct phl_info_t *phl_info = phl;
+
+	return rtw_hal_get_pw_lmt_regu_type_from_str(phl_info->hal, band, str);
+}
+
+const char *rtw_phl_get_pw_lmt_regu_str_from_type_of_band(void *phl
+	, enum band_type band, u8 regu)
+{
+	struct phl_info_t *phl_info = phl;
+
+	return rtw_hal_get_pw_lmt_regu_str_from_type(phl_info->hal, band, regu);
 }
 
 const char *rtw_phl_get_pw_lmt_regu_type_str(void *phl, enum band_type band)
@@ -43,11 +70,24 @@ bool rtw_phl_pw_lmt_regu_tbl_exist(void *phl, enum band_type band, u8 regu)
 	return rtw_hal_pw_lmt_regu_tbl_exist(phl_info->hal, band, regu);
 }
 
-u8 rtw_phl_ext_reg_codemap_search(void *phl, u16 domain_code, const char *country, const char **reg_name)
+u8 rtw_phl_ext_reg_codemap_search(void *phl, u16 domain_code, const char *country
+	, const char **reg_name)
+{
+	/* 2G/5G only, TOBE REMOVED */ 
+	struct phl_info_t *phl_info = phl;
+
+	return rtw_hal_ext_reg_codemap_search(phl_info->hal
+		, BAND_ON_24G/* 2G and 5G use same array */
+		, domain_code, country, reg_name);
+}
+
+u8 rtw_phl_ext_reg_codemap_of_band_search(void *phl, enum band_type band
+	, u16 domain_code, const char *country, const char **reg_name)
 {
 	struct phl_info_t *phl_info = phl;
 
-	return rtw_hal_ext_reg_codemap_search(phl_info->hal, domain_code, country, reg_name);
+	return rtw_hal_ext_reg_codemap_search(phl_info->hal, band
+		, domain_code, country, reg_name);
 }
 
 bool rtw_phl_get_pwr_lmt_en(void *phl, u8 band_idx)
@@ -529,6 +569,16 @@ rtw_phl_cmd_set_tx_power(void *phl, enum phl_band_idx band_idx
 		, cmd_type, cmd_timeout);
 }
 
+enum rtw_phl_status rtw_phl_update_tas_def_setting(
+	void *phl, u32 tas_config)
+{
+	struct phl_info_t *phl_info = phl;
+
+	rtw_hal_update_tas_def_setting(phl_info->hal, tas_config);
+
+	return RTW_PHL_STATUS_SUCCESS;
+}
+
 enum rtw_phl_status rtw_phl_get_txinfo_pwr(void *phl, s16 *pwr_dbm)
 {
 	struct phl_info_t *phl_info = phl;
@@ -665,24 +715,16 @@ _exit:
 }
 
 void
-rtw_phl_set_tx_pwr_comp(void *phl, u8 regu, s8 ag_comp_2g,
-	s8 ag_comp_5g, s8 ag_comp_6g)
+rtw_phl_set_tx_pwr_comp(void *phl, struct rtw_phl_regu_dyn_ant_gain *dyn_ag,
+							enum band_type band, const char *sregulation)
 {
 	struct	phl_info_t *phl_info = (struct phl_info_t *)phl;
-	u8 tx_tbl_to_pwr_times = rtw_hal_get_tx_tbl_to_pwr_times(phl_info->hal);
 	enum phl_phy_idx phy_idx = HW_PHY_0;
-	struct rtw_phl_regu_dyn_ant_gain dyn_ag;
 
+	if (dyn_ag == NULL || sregulation == NULL)
+		return;
 
-	PHL_INFO("%s...\n", __func__);
-
-	dyn_ag.regu = regu;
-	dyn_ag.ag_2g_comp = ag_comp_2g * tx_tbl_to_pwr_times;
-	dyn_ag.ag_5g_comp = ag_comp_5g * tx_tbl_to_pwr_times;
-	dyn_ag.ag_6g_comp = ag_comp_6g * tx_tbl_to_pwr_times;
-
-	rtw_hal_set_tx_pwr_comp(phl_info->hal, phy_idx, &dyn_ag);
-
+	rtw_hal_set_tx_pwr_comp(phl_info->hal, phy_idx, dyn_ag, band, sregulation);
 }
 
 #endif
@@ -703,10 +745,41 @@ s8 rtw_phl_get_power_limit_option(void *phl, u8 hw_band, u8 rf_path, u16 rate,
 					      bandwidth, beamforming, tx_num, channel, band, reg);
 }
 
+s8 rtw_phl_get_power_limit_ru_option(void *phl,
+	u8 hw_band, u8 rf_path, u16 rate, u8 bandwidth,
+	u8 tx_num, u8 channel, u32 band, u8 reg)
+{
+	struct  phl_info_t *phl_info = (struct phl_info_t *)phl;
+
+	return rtw_hal_get_power_limit_ru_option(phl_info->hal
+		, hw_band, rf_path, rate, bandwidth, tx_num, channel, band, reg);
+}
+
 u8 rtw_phl_get_tx_tbl_to_tx_pwr_times(void *phl)
 {
 	struct  phl_info_t *phl_info = (struct phl_info_t *)phl;
 
 	return rtw_hal_get_tx_tbl_to_tx_pwr_times(phl_info->hal);
+}
+
+s8 rtw_phl_get_power_limit_value_ww(void *phl)
+{
+	struct  phl_info_t *phl_info = (struct phl_info_t *)phl;
+
+	return rtw_hal_get_power_limit_value_ww(phl_info->hal);
+}
+
+s8 rtw_phl_get_power_limit_value_na(void *phl)
+{
+	struct  phl_info_t *phl_info = (struct phl_info_t *)phl;
+
+	return rtw_hal_get_power_limit_value_na(phl_info->hal);
+}
+
+u32 rtw_phl_get_regulation_max_num(void *phl, enum band_type band)
+{
+	struct  phl_info_t *phl_info = (struct phl_info_t *)phl;
+
+	return rtw_hal_get_regulation_max_num(phl_info->hal, band);
 }
 
