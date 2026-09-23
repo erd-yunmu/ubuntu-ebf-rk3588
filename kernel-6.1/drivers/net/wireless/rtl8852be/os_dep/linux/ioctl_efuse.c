@@ -28,19 +28,24 @@ static u8 rtw_efuse_cmd(_adapter *padapter,
 
 	rtw_mp_set_phl_cmd(padapter, (void*)pefuse_arg, sizeof(struct rtw_efuse_phl_arg));
 
-	while (i <= 50) {
+	while (i <= 500) {
 		rtw_msleep_os(10);
 		rtw_mp_get_phl_cmd(padapter, (void*)pefuse_arg, sizeof(struct rtw_efuse_phl_arg));
 		if (pefuse_arg->cmd_ok && pefuse_arg->status == RTW_PHL_STATUS_SUCCESS) {
 			RTW_INFO("%s,eFuse GET CMD OK !!!\n", __func__);
 			ret = _SUCCESS;
 			break;
+		} else if (pefuse_arg->cmd_ok && pefuse_arg->status == RTW_PHL_STATUS_FAILURE) { 
+			RTW_INFO("%s,eFuse GET CMD FAIL !!!\n", __func__);
+			ret = _FAIL;
+			break;
 		} else {
 			rtw_msleep_os(10);
 			if (i > 50) {
-				RTW_INFO("%s, eFuse GET CMD FAIL !!!\n", __func__);
+				RTW_INFO("%s, timeout eFuse GET CMD FAIL !!!\n", __func__);
 				break;
 			}
+			RTW_INFO("%s, wait for eFuse GET CMD !!!\n", __func__);
 			i++;
 		}
 	}
@@ -137,6 +142,9 @@ u8 rtw_efuse_read_map2shadow(_adapter *padapter, u8 efuse_type)
 		    rtw_efuse_cmd(padapter, efuse_arg, RTW_EFUSE_CMD_WIFI_UPDATE_MAP);
 		else if (efuse_type == RTW_EFUSE_BT)
 			rtw_efuse_cmd(padapter, efuse_arg, RTW_EFUSE_CMD_BT_UPDATE_MAP);
+		else
+			RTW_INFO("%s,efuse_type unknow :%d!!!\n", __func__, efuse_type);
+
 		if (efuse_arg->cmd_ok && efuse_arg->status == RTW_PHL_STATUS_SUCCESS)
 				res = _SUCCESS;
 		else
@@ -343,6 +351,11 @@ u8 rtw_efuse_map_write(_adapter * adapter, u16 addr, u16 cnts, u8 *data, u8 efus
 	u16 i = 0;
 
 	efuse_arg = rtw_zmalloc(sizeof(struct rtw_efuse_phl_arg));
+
+	if (efuse_arg == NULL) {
+		status = _FAIL;
+		goto exit;
+	}
 
 	if (efuse_type == RTW_EFUSE_WIFI)
 		err = rtw_efuse_get_map_size(adapter, &size, RTW_EFUSE_CMD_WIFI_GET_LOG_SIZE);
@@ -1595,28 +1608,27 @@ exit:
 
 u8 rtw_efuse_bt_write_raw_hidden(_adapter * adapter, u16 addr, u16 cnts, u8 *data)
 {
-	u8 status = _SUCCESS;
+	u8 status = _FAIL;
 	struct rtw_efuse_phl_arg *efuse_arg = NULL;
 	u16 i = 0;
 
 	efuse_arg = _rtw_zmalloc(sizeof(struct rtw_efuse_phl_arg));
-
-	while (i < cnts) {
-		efuse_arg->io_type = 1;
-		efuse_arg->io_offset = addr + i;
-		efuse_arg->io_value = data[i];
-		rtw_efuse_cmd(adapter, efuse_arg, RTW_EFUSE_CMD_BT_WRITE_HIDDEN);
-		if (efuse_arg->cmd_ok && efuse_arg->status == RTW_PHL_STATUS_SUCCESS)
-			status = _SUCCESS;
-		else{
-			status = _FAIL;
-			break;
-		}
-		i++;
-	}
-exit :
-	if (efuse_arg)
+    if (efuse_arg) {
+	    while (i < cnts) {
+		    efuse_arg->io_type = 1;
+		    efuse_arg->io_offset = addr + i;
+		    efuse_arg->io_value = data[i];
+		    rtw_efuse_cmd(adapter, efuse_arg, RTW_EFUSE_CMD_BT_WRITE_HIDDEN);
+		    if (efuse_arg->cmd_ok && efuse_arg->status == RTW_PHL_STATUS_SUCCESS)
+			    status = _SUCCESS;
+		    else{
+			    status = _FAIL;
+			    break;
+		    }
+		    i++;
+	    }
 		_rtw_mfree(efuse_arg, sizeof(struct rtw_efuse_phl_arg));
+    }
 
 	return status;
 }

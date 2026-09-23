@@ -78,10 +78,20 @@ enum cache_addr_type {
 	#define _os_sema PlatformSemaphore
 	#define _os_event PlatformEvent
 	#define _os_list struct list_head
+	#define _os_raw_time u32
 
 	#define _os_atomic volatile long
+#ifdef _KERNEL_MODE
 	#define _os_dbgdump DbgPrint
-	#define _os_dbgdump_c DbgPrint
+#else
+	char phl_msgbuf[MAX_MSG_LEN];
+	#define _os_dbgdump(fmt, ...) do {\
+		snprintf(phl_msgbuf, MAX_MSG_LEN, fmt, ##__VA_ARGS__);\
+		OutputDebugStringA(phl_msgbuf);\
+	}while(0);
+#endif /* _KERNEL_MODE */
+
+	#define _os_dbgdump_c _os_dbgdump
 	#define _os_dbgdump_lmt DbgPrint
 	#define _os_dbgdump_c_lmt DbgPrint
 	#define _os_assert ASSERT
@@ -126,6 +136,7 @@ enum cache_addr_type {
 	#define _os_sema _sema
 	#define _os_event struct completion
 	#define _os_list _list
+	#define _os_raw_time sysptime
 	#define _os_atomic ATOMIC_T
 	#define MAC_ALEN ETH_ALEN
 	#define _os_dbgdump _dbgdump
@@ -184,6 +195,7 @@ enum cache_addr_type {
 	#define _os_sema PlatformSemaphore
 	#define _os_event PlatformEvent
 	#define _os_list struct list_head
+	#define _os_raw_time u32
 
 	#define _os_atomic volatile long
 
@@ -254,6 +266,7 @@ enum cache_addr_type {
 	#define _os_assert(_expr)
 	#define _os_warn_on(_cond)
 	#define _os_spinlockfg unsigned int
+	#define _os_raw_time u32
 
 	#define _os_tasklet unsigned long
 	#define _os_thread unsigned long

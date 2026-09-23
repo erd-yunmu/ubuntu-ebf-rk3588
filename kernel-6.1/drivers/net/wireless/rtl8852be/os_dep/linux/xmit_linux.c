@@ -63,9 +63,9 @@ sint rtw_endofpktfile(struct pkt_file *pfile)
 	return _FALSE;
 }
 
+#ifdef CONFIG_TCP_CSUM_OFFLOAD_TX
 void rtw_set_tx_chksum_offload(struct sk_buff *pkt, struct pkt_attrib *pattrib)
 {
-#ifdef CONFIG_TCP_CSUM_OFFLOAD_TX
 	struct sk_buff *skb = (struct sk_buff *)pkt;
 	struct iphdr *iph = NULL;
 	struct ipv6hdr *i6ph = NULL;
@@ -108,9 +108,9 @@ void rtw_set_tx_chksum_offload(struct sk_buff *pkt, struct pkt_attrib *pattrib)
 	default:
 		break;
 	}
+}
 #endif
 
-}
 #if 0 /*CONFIG_CORE_XMITBUF*/
 int rtw_os_xmit_resource_alloc(_adapter *padapter, struct xmit_buf *pxmitbuf, u32 alloc_sz, u8 flag)
 {
@@ -256,14 +256,10 @@ static inline bool rtw_os_need_wake_queue(_adapter *padapter, u16 os_qid)
 	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 
 	if (padapter->registrypriv.wifi_spec) {
-		if (pxmitpriv->hwxmits[os_qid].accnt < WMM_XMIT_THRESHOLD)
+		if (os_qid < 4 && pxmitpriv->hwxmits[os_qid].accnt < WMM_XMIT_THRESHOLD)
 			return _TRUE;
-#ifdef DBG_CONFIG_ERROR_DETECT
-#ifdef DBG_CONFIG_ERROR_RESET
-	} else if (rtw_hal_sreset_inprogress(padapter) == _TRUE) {
-		return _FALSE;
-#endif/* #ifdef DBG_CONFIG_ERROR_RESET */
-#endif/* #ifdef DBG_CONFIG_ERROR_DETECT */
+		else if (os_qid == 4) /* EAPOL */
+			return _TRUE;
 	} else {
 		return _TRUE;
 	}
@@ -279,10 +275,12 @@ static inline bool rtw_os_need_stop_queue(_adapter *padapter, u16 os_qid)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35))
 	if (padapter->registrypriv.wifi_spec) {
 		/* No free space for Tx, tx_worker is too slow */
-		if (pxmitpriv->hwxmits[os_qid].accnt > WMM_XMIT_THRESHOLD)
+		if ((os_qid < 4) && (pxmitpriv->hwxmits[os_qid].accnt > WMM_XMIT_THRESHOLD))
+			return _TRUE;
+		else if ((os_qid == 4) && (pxmitpriv->free_xmitframe_cnt == 0)) /* EAPOL */
 			return _TRUE;
 	} else {
-		if (pxmitpriv->free_xmitframe_cnt <= 4)
+		if ((pxmitpriv->free_xmitframe_cnt <= 4)) /* VO VI BE BK EAPOL */
 			return _TRUE;
 	}
 #else
@@ -610,7 +608,7 @@ int rtw_os_tx(struct sk_buff *pkt, _nic_hdl pnetdev)
 
 	if ((rtw_os_is_adapter_ready(padapter, pkt) == _FALSE)
 #ifdef CONFIG_LAYER2_ROAMING
-		&& (!padapter->mlmepriv.roam_network)
+		&& (!padapter->mlmepriv.roam_buf_pkt)
 #endif
 	)
 		goto drop_packet;
@@ -717,6 +715,18 @@ void rtw_coalesce_tx_amsdu(_adapter *padapter, struct xmit_frame *pxframes[],
 	head_xframe = pxframes[0];
 	head_skb = head_xframe->pkt;
 
+#ifdef RTW_SKB_CLONED_HANDLE
+	if (skb_cloned(head_skb) || skb_header_cloned(head_skb) || skb_shared(head_skb))
+		RTW_DBG("==> 1: %d-%d-%d\n", skb_cloned(head_skb), skb_header_cloned(head_skb), skb_shared(head_skb));
+
+	if (skb_cow_head(head_skb, 0) < 0)
+		RTW_ERR("1: skb_cow_head FAIL!\n");
+
+	if (skb_cow(head_skb, 0) < 0)
+		RTW_ERR("1: skb_cow FAIL!\n");
+
+
+#endif
 	ieee8023_header_to_rfc1042(head_skb, 0);
 
 	frag_tail = &skb_shinfo(head_skb)->frag_list;
@@ -732,6 +742,16 @@ void rtw_coalesce_tx_amsdu(_adapter *padapter, struct xmit_frame *pxframes[],
 		else
 			pads = 0;
 
+#ifdef RTW_SKB_CLONED_HANDLE
+		if (skb_cloned(skb) || skb_header_cloned(skb) || skb_shared(skb))
+			RTW_DBG("==> 2: %d-%d-%d\n", skb_cloned(skb), skb_header_cloned(skb), skb_shared(skb));
+
+		if (skb_cow_head(skb, 0) < 0)
+			RTW_ERR("2: skb_cow_head FAIL!\n");
+
+		if (skb_cow(skb, 0) < 0)
+			RTW_ERR("2: skb_cow FAIL!\n");
+#endif
 		ieee8023_header_to_rfc1042(skb, pads);
 
 		/* free sk accounting to have TP like doing skb_linearize() */

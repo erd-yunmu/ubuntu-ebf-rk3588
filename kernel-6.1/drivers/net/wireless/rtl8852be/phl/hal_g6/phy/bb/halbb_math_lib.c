@@ -332,7 +332,7 @@ u32 halbb_cal_bit_shift(u32 bit_mask)
 
 s32 halbb_cnvrt_2_sign(u32 val, u8 bit_num)
 {
-	if (bit_num > 32)
+	if (bit_num >= 32)
 		return (s32)val;
 
 	if (val & BIT(bit_num - 1)) /*Sign BIT*/
@@ -353,6 +353,27 @@ s64 halbb_cnvrt_2_sign_64(u64 val, u8 bit_num)
 		val_sign = val - (one << bit_num); /*@2's*/
 
 	return val_sign;
+}
+
+u16 halbb_db_avg2(struct bb_info *bb, u16 val_db_1, u16 val_db_2)
+{
+	/* Input / Output : U(16,2) value */
+	u16 rpt = 0;
+	u16 val_diff = 0;
+	u16 db_ofst[14] = {2,4,7,10,13,16,19,23,26,30,33,37,41,45};
+
+	val_diff = DIFF_2(val_db_1, val_db_2);
+	// Rounding
+	if (val_diff & BIT(1))
+		val_diff += (1 << 2);
+	val_diff >>= 2;
+
+	if (val_diff >= 15)
+		rpt = MAX_2(val_db_1, val_db_2) - (3 << 2);
+	else
+		rpt = MIN_2(val_db_1, val_db_2) + db_ofst[val_diff - 1];
+
+	return rpt;
 }
 
 void halbb_print_sign_frac_digit(struct bb_info *bb, u32 val, u8 total_bit_num,
@@ -461,13 +482,16 @@ void halbb_math_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 	s32 var[5] = {0};
 	s32 tmp_32 = 0;
 	u64 tmp_64 = 0;
+	u16 tmp_16 = 0;
 
 	if (_os_strcmp(input[1], "-h") == 0) {
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "div {a(hex)} {b{hex}}\n");
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "db_avg2 {a(dec)} {b(dec)}\n");
 		return;
 	}
-	HALBB_SCAN(input[1], DCMD_DECIMAL, &var[0]);
+	// HALBB_SCAN(input[1], DCMD_DECIMAL, &var[0]);
 
 	if (_os_strcmp(input[1], "div") == 0) {
 		HALBB_SCAN(input[2], DCMD_HEX, &var[0]);
@@ -481,5 +505,12 @@ void halbb_math_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "u64 (%d/%d) = %llx\n", var[0], var[1], tmp_64);
 
+	} else if (_os_strcmp(input[1], "db_avg2") == 0) {
+		HALBB_SCAN(input[2], DCMD_DECIMAL, &var[0]);
+		HALBB_SCAN(input[3], DCMD_DECIMAL, &var[1]);
+
+		tmp_16 = halbb_db_avg2(bb, (u16)var[0], (u16)var[1]);
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "AVG(%d, %d) = U(16,2) 0x%x\n", var[0], var[1], tmp_16);
 	}
 }

@@ -80,17 +80,14 @@ rtw_hal_cfg_chinfo(void *hal, struct rtw_chinfo_action_parm *act_param)
 			bbcr.ch_i_cmprs = false; /*8 bits*/
 			break;
 		}
-#ifdef CONFIG_PHL_CHANNEL_INFO_DBG
+
 		if (act_param->ele_bitmap == 0) {
 			/* 2T2R */
 			bbcr.ch_i_ele_bitmap = 0x303;
 		} else {
 			bbcr.ch_i_ele_bitmap = act_param->ele_bitmap;
 		}
-#else
-		/* 2T2R */
-		bbcr.ch_i_ele_bitmap = 0x303;
-#endif
+
 		hal_status = _hal_chinfo_query_idle_csi_buf(hal_info, 0, &buf_start, &buf_end);
 		if (hal_status != RTW_HAL_STATUS_SUCCESS) {
 			PHL_ERR("%s: query_idle_csi_buf fail\n", __func__);
@@ -123,7 +120,7 @@ exit:
 
 void
 _hal_fill_csi_header_remain(void* hal, struct csi_header_t *csi_header
-	, struct rtw_r_meta_data *mdata)
+	, const struct rtw_r_meta_data *mdata)
 {
 	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
 	struct rtw_phl_com_t *phl_com = hal_info->phl_com;
@@ -172,7 +169,7 @@ _hal_fill_csi_header_remain(void* hal, struct csi_header_t *csi_header
 	csi_header->channel = 0;
 
 	/* Others: mac addres not from TA ? */
-	/* hal_mem_cpy(h, &(csi_header->mac_addr[0]), &(mdata->ta[0]), MAC_ALEN); */
+	/* _os_mem_cpy(halcom_to_drvpriv(h), &(csi_header->mac_addr[0]), &(mdata->ta[0]), MAC_ALEN); */
 }
 
 void
@@ -181,9 +178,10 @@ _hal_fill_csi_header_phy_info(void* hal, struct csi_header_t *csi_header
 {
 	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
 	struct rtw_hal_com_t *h = hal_info->hal_com;
+	void *drv = halcom_to_drvpriv(h);
 
 	/* Initialize csi header */
-	hal_mem_set(h, csi_header, 0, sizeof(struct csi_header_t));
+	_os_mem_set(drv, csi_header, 0, sizeof(struct csi_header_t));
 	/* from phy_info_rpt */
 	/* shift 1 for remove decimal point */
 	csi_header->rssi[0] = phy_info->rssi[0] >> 1;
@@ -202,26 +200,141 @@ _hal_fill_csi_header_phy_info(void* hal, struct csi_header_t *csi_header
 	csi_header->evm[1] = (phy_info->sts1_evm_m << 4 | phy_info->sts1_evm_l) >> 2;
 }
 
-enum rtw_hal_status
-rtw_hal_ch_info_en(void *hal, struct rtw_chinfo_action_parm *act_param,
-						u8 pkt_id)
+static void _hal_fill_csi_header_phy_info_ppdu_sts(struct hal_info_t *hal_info,
+	const struct rtw_r_meta_data *mdata, const struct hal_ppdu_sts_usr *usr,
+	const struct rtw_phl_ppdu_phy_info *phy_info, struct csi_header_t *csi_header)
+{
+	struct rtw_hal_com_t *hal_com = hal_info->hal_com;
+	struct rtw_phl_com_t *phl_com = hal_info->phl_com;
+	void *drv = halcom_to_drvpriv(hal_com);
+
+	/* Initialize csi header */
+	_os_mem_set(drv, csi_header, 0, sizeof(struct csi_header_t));
+	/* already remove decimal point in rtw_hal_bb_parse_phy_sts */
+	_os_mem_cpy(drv, &(csi_header->rssi[0]), &(phy_info->rssi_path[0]), 2);
+	csi_header->nc = phy_info->n_rx - 1;
+	csi_header->nr = phy_info->n_sts;
+	/* shift 1 for remove decimal point */
+	csi_header->avg_idle_noise_pwr = phy_info->avg_idle_noise_pwr >> 1;
+	/* shift 2 for remove decimal point */
+	csi_header->evm[0] = phy_info->evm_1_sts >> 2;
+	csi_header->evm[1] = phy_info->evm_2_sts >> 2;
+	csi_header->csi_data_length = phy_info->ch_info_len;
+	csi_header->rxsc = phy_info->rxsc;
+	csi_header->csi_valid = phy_info->is_ch_info_len_valid;
+
+	_hal_fill_csi_header_remain(hal_info, csi_header, mdata);
+	if (usr[0].vld) {
+		struct rtw_phl_stainfo_t *sta = rtw_phl_get_stainfo_by_macid(phl_com->phl_priv, usr[0].macid);
+		if (sta != NULL)
+			_os_mem_cpy(drv, &(csi_header->mac_addr[0]), sta->mac_addr, MAC_ADDRESS_LENGTH);
+	}
+#ifdef CONFIG_PHL_WKARD_CHANNEL_INFO_ACK
+	else {
+		_os_mem_cpy(drv, &(csi_header->mac_addr[0]), mdata->ta, MAC_ADDRESS_LENGTH);
+	}
+#endif
+}
+
+#ifndef CONFIG_PHL_CHANNEL_INFO_DIRECT_INDICATE
+static void _hal_get_ch_info_physts(void *hal,
+	struct rtw_r_meta_data *mdata, struct hal_ppdu_sts_usr *usr,
+	struct rtw_phl_ppdu_phy_info *phy_info)
 {
 	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
-	/*void *drv_priv = hal_to_drvpriv(hal_info);*/
+	struct rtw_phl_com_t *phl_com = hal_info->phl_com;
+	struct csi_header_t *csi_header = NULL;
+	void *drv = hal_to_drvpriv(hal_info);
+	struct chan_info_t *chan_info_old = NULL;
+	u8* buf_addr;
+	u32 idle_num = CHAN_INFO_PKT_TOTAL;
+
+	if (CHAN_INFO_MAX_SIZE < phy_info->ch_info_len) {
+		PHL_ERR("chan info buffer smaller than ch info len\n");
+		return;
+	}
+
+	idle_num = rtw_phl_get_chaninfo_idle_number(drv, phl_com);
+
+	if (idle_num == CHAN_INFO_PKT_TOTAL)
+		phl_com->chan_info = rtw_phl_query_idle_chaninfo(drv, phl_com);
+
+	if (phl_com->chan_info == NULL) {
+		/*hstatus = RTW_HAL_STATUS_SUCCESS is expected*/
+		PHL_INFO("channel info packet not avaialbe due to no pakcet handle\n");
+		return;
+	}
+
+	buf_addr = phl_com->chan_info->chan_info_buffer;
+	_os_mem_cpy(drv, buf_addr, phy_info->ch_info_addr, phy_info->ch_info_len);
+	phl_com->chan_info->length = phy_info->ch_info_len;
+	csi_header = &phl_com->chan_info->csi_header;
+
+	_hal_fill_csi_header_phy_info_ppdu_sts(hal_info, mdata, usr, phy_info, csi_header);
+
+#ifdef CONFIG_PHL_CHANNEL_INFO_DBG
+	hal_print_csi_raw_data(phl_com->chan_info);
+#endif
+	/* push compelete channel info resourecs to busy queue */
+	chan_info_old = rtw_phl_recycle_busy_chaninfo(drv, phl_com, phl_com->chan_info);
+	if (chan_info_old)
+			rtw_phl_enqueue_idle_chaninfo(drv, phl_com, chan_info_old);
+	phl_com->chan_info = rtw_phl_query_idle_chaninfo(drv, phl_com);
+	if(phl_com->chan_info == NULL)
+		PHL_INFO("channel info packet not avaialbe after recycle\n");
+}
+#else
+static void _hal_get_ch_info_physts_dind(void *hal,
+	struct rtw_r_meta_data *mdata, struct hal_ppdu_sts_usr *usr,
+	struct rtw_phl_ppdu_phy_info *phy_info)
+{
+	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
+	struct rtw_phl_com_t *phl_com = hal_info->phl_com;
+	void *drv = hal_to_drvpriv(hal_info);
+
+	_hal_fill_csi_header_phy_info_ppdu_sts(hal_info, mdata, usr, phy_info
+		, &phl_com->chan_info->csi_header);
+
+	if (phl_com->evt_ops.csi_indicate) {
+		struct csi_ind_t csi_ind = {
+			.drv_priv = drv,
+			.csi_header = &phl_com->chan_info->csi_header,
+			.csi_raw = phy_info->ch_info_addr,
+		};
+
+		phl_com->evt_ops.csi_indicate(&csi_ind);
+	}
+}
+#endif
+
+void rtw_hal_get_ch_info_physts(void *hal,
+	struct rtw_r_meta_data *mdata, struct hal_ppdu_sts_usr *usr,
+	struct rtw_phl_ppdu_phy_info *phy_info)
+{
+#ifndef CONFIG_PHL_CHANNEL_INFO_DIRECT_INDICATE
+	_hal_get_ch_info_physts(hal, mdata, usr, phy_info);
+#else
+	_hal_get_ch_info_physts_dind(hal, mdata, usr, phy_info);
+#endif
+}
+
+enum rtw_hal_status
+rtw_hal_ch_info_en(void *hal, struct rtw_chinfo_action_parm *act_param)
+{
+	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
 	struct rtw_phl_com_t *phl_com = hal_info->phl_com;
 	enum phl_phy_idx hw_phy_idx = HW_PHY_0;
-	u8 mode = act_param->mode, filter = 0, sg_size = 0;
-	u8 macid = (u8)act_param->sta->macid;
+	u8 filter = 0, sg_size = 0;
 	u8 phy_idx = act_param->sta->rlink->hw_band;
 	bool en = act_param->enable;
 	enum rtw_hal_status hal_status = RTW_HAL_STATUS_SUCCESS;
 	struct rtw_phl_stainfo_t *sta = act_param->sta;
+	struct rtw_phl_stainfo_t *self_sta = rtw_phl_get_stainfo_self(hal_info->phl_com->phl_priv, sta->rlink);
+	u16 macid;
 	struct rtw_chinfo_cur_parm *cur_parm = phl_com->cur_parm;
 	bool valid_ch_info_physts = false;
 	u8 arr_idx = 0;
-	enum rtw_data_rate  rate = RTW_DATA_RATE_OFDM6;
-	u8 retry_cnt = 5, pkt_num = 1;
-	u16 period = act_param->trig_period;
+	void *drv = hal_to_drvpriv(hal_info);
 
 	switch (phy_idx) {
 	case 0:
@@ -264,35 +377,34 @@ rtw_hal_ch_info_en(void *hal, struct rtw_chinfo_action_parm *act_param,
 				else
 					PHL_ERR("[CH INFO] not implement for mode(%d)\n", act_param->mode);
 			} else {
-				/* MAC cfg only for RICH MODE */
-				hal_status = rtw_hal_mac_chan_info_cfg(hal_info, en, macid, mode, filter, sg_size);
 				rtw_hal_bb_ch_info_status_en(hal_info, en, hw_phy_idx);
 			}
 
 			/* first enbale, memcpy the current parameter */
-			hal_mem_cpy(hal_info->hal_com, &cur_parm->action_parm,
+			_os_mem_cpy(drv, &cur_parm->action_parm,
 						act_param, sizeof(struct rtw_chinfo_action_parm));
-		} else {
-			/* set macid info to MAC cfg for more one client */
-			if (phl_com->cur_parm->action_parm.enable_mode == CHINFO_EN_RICH_MODE)
-				hal_status = rtw_hal_mac_chan_info_cfg(hal_info, en, macid, mode, filter, sg_size);
 		}
 
-		 if (phl_com->cur_parm->action_parm.mode == CHINFO_MODE_ACK) {
-#ifdef CONFIG_PHL_WKARD_CHANNEL_INFO_ACK
-			/* record data rate to filter unexpected csi */
-			cur_parm->rate = rate;
-#endif
-			hal_status = rtw_hal_mac_cfg_sensing_csi(hal_info, macid,
-								true, period, retry_cnt, rate,
-								pkt_num, &pkt_id);
-		}
-		/* add macid to cur_parm  */
+		macid = cur_parm->action_parm.mode == CHINFO_MODE_ACK ? self_sta->macid : sta->macid;
+
+		/* set macid info to MAC cfg for more one client */
+		if (phl_com->cur_parm->action_parm.enable_mode == CHINFO_EN_RICH_MODE)
+			hal_status = rtw_hal_mac_chan_info_cfg(hal_info, en, macid
+				, cur_parm->action_parm.mode, filter, sg_size);
+
+		/* add macid to cur_parm */
 		arr_idx = (u8)_os_division64(macid, 8);
 		cur_parm->macid_bitmap[arr_idx] |= BIT(_os_modular64(macid, 8));
 		cur_parm->num++;
+		PHL_INFO("[CH INFO] num:%d,macid_bitmap[%d]:0x%02x\n",
+			cur_parm->num, arr_idx, cur_parm->macid_bitmap[arr_idx]);
 	} else {
 		/* disable BB for no client */
+		if (cur_parm->num == 0) {
+			PHL_ERR("[CHAN INFO] error cur_parm->num = %d\n", cur_parm->num);
+			goto exit;
+		}
+
 		if (cur_parm->num == 1) {
 			if (cur_parm->action_parm.enable_mode== CHINFO_EN_LIGHT_MODE) {
 				if (cur_parm->action_parm.mode == CHINFO_MODE_ACK)
@@ -304,112 +416,39 @@ rtw_hal_ch_info_en(void *hal, struct rtw_chinfo_action_parm *act_param,
 								cur_parm->action_parm.mode);
 			} else {
 				rtw_hal_bb_ch_info_status_en(hal_info, en, hw_phy_idx);
-				/* disable MAC for only for RICH MODE */
-				hal_status = rtw_hal_mac_chan_info_cfg(hal_info, en,
-										macid, mode, filter, sg_size);
 			}
-
-			/* disable, reset cur_parm to 0 */
-			hal_mem_set(hal_info->hal_com, cur_parm, 0, sizeof(struct rtw_chinfo_cur_parm));
-		} else if (cur_parm->num > 1) {
-			/* remvoe macid info to MAC cfg for more one client */
-			if (phl_com->cur_parm->action_parm.enable_mode == CHINFO_EN_RICH_MODE)
-				hal_status = rtw_hal_mac_chan_info_cfg(hal_info, en, macid, mode, filter, sg_size);
-		} else {
-			PHL_ERR("[CHAN INFO] error cur_parm->num = %d\n", cur_parm->num);
+			cur_parm->action_parm.enable = false;
 		}
 
-		if (phl_com->cur_parm->action_parm.mode == CHINFO_MODE_ACK)
-			hal_status = rtw_hal_mac_cfg_sensing_csi(hal_info, macid,
-								false, period, retry_cnt, rate,
-								pkt_num, &pkt_id);
+		macid = cur_parm->action_parm.mode == CHINFO_MODE_ACK ? self_sta->macid : sta->macid;
+
+		/* remvoe macid info to MAC cfg for more one client */
+		if (phl_com->cur_parm->action_parm.enable_mode == CHINFO_EN_RICH_MODE)
+			hal_status = rtw_hal_mac_chan_info_cfg(hal_info, en, macid
+				, cur_parm->action_parm.mode, filter, sg_size);
+
 		/* remove macid to cur_parm */
 		arr_idx = (u8)_os_division64(macid, 8);
-		cur_parm->macid_bitmap[arr_idx] |= BIT(_os_modular64(macid, 8));
+		cur_parm->macid_bitmap[arr_idx] &= ~(BIT(_os_modular64(macid, 8)));
 		cur_parm->num--;
+		PHL_INFO("[CH INFO] num:%d,macid_bitmap[%d]:0x%02x\n",
+			cur_parm->num, arr_idx, cur_parm->macid_bitmap[arr_idx]);
 	}
 
 exit:
 	return hal_status;
 }
 
-void
-rtw_hal_get_ch_info_physts(void *hal,
-							struct rtw_r_meta_data *mdata,
-							struct hal_ppdu_sts_usr *usr,
-							struct rtw_phl_ppdu_phy_info *phy_info)
+#ifdef CONFIG_PHL_CSI_FW_TX_OFLD
+enum rtw_hal_status
+rtw_hal_ch_info_pkt_ofld(void *hal, u16 macid, u8 en, u16 period, u8 retry_cnt,
+				u16 rate, u8 pkt_num, u8 *pkt_id)
 {
 	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
-	struct rtw_hal_com_t *hal_com = hal_info->hal_com;
-	struct rtw_phl_com_t *phl_com = hal_info->phl_com;
-	struct chan_info_t *chan_info_old = NULL;
-	struct rtw_phl_stainfo_t * sta = NULL;
-	struct csi_header_t *csi_header = NULL;
-	/*struct rtw_chinfo_cur_parm *cur_parm = phl_com->cur_parm;*/
-	void *drv = hal_to_drvpriv(hal_info);
-	u8* buf_addr;
-	u32 idle_num = CHAN_INFO_PKT_TOTAL;
 
-	if (CHAN_INFO_MAX_SIZE < phy_info->ch_info_len) {
-		PHL_ERR("chan info buffer smaller than ch info len\n");
-		return;
-	}
-
-	idle_num = rtw_phl_get_chaninfo_idle_number(drv, phl_com);
-
-	if (idle_num == CHAN_INFO_PKT_TOTAL)
-		phl_com->chan_info = rtw_phl_query_idle_chaninfo(drv, phl_com);
-
-	if (phl_com->chan_info == NULL) {
-		/*hstatus = RTW_HAL_STATUS_SUCCESS is expected*/
-		PHL_INFO("channel info packet not avaialbe due to no pakcet handle\n");
-		return;
-	}
-
-	buf_addr = phl_com->chan_info->chan_info_buffer;
-	hal_mem_cpy(hal_com, buf_addr, phy_info->ch_info_addr, phy_info->ch_info_len);
-	csi_header = &phl_com->chan_info->csi_header;
-	phl_com->chan_info->length = phy_info->ch_info_len;
-
-	/* Initialize csi header */
-	hal_mem_set(hal_com, csi_header, 0, sizeof(struct csi_header_t));
-	/* already remove decimal point in rtw_hal_bb_parse_phy_sts */
-	hal_mem_cpy(hal_com, &(csi_header->rssi[0]), &(phy_info->rssi_path[0]), 2);
-	csi_header->nc = phy_info->n_rx - 1;
-	csi_header->nr = phy_info->n_sts;
-	/* shift 1 for remove decimal point */
-	csi_header->avg_idle_noise_pwr = phy_info->avg_idle_noise_pwr >> 1;
-	/* shift 2 for remove decimal point */
-	csi_header->evm[0] = phy_info->evm_1_sts >> 2;
-	csi_header->evm[1] = phy_info->evm_2_sts >> 2;
-	csi_header->csi_data_length = phy_info->ch_info_len;
-	csi_header->rxsc = phy_info->rxsc;
-	csi_header->csi_valid = phy_info->is_ch_info_len_valid;
-
-	_hal_fill_csi_header_remain(hal, csi_header, mdata);
-	if (usr[0].vld) {
-		sta = rtw_phl_get_stainfo_by_macid(phl_com->phl_priv, usr[0].macid);
-		if (sta != NULL)
-			hal_mem_cpy(hal_info->hal_com, &(csi_header->mac_addr[0]),
-			sta->mac_addr, MAC_ADDRESS_LENGTH);
-	}
-#ifdef CONFIG_PHL_WKARD_CHANNEL_INFO_ACK
-	else {
-		hal_mem_cpy(hal_info->hal_com, &(csi_header->mac_addr[0]),
-			mdata->ta, MAC_ADDRESS_LENGTH);
-	}
-#endif
-#ifdef CONFIG_PHL_CHANNEL_INFO_DBG
-	hal_print_csi_raw_data(phl_com->chan_info);
-#endif
-	/* push compelete channel info resourecs to busy queue */
-	chan_info_old = rtw_phl_recycle_busy_chaninfo(drv, phl_com, phl_com->chan_info);
-	if (chan_info_old)
-			rtw_phl_enqueue_idle_chaninfo(drv, phl_com, chan_info_old);
-	phl_com->chan_info = rtw_phl_query_idle_chaninfo(drv, phl_com);
-	if(phl_com->chan_info == NULL)
-		PHL_INFO("channel info packet not avaialbe after recycle\n");
+	return rtw_hal_mac_cfg_sensing_csi(hal_info, macid, en, period, retry_cnt, rate, pkt_num, pkt_id);
 }
+#endif
 
 #ifdef CONFIG_PHL_CHANNEL_INFO_DBG
 void
@@ -418,16 +457,11 @@ hal_print_csi_raw_data(struct chan_info_t *chan_info)
 	u64 *buff_tmp = NULL;
 	u32 print_len = chan_info->csi_header.csi_data_length >> 3;
 	struct csi_header_t csi_header = chan_info->csi_header;
-	u8 i;
-
-	if (chan_info == NULL) {
-		PHL_TRACE(COMP_PHL_CHINFO, _PHL_INFO_, "[CH INFO] chan_info is NULL\n");
-		return;
-	}
+	u32 i;
 
 	if (chan_info->chan_info_buffer == NULL
 		|| chan_info->length == 0
-		|| chan_info->csi_header.csi_data_length == 0) {
+		|| csi_header.csi_data_length == 0) {
 		PHL_TRACE(COMP_PHL_CHINFO, _PHL_INFO_, "[CH INFO] chan_info_buffer is NULL\n");
 		return;
 	}
@@ -478,14 +512,11 @@ hal_print_csi_raw_data(struct chan_info_t *chan_info)
 #endif
 #ifdef CONFIG_PHL_WKARD_CHANNEL_INFO_ACK
 u8 rtw_hal_ch_info_process_ack(struct rtw_r_meta_data *meta,
-									struct rtw_phl_ppdu_sts_info *ppdu_info,
+									struct rtw_phl_ppdu_sts_ent *ppdu_sts_ent,
 									struct rtw_chinfo_cur_parm *cur_parm,
 									u16 macid)
 {
-	enum phl_band_idx band = (meta->bb_sel > 0) ? HW_BAND_1 : HW_BAND_0;
-	if (cur_parm->action_parm.enable == true
-		&& cur_parm->action_parm.mode == CHINFO_MODE_ACK
-		&& ppdu_info->sts_ent[band][meta->ppdu_cnt].frame_type == RTW_FRAME_TYPE_ACK
+	if (ppdu_sts_ent->frame_type == RTW_FRAME_TYPE_ACK
 		&& ((cur_parm->action_parm.chk_ack_rate == true && meta->rx_rate == cur_parm->rate) || cur_parm->action_parm.chk_ack_rate == false)
 	) {
 		int map_idx = (int)macid / 32;
@@ -500,4 +531,122 @@ u8 rtw_hal_ch_info_process_ack(struct rtw_r_meta_data *meta,
 	}
 }
 #endif
+
+#ifndef CONFIG_PHL_CHANNEL_INFO_DIRECT_INDICATE
+static void _hal_handle_ch_info_from_chan_sts(struct rtw_phl_com_t *phl_com,
+	struct hal_info_t *hal, struct rtw_pkt_buf_list *pkt, struct rtw_r_meta_data *mdata)
+{
+	enum rtw_hal_status status = RTW_HAL_STATUS_SUCCESS;
+	void *drv = hal_to_drvpriv(hal);
+	u8* buf_addr;
+	struct ch_rpt_hdr_info ch_hdr_rpt = {0};
+	struct phy_info_rpt phy_rpt = {0};
+	struct ch_info_drv_rpt drv_rpt = {0};
+
+	u32 idle_num = CHAN_INFO_PKT_TOTAL;
+	struct chan_info_t *chan_info_old = NULL;
+
+	/* Channel Report */
+	/* TODO: need to discuss the final csi header format further.*/
+	idle_num = rtw_phl_get_chaninfo_idle_number(drv, phl_com);
+
+	if (idle_num == CHAN_INFO_PKT_TOTAL)
+		phl_com->chan_info = rtw_phl_query_idle_chaninfo(drv, phl_com);
+
+	if (phl_com->chan_info == NULL) {
+		/*hstatus = RTW_HAL_STATUS_SUCCESS is expected*/
+		PHL_INFO("channel info packet not avaialbe due to no pakcet handle\n");
+		return;
+	}
+
+	buf_addr = phl_com->chan_info->chan_info_buffer;
+	status = rtw_hal_bb_ch_info_parsing(hal, pkt->vir_addr, mdata,
+		buf_addr + phl_com->chan_info->length,
+		&ch_hdr_rpt, &phy_rpt, &drv_rpt);
+
+	if (status == RTW_HAL_STATUS_FAILURE) {
+		phl_com->chan_info->length = 0;
+		return;
+	}
+
+	phl_com->chan_info->length += drv_rpt.raw_data_len;
+	/* store phy info if seg#0 is success*/
+	if (drv_rpt.seg_idx_curr == 0)
+		_hal_fill_csi_header_phy_info(hal, &(phl_com->chan_info->csi_header),
+			&ch_hdr_rpt, &phy_rpt);
+	if (status == RTW_HAL_STATUS_BB_CH_INFO_LAST_SEG) {
+		/* Fill remain csi header to buffer  */
+		_hal_fill_csi_header_remain(hal,
+			&(phl_com->chan_info->csi_header), mdata);
+		#ifdef CONFIG_PHL_CHANNEL_INFO_DBG
+		hal_print_csi_raw_data(phl_com->chan_info);
+		#endif
+
+		/* push compelete channel info resourecs to busy queue */
+		chan_info_old = rtw_phl_recycle_busy_chaninfo(drv, phl_com, phl_com->chan_info);
+		if (chan_info_old)
+			rtw_phl_enqueue_idle_chaninfo(drv, phl_com, chan_info_old);
+		phl_com->chan_info = rtw_phl_query_idle_chaninfo(drv, phl_com);
+		if(phl_com->chan_info == NULL)
+			PHL_INFO("channel info packet not avaialbe after recycle\n");
+	}
+}
+#else
+static void _hal_handle_ch_info_from_chan_sts_dind(struct rtw_phl_com_t *phl_com,
+	struct hal_info_t *hal, struct rtw_pkt_buf_list *pkt, struct rtw_r_meta_data *mdata)
+{
+	enum rtw_hal_status status = RTW_HAL_STATUS_SUCCESS;
+	void *drv = hal_to_drvpriv(hal);
+	u8* buf_addr;
+	struct ch_rpt_hdr_info ch_hdr_rpt = {0};
+	struct phy_info_rpt phy_rpt = {0};
+	struct ch_info_drv_rpt drv_rpt = {0};
+
+	buf_addr = phl_com->chan_info->chan_info_buffer;
+	status = rtw_hal_bb_ch_info_parsing(hal, pkt->vir_addr, mdata,
+		buf_addr + phl_com->chan_info->length,
+		&ch_hdr_rpt, &phy_rpt, &drv_rpt);
+
+	if (status == RTW_HAL_STATUS_FAILURE) {
+		phl_com->chan_info->length = 0;
+		return;
+	}
+
+	phl_com->chan_info->length += drv_rpt.raw_data_len;
+	/* store phy info if seg#0 is success*/
+	if (drv_rpt.seg_idx_curr == 0)
+		_hal_fill_csi_header_phy_info(hal, &(phl_com->chan_info->csi_header),
+			&ch_hdr_rpt, &phy_rpt);
+	if (status == RTW_HAL_STATUS_BB_CH_INFO_LAST_SEG) {
+		/* Fill remain csi header to buffer  */
+		_hal_fill_csi_header_remain(hal,
+			&(phl_com->chan_info->csi_header), mdata);
+		#ifdef CONFIG_PHL_CHANNEL_INFO_DBG
+		hal_print_csi_raw_data(phl_com->chan_info);
+		#endif
+
+		if (phl_com->evt_ops.csi_indicate) {
+			struct csi_ind_t csi_ind = {
+				.drv_priv = drv,
+				.csi_header = &phl_com->chan_info->csi_header,
+				.csi_raw = phl_com->chan_info->chan_info_buffer,
+			};
+
+			phl_com->evt_ops.csi_indicate(&csi_ind);
+		}
+
+		phl_chaninfo_pkt_init(drv, phl_com->chan_info);
+	}
+}
+#endif
+
+void hal_handle_ch_info_from_chan_sts(struct rtw_phl_com_t *phl_com,
+	struct hal_info_t *hal, struct rtw_pkt_buf_list *pkt, struct rtw_r_meta_data *mdata)
+{
+#ifndef CONFIG_PHL_CHANNEL_INFO_DIRECT_INDICATE
+	_hal_handle_ch_info_from_chan_sts(phl_com, hal, pkt, mdata);
+#else
+	_hal_handle_ch_info_from_chan_sts_dind(phl_com, hal, pkt, mdata);
+#endif
+}
 #endif /* CONFIG_PHL_CHANNEL_INFO */

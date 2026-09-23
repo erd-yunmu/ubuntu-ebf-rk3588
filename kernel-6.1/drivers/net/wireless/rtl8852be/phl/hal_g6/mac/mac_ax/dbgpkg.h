@@ -24,13 +24,13 @@
 #include "trxcfg.h"
 #include "dle.h"
 
+#define DBG_REG_PAGE_SIZE 0x100
 #define FW_RSVD_PLE_SIZE 0x800
 #define RSVD_PLE_OFST_8852A 0x6f800
 #define RSVD_PLE_OFST_8852B 0x2f800
 #define RSVD_PLE_OFST_8852C 0x6f800
 #define RSVD_PLE_OFST_8192XB 0x6f800
 #define RSVD_PLE_OFST_8851B 0x2f800
-#define RSVD_PLE_OFST_8851E 0x6f800
 #define RSVD_PLE_OFST_8852D 0x6f800
 #define RSVD_PLE_OFST_8852BT 0x6f800
 #define FW_RSVD_PLE_DBG_SIZE 0x100
@@ -41,6 +41,12 @@
 #define WOW_CAM_MEM_SIZE 0x240
 #define ADDR_CAM_MEM_SIZE 0x4000
 #define TXD_FIFO_SIZE 0x200
+#define RXD_FIFO_SIZE 0x1000
+#define DMA_TXFIFO_0_SIZE 0x2000
+#define DMA_RXFIFO_0_SIZE 0x4000
+#define DMA_TXFIFO_1_SIZE 0x1000
+#define DMA_RXFIFO_1_SIZE 0x2000
+#define BA_CAM_SIZE_LAGACY 0x1C0 // 64 * 7
 #define DBG_PORT_DUMP_DLY_US 10
 #define FW_BACKTRACE_MAX_SIZE 512 // 8 * 64(entry)
 #define FW_BACKTRACE_KEY 0xBACEBACE
@@ -70,12 +76,13 @@
 #define MAC_DBG_DUMP_DLY_US 10
 
 #define DBG_SEL_FW_PROG_CNTR 0xF200F2
-#define FW_PROG_CNTR_DMP_CNT 15
-#define FW_PROG_CNTR_DMP_DLY_US 10
 
 /* Wait for BCN parser idle shall consider RX beacon max time */
 #define BCN_PSR_WAIT_CNT 900
 #define BCN_PSR_WAIT_US 10
+
+#define FW_PROG_CNTR_DMP_CNT 15
+#define FW_PROG_CNTR_DMP_DLY_US 10
 
 /* REG dump*/
 #define MAC_PAGE_SRT		0
@@ -114,7 +121,6 @@
 #define SS_WMM_NUM_8852C   4
 #define SS_WMM_NUM_8192XB   4
 #define SS_WMM_NUM_8851B   2
-#define SS_WMM_NUM_8851E   4
 #define SS_WMM_NUM_8852D   4
 #define SS_WMM_NUM_8852BT   2
 #define SS_UL_SUPPORT_8852A    1
@@ -122,7 +128,6 @@
 #define SS_UL_SUPPORT_8852C    1
 #define SS_UL_SUPPORT_8192XB    1
 #define SS_UL_SUPPORT_8851B    0
-#define SS_UL_SUPPORT_8851E    1
 #define SS_UL_SUPPORT_8852D    1
 #define SS_UL_SUPPORT_8852BT    0
 #define SS_FW_SUPPORT_8852A    1
@@ -130,7 +135,6 @@
 #define SS_FW_SUPPORT_8852C    1
 #define SS_FW_SUPPORT_8192XB    1
 #define SS_FW_SUPPORT_8851B    0
-#define SS_FW_SUPPORT_8851E    1
 #define SS_FW_SUPPORT_8852D    1
 #define SS_FW_SUPPORT_8852BT    0
 #define SS_POLL_UNEXPECTED	0xFFFFFFFF
@@ -203,6 +207,15 @@
 	{5, 2, 9, 13, 17, 21, 25, 29}
 
 #define READ_DBG_FS_REG() GET_FIELD(MAC_REG_R32(R_AX_UDM0), B_AX_UDM0_FS_CODE)
+#define vir2phy(_addr) (((_addr) < 0x30000000) ? (_addr) : ((_addr) & 0x1FFFFFFF))
+
+#define FW_PC_DBG_DUMP_CNT 15
+#define FW_PC_DBG_DUMP_RATE_US 10
+#define FW_PC_DBG_DUMP_HANGDETECT_EN 1
+#define FW_PC_DBG_DUMP_HANGDETECT_DIS 0
+#define H2C_PATHCHECK_TIMEOUT_MS 10
+#define H2C_USB_PATHCHECK_TIMEOUT_MS 100
+#define H2C_SDIO_PATHCHECK_TIMEOUT_MS 250
 
 /**
  * @enum mac_ax_sram_dbg_sel
@@ -260,6 +273,11 @@ enum mac_ax_sram_dbg_sel {
 	SHCUT_MACHDR_SEL,
 	BCN_IE_CAM1_SEL,
 	WD_PAGE_SEL,
+	DCPU_LOCAL_SEL,
+	TXD_FIFO_0_SEL,
+	TXD_FIFO_1_SEL,
+	DMA_TXFIFO_0_SEL,
+	DMA_TXFIFO_1_SEL
 };
 
 /**
@@ -443,6 +461,14 @@ enum mac_ax_fwdbgreg_offset {
 	R_EXCEPTION_RA4             = 0x110,
 	R_EXCEPTION_RA5             = 0x114,
 	R_EXCEPTION_RA6             = 0x118,
+	R_PCIE_SER_OOBS_VAL         = 0x138,
+	R_PCIE_SER_INFO_0           = 0x13C,
+	R_PCIE_SER_INFO_1           = 0x140,
+	R_PCIE_SER_INFO_2           = 0x144,
+	R_PCIE_SER_INFO_3           = 0x148,
+	R_PCIE_SER_INFO_4           = 0x14C,
+	R_PCIE_SER_AER_UNCORR       = 0x150,
+	R_PCIE_SER_AER_CORR         = 0x154,
 	R_FWERROR_LAST
 };
 
@@ -507,23 +533,6 @@ enum mac_ax_dle_dfi_sel {
 	MAC_AX_DLE_DFI_SEL_LAST,
 	MAC_AX_DLE_DFI_SEL_MAX = MAC_AX_DLE_DFI_SEL_LAST,
 	MAC_AX_DLE_DFI_SEL_INVALID = MAC_AX_DLE_DFI_SEL_LAST,
-};
-
-/**
- * @struct mac_ax_dle_dfi_info
- * @brief mac_ax_dle_dfi_info
- *
- * @var mac_ax_dle_dfi_info::srt
- * Please Place Description here.
- * @var mac_ax_dle_dfi_info::end
- * Please Place Description here.
- * @var mac_ax_dle_dfi_info::inc_num
- * Please Place Description here.
- */
-struct mac_ax_dle_dfi_info {
-	u32 srt;
-	u32 end;
-	u32 inc_num;
 };
 
 /**
@@ -930,6 +939,23 @@ enum mac_ax_dbg_port_sel {
 	MAC_AX_DBG_PORT_SEL_INVALID = MAC_AX_DBG_PORT_SEL_LAST,
 };
 
+/**
+ * @struct mac_ax_dle_dfi_info
+ * @brief mac_ax_dle_dfi_info
+ *
+ * @var mac_ax_dle_dfi_info::srt
+ * Please Place Description here.
+ * @var mac_ax_dle_dfi_info::end
+ * Please Place Description here.
+ * @var mac_ax_dle_dfi_info::inc_num
+ * Please Place Description here.
+ */
+struct mac_ax_dle_dfi_info {
+	u32 srt;
+	u32 end;
+	u32 inc_num;
+};
+
 struct ss_link_info {
 	u8 wmm;
 	u8 ac;
@@ -964,6 +990,8 @@ struct fw_backtrace_info {
  * @addtogroup DebugPackage
  * @{
  */
+
+#if MAC_AX_FEATURE_DBGPKG
 
 /**
  * @brief mac_fwcmd_lb
@@ -1180,11 +1208,12 @@ u32 mac_sram_dbg_write(struct mac_ax_adapter *adapter, u32 offset,
  *
  * @param *adapter
  * @param offset
+ * @param *val
  * @param sel
  * @return Please Place Description here.
  * @retval u32
  */
-u32 mac_sram_dbg_read(struct mac_ax_adapter *adapter, u32 offset,
+u32 mac_sram_dbg_read(struct mac_ax_adapter *adapter, u32 offset, u32 *val,
 		      enum mac_ax_sram_dbg_sel sel);
 /**
  * @}
@@ -1504,10 +1533,13 @@ u32 mac_get_ple_dbg_addr(struct mac_ax_adapter *adapter);
  * @brief fw_pc_dbg_dump_ax
  *
  * @param *adapter
+ * @param count
+ * @param delay_us
+ * @param hangdetect
  * @return Please Place Description here.
- * @retval u32
+ * @retval void
  */
-u32 fw_pc_dbg_dump_ax(struct mac_ax_adapter *adapter);
+u32 fw_pc_dbg_dump_ax(struct mac_ax_adapter *adapter, u32 count, u32 delay_us, u8 hangdetect);
 /**
  * @}
  * @}
@@ -1573,4 +1605,43 @@ u32 mac_get_test_l12_rpt(struct mac_ax_adapter *adapter, u32 *test_l12_status_co
 u32 mac_dle_status_dump(struct mac_ax_adapter *adapter);
 
 u32 mac_wdt_log(struct mac_ax_adapter *adapter);
+
+u32 mac_sys_st_check(struct mac_ax_adapter *adapter, u32 diag_level, u32 *total_check_number);
+
+u32 mac_trx_st_check(struct mac_ax_adapter *adapter, u32 diag_level, u32 *total_check_number,
+		     char *output, u32 out_len, u32 *used);
+
+u32 mac_fw_st_check(struct mac_ax_adapter *adapter, u32 diag_level, u32 *total_check_number,
+		    char *output, u32 out_len, u32 *used);
+
+u32 mac_ser_st_check(struct mac_ax_adapter *adapter, u32 diag_level, u32 *total_check_number);
+
+u32 mac_err_flag_check(struct mac_ax_adapter *adapter,
+		       char *output, u32 out_len, u32 *used,
+		       u32 diag_level, u32 *total_check_number);
+
+u32 mac_ser_l2_st_check(struct mac_ax_adapter *adapter, u32 diag_level, u32 *total_check_number);
+
+u32 mac_pcie_status_dump(struct mac_ax_adapter *adapter);
+
+u32 mac_h2c_path_check(struct mac_ax_adapter *adapter);
+
+#if MAC_AX_SDIO_SUPPORT
+u32 mac_sdio_reg_dump(struct mac_ax_adapter *adapter);
+#endif
+
+#if MAC_AX_PLDR_DIAGNOSE_EN
+u32 mac_dbgcmd_init(struct mac_ax_adapter *adapter);
+
+u32 mac_dbgcmd_flush(struct mac_ax_adapter *adapter);
+
+u32 mac_dbgcmd_deinit(struct mac_ax_adapter *adapter);
+
+u32 mac_pldr_diagnose_dump(struct mac_ax_adapter *adapter);
+#endif /* CONFIG_PHL_DIAGNOSE */
+
+static u32 c2h_sys_cmd_lb(struct mac_ax_adapter *adapter, u8 *buf, u32 len,
+			  struct rtw_c2h_info *info);
+
+#endif /* MAC_AX_FEATURE_DBGPKG */
 #endif

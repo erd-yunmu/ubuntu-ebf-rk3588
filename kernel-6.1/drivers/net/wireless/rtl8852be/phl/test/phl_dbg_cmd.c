@@ -30,6 +30,13 @@ static const struct phl_dbg_cmd_info phl_dbg_core_cmd_i[] = {
 	{"git_info", PHL_DBG_CORE_GIT_INFO}
 };
 
+struct _hal_proc_cmd_param {
+	char proc_cmd;
+	struct rtw_proc_cmd *incmd;
+	char *output;
+	u32 out_len;
+};
+
 void phl_dbg_git_info(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 		      u32 input_num, char *output, u32 out_len)
 {
@@ -147,11 +154,9 @@ phl_dbg_core_proc_cmd(struct phl_info_t *phl_info,
 	return 0;
 }
 
-enum rtw_phl_status
-rtw_phl_dbg_core_cmd(struct phl_info_t *phl_info,
-		     struct rtw_proc_cmd *incmd,
-		     char *output,
-		     u32 out_len)
+enum rtw_phl_status phl_dbg_core_cmd(struct phl_info_t *phl_info,
+				     struct rtw_proc_cmd *incmd, char *output,
+				     u32 out_len)
 {
 	if (incmd->in_type == RTW_ARG_TYPE_BUF) {
 		phl_dbg_core_proc_cmd(phl_info, incmd->in.buf, output, out_len);
@@ -159,6 +164,36 @@ rtw_phl_dbg_core_cmd(struct phl_info_t *phl_info,
 		phl_dbg_core_cmd_parser(phl_info, incmd->in.vector,
 				   incmd->in_cnt_len, output, out_len);
 	}
+	return RTW_PHL_STATUS_SUCCESS;
+}
+
+enum rtw_phl_status phl_dbg_hal_cmd(struct phl_info_t *phl_info, char proc_cmd,
+				    struct rtw_proc_cmd *incmd, char *output,
+				    u32 out_len)
+{
+	struct _hal_proc_cmd_param param = {0};
+
+	param.proc_cmd = proc_cmd;
+	param.incmd = incmd;
+	param.output = output;
+	param.out_len = out_len;
+
+	return phl_cmd_enqueue(phl_info, HW_BAND_0, MSG_EVT_DBG_HAL_PROC_CMD,
+			       (u8 *)&param, sizeof(struct _hal_proc_cmd_param),
+			       NULL, PHL_CMD_WAIT, 0);
+}
+
+enum rtw_phl_status phl_cmd_hal_proc_cmd_hdl(struct phl_info_t *phl_info,
+					     u8 *param)
+{
+	struct _hal_proc_cmd_param *p = (struct _hal_proc_cmd_param *)param;
+
+	if (RTW_HAL_STATUS_SUCCESS != rtw_hal_proc_cmd(phl_info->hal,
+						       p->proc_cmd, p->incmd,
+						       p->output, p->out_len)) {
+		return RTW_PHL_STATUS_FAILURE;
+	}
+
 	return RTW_PHL_STATUS_SUCCESS;
 }
 
@@ -813,7 +848,7 @@ void _dump_wow_stats(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 	"[wow function]",
 	wow_stat->keep_alive_en, wow_stat->disc_det_en, wow_stat->arp_en, wow_stat->ndp_en, wow_stat->gtk_en, wow_stat->dot11w_en,
 	"[wow error]",
-	wow_stat->err.init, wow_stat->err.deinit,
+	(unsigned int)wow_stat->err.init, (unsigned int)wow_stat->err.deinit,
 	"[wow aoac]",
 	wow_stat->aoac_rpt_fail_cnt);
 #endif /* CONFIG_WOWLAN */
@@ -1040,7 +1075,7 @@ void _bcn_cmd_parser(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 				out_len - used, "_bcn_cmd_parser: error Para, try enter -h\n");
 	}
 }
-
+#ifdef CONFIG_PHL_BEAMFORM
 void phl_dbg_cmd_snd(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 		      u32 input_num, char *output, u32 out_len)
 {
@@ -1106,11 +1141,11 @@ void phl_dbg_cmd_snd(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 	}
 #endif
 }
-
-void _convert_tx_rate(enum hal_rate_mode mode, u8 mcs_ss_idx, char *str, u32 str_len)
+#endif
+void convert_tx_rate(enum rtw_rate_mode mode, u8 mcs_ss_idx, char *str, u32 str_len)
 {
 	switch (mode) {
-	case HAL_LEGACY_MODE:
+	case RTW_LEGACY_MODE:
 		switch (mcs_ss_idx) {
 		case RTW_DATA_RATE_CCK1:	_os_snprintf(str, str_len,"CCK 1"); break;
 		case RTW_DATA_RATE_CCK2:	_os_snprintf(str, str_len,"CCK 2"); break;
@@ -1129,11 +1164,11 @@ void _convert_tx_rate(enum hal_rate_mode mode, u8 mcs_ss_idx, char *str, u32 str
 			break;
 		}
 		break;
-	case HAL_HT_MODE:
+	case RTW_HT_MODE:
 		_os_snprintf(str, str_len,"MCS%d", mcs_ss_idx);
 		break;
-	case HAL_VHT_MODE:
-	case HAL_HE_MODE:
+	case RTW_VHT_MODE:
+	case RTW_HE_MODE:
 		_os_snprintf(str, str_len,"%dSS MCS%d",
 		             ((mcs_ss_idx & 0x70)>> 4) + 1,
 		             (mcs_ss_idx & 0x0F));
@@ -1144,7 +1179,7 @@ void _convert_tx_rate(enum hal_rate_mode mode, u8 mcs_ss_idx, char *str, u32 str
 	}
 }
 
-void _convert_rx_rate(u32 rx_rate, char *str, u32 str_len)
+void convert_rx_rate(u32 rx_rate, char *str, u32 str_len)
 {
 	switch(rx_rate) {
 	case RTW_DATA_RATE_CCK1:	_os_snprintf(str, str_len,"CCK 1"); break;
@@ -1382,8 +1417,8 @@ void phl_dbg_cmd_asoc_sta(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 							 path_idx, rssi - PHL_MAX_RSSI);
 				}
 
-				if((HAL_HT_MODE == psta->hal_sta->ra_info.rpt_rt_i.mode)
-					|| (HAL_VHT_MODE == psta->hal_sta->ra_info.rpt_rt_i.mode)) {
+				if((RTW_HT_MODE == psta->hal_sta->ra_info.rpt_rt_i.mode)
+					|| (RTW_VHT_MODE == psta->hal_sta->ra_info.rpt_rt_i.mode)) {
 					PHL_DBG_MON_INFO(out_len, used, output + used,
 						out_len - used, "[Stats] is_support_sgi:%s\n",
 						(RTW_GILTF_SGI_4XHE08 == psta->hal_sta->ra_info.rpt_rt_i.gi_ltf)?"yes":"no");
@@ -1392,14 +1427,14 @@ void phl_dbg_cmd_asoc_sta(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 						out_len - used, "[Stats] is_support_sgi:no\n");
 				}
 
-				_convert_tx_rate( psta->hal_sta->ra_info.rpt_rt_i.mode,
+				convert_tx_rate( psta->hal_sta->ra_info.rpt_rt_i.mode,
 						psta->hal_sta->ra_info.rpt_rt_i.mcs_ss_idx,
 						tx_rate_str, 32);
 				PHL_DBG_MON_INFO(out_len, used, output + used,
 					out_len - used, "[Stats] Tx Rate:%s\n",
 					tx_rate_str);
 
-				_convert_rx_rate(psta->stats.rx_rate, rx_rate_str, 32);
+				convert_rx_rate(psta->stats.rx_rate, rx_rate_str, 32);
 				PHL_DBG_MON_INFO(out_len, used, output + used,
 					out_len - used, "[Stats] Rx Rate:%s\n",
 					rx_rate_str);
@@ -2217,6 +2252,26 @@ static void _phl_set_level(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 }
 #endif /*CONFIG_RTW_DEBUG*/
 
+static void _phl_set_dump_cfg(struct phl_info_t *phl_info, char input[][MAX_ARGV],
+		      u32 input_num, char *output, u32 out_len)
+{
+	u32 ctrl = 0;
+	u32 used = 0;
+
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\n[DBG] dump_cfg=0x%x\n", phl_info->phl_com->dbg_cfg.dump_cfg);
+
+	if (input_num <= 2)
+		return;
+
+	_get_hex_from_string(input[1], &ctrl);
+
+	rtw_phl_update_io_dump_allow(phl_info, (ctrl & DUMP_CFG_IO_ALLOW));
+	rtw_phl_update_fw_log_dump_allow(phl_info, (ctrl & DUMP_CFG_FW_LOG_ALLOW));
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			 "\nupdate dump_cfg=0x%x\n", phl_info->phl_com->dbg_cfg.dump_cfg);
+}
+
 #ifdef CONFIG_USB_HCI
 void
 _phl_dbg_cmd_usb_speed(struct phl_info_t *phl_info, char input[][MAX_ARGV],
@@ -2286,6 +2341,81 @@ _phl_dbg_cmd_usb_speed(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 	}
 }
 #endif /*CONFIG_USB_HCI*/
+
+#ifdef DBG_MONITOR_TIME
+static u32 phl_dbg_cmd_func_latency(struct phl_info_t *phl_info, char input[][MAX_ARGV],
+			u32 input_num, char *output, u32 out_len)
+{
+	u32 used = 0;
+	struct rtw_phl_com_t *phl_com = phl_info->phl_com;
+
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"========== PHL FUNC LATENCY ==========\n");
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t rtw_phl_init : %u ms\n", (int)phl_com->func_latency[TIME_PHL_INIT]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t rtw_phl_preload : %u ms\n", (int)phl_com->func_latency[TIME_PHL_PRELOAD]);
+
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t hal_fast_start : %u ms\n", (int)phl_com->func_latency[TIME_HAL_FAST_START]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t hal_get_efuse : %u ms\n", (int)phl_com->func_latency[TIME_HAL_GET_EFUSE]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t hal_fast_stop : %u ms\n", (int)phl_com->func_latency[TIME_HAL_FAST_STOP]);
+
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t rtw_phl_star : %u ms\n", (int)phl_com->func_latency[TIME_PHL_START]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t rtw_hal_star : %u ms\n", (int)phl_com->func_latency[TIME_HAL_START]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t\t rtw_hal_mac_hal_init : %u ms\n", (int)phl_com->func_latency[TIME_HAL_MAC_HAL_INIT]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t\t rtw_hal_efuse_process : %u ms\n", (int)phl_com->func_latency[TIME_HAL_EFUSE_PROC]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t\t rtw_hal_init_bb_early_init : %u ms\n", (int)phl_com->func_latency[TIME_HAL_INIT_BB_REG1]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t\t rtw_hal_init_bb_reg : %u ms\n", (int)phl_com->func_latency[TIME_HAL_INIT_BB_REG2]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t\t rtw_hal_init_rf_reg : %u ms\n", (int)phl_com->func_latency[TIME_HAL_INIT_RF_REG]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t\t rtw_hal_btc_init_coex_cfg_ntfy : %u ms\n", (int)phl_com->func_latency[TIME_HAL_INIT_BTC]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t\t rtw_hal_bb_dm_init : %u ms\n", (int)phl_com->func_latency[TIME_HAL_BB_DM_INIT]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t\t rtw_hal_rf_dm_init : %u ms\n", (int)phl_com->func_latency[TIME_HAL_RF_DM_INIT]);
+
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t rtw_hal_set_ch_bw : %u ms (max)\n", (int)phl_com->func_latency[TIME_HAL_SET_CHAN]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t rtw_hal_rf_chl_rfk_trigger : %u ms (max)\n", (int)phl_com->func_latency[TIME_HAL_RFK]);
+
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t rtw_phl_wifi_role_alloc : %u ms\n", (int)phl_com->func_latency[TIME_PHL_ROLE_ALLOC]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t rtw_phl_wifi_role_free : %u ms\n", (int)phl_com->func_latency[TIME_PHL_ROLE_FREE]);
+
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t rtw_phl_suspend : %u ms\n", (int)phl_com->func_latency[TIME_PHL_SUSPEND]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t phl_wow_start : %u ms\n", (int)phl_com->func_latency[TIME_PHL_WOW_START]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t phl_cmd_role_suspend : %u ms\n", (int)phl_com->func_latency[TIME_PHL_ROLE_SUSPEND]);
+
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t rtw_phl_resume : %u ms\n", (int)phl_com->func_latency[TIME_PHL_RESUME]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t phl_wow_stop : %u ms\n", (int)phl_com->func_latency[TIME_PHL_WOW_STOP]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t\t phl_cmd_role_recover : %u ms\n", (int)phl_com->func_latency[TIME_PHL_ROLE_RECOVER]);
+
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t rtw_phl_stop : %u ms\n", (int)phl_com->func_latency[TIME_PHL_STOP]);
+	PHL_DBG_MON_INFO(out_len, used, output + used, out_len - used,
+			"\t rtw_phl_deinit : %u ms\n", (int)phl_com->func_latency[TIME_PHL_DEINIT]);
+
+	return used;
+}
+#endif
 
 void phl_dbg_cmd_parser(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 		        u32 input_num, char *output, u32 out_len)
@@ -2376,11 +2506,13 @@ void phl_dbg_cmd_parser(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 	}
 	break;
 #endif
+#ifdef CONFIG_PHL_BEAMFORM
 	case PHL_DBG_SOUND :
 	{
 		phl_dbg_cmd_snd(phl_info, input, input_num, output, out_len);
 	}
 	break;
+#endif
 	case PHL_DBG_ASOC_STA:
 	{
 		phl_dbg_cmd_asoc_sta(phl_info, input, input_num, output, out_len);
@@ -2460,6 +2592,7 @@ void phl_dbg_cmd_parser(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 #ifdef CONFIG_PHL_ECSA
 		struct rtw_wifi_role_t *role = NULL;
 		struct rtw_phl_ecsa_param param = {0};
+		int band = 0;
 		int chan = 0;
 		int bw = 0;
 		int offset = 0;
@@ -2467,15 +2600,16 @@ void phl_dbg_cmd_parser(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 		int op_class = 0;
 		int mode = 0;
 		int delay_start_ms = 0;
-		if (input_num <= 7)
+		if (input_num <= 8)
 			break;
-		_os_sscanf(input[1], "%d", &chan);
-		_os_sscanf(input[2], "%d", &bw);
-		_os_sscanf(input[3], "%d", &offset);
-		_os_sscanf(input[4], "%d", &count);
-		_os_sscanf(input[5], "%d", &op_class);
-		_os_sscanf(input[6], "%d", &mode);
-		_os_sscanf(input[7], "%d", &delay_start_ms);
+		_os_sscanf(input[1], "%d", &band);
+		_os_sscanf(input[2], "%d", &chan);
+		_os_sscanf(input[3], "%d", &bw);
+		_os_sscanf(input[4], "%d", &offset);
+		_os_sscanf(input[5], "%d", &count);
+		_os_sscanf(input[6], "%d", &op_class);
+		_os_sscanf(input[7], "%d", &mode);
+		_os_sscanf(input[8], "%d", &delay_start_ms);
 		role = phl_get_wrole_by_ridx(phl_info, 2);
 		if(role){
 			param.ecsa_type = ECSA_TYPE_AP;
@@ -2485,6 +2619,7 @@ void phl_dbg_cmd_parser(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 			param.mode = (u8)mode;
 			param.op_class = (u8)op_class;
 			param.delay_start_ms = delay_start_ms;
+			param.new_chan_def.band = (u8)band;
 			param.new_chan_def.chan = (u8)chan;
 			param.new_chan_def.bw = (u8)bw;
 			param.new_chan_def.offset = (u8)offset;
@@ -2541,6 +2676,9 @@ void phl_dbg_cmd_parser(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 			"[DBG] Current TX duty control: %d \n", tx_duty);
 	}
 	break;
+	case PHL_DBG_SET_DUMP_CFG:
+		_phl_set_dump_cfg(phl_info, input, input_num, output, out_len);
+	break;
 #ifdef CONFIG_PHL_CHANNEL_INFO_DBG
 	case PHL_DBG_CHAN_INFO:
 		_phl_dbg_cmd_chan_info(phl_info, input, input_num, output, out_len);
@@ -2566,6 +2704,14 @@ void phl_dbg_cmd_parser(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 		_phl_set_level(phl_info, input, input_num, output, out_len);
 	#endif /*CONFIG_RTW_DEBUG*/
 	break;
+#ifdef DBG_MONITOR_TIME
+	case PHL_DBG_FUNC_LATENCY:
+	{
+		used += phl_dbg_cmd_func_latency(phl_info, input, input_num, output + used,
+		                               out_len - used);
+	}
+	break;
+#endif
 
 	default:
 		PHL_DBG_MON_INFO(out_len, used, output + used,
@@ -2574,9 +2720,8 @@ void phl_dbg_cmd_parser(struct phl_info_t *phl_info, char input[][MAX_ARGV],
 	}
 }
 
-s32
-phl_dbg_proc_cmd(struct phl_info_t *phl_info,
-		 char *input, char *output, u32 out_len)
+static s32 _dbg_proc_cmd(struct phl_info_t *phl_info, char *input, char *output,
+			 u32 out_len)
 {
 	char *token;
 	u32 argc = 0;
@@ -2599,18 +2744,26 @@ phl_dbg_proc_cmd(struct phl_info_t *phl_info,
 	return 0;
 }
 
-enum rtw_hal_status
-rtw_phl_dbg_proc_cmd(struct phl_info_t *phl_info,
-		     struct rtw_proc_cmd *incmd,
-		     char *output,
-		     u32 out_len)
+enum rtw_hal_status phl_dbg_proc_cmd(struct phl_info_t *phl_info,
+				     struct rtw_proc_cmd *incmd, char *output,
+				     u32 out_len)
 {
 	if (incmd->in_type == RTW_ARG_TYPE_BUF) {
-		phl_dbg_proc_cmd(phl_info, incmd->in.buf, output, out_len);
+		_dbg_proc_cmd(phl_info, incmd->in.buf, output, out_len);
 	} else if(incmd->in_type == RTW_ARG_TYPE_ARRAY){
 		phl_dbg_cmd_parser(phl_info, incmd->in.vector,
 				   incmd->in_cnt_len, output, out_len);
 	}
+	return RTW_HAL_STATUS_SUCCESS;
+}
+#else
+
+enum rtw_hal_status
+rtw_phl_dbg_proc_cmd(struct phl_info_t *phl_info,
+                     struct rtw_proc_cmd *incmd,
+                     char *output,
+                     u32 out_len)
+{
 	return RTW_HAL_STATUS_SUCCESS;
 }
 

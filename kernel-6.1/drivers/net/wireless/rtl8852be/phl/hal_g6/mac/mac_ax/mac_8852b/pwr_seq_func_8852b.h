@@ -22,13 +22,26 @@
 
 #define PWR_SEQ_VER_8852B  22
 
+#if MAC_AX_SDIO_SUPPORT
 u32 mac_pwr_on_sdio_8852b(struct mac_ax_adapter *adapter);
+#endif
+#if MAC_AX_USB_SUPPORT
 u32 mac_pwr_on_usb_8852b(struct mac_ax_adapter *adapter);
+#endif
+#if MAC_AX_PCIE_SUPPORT
 u32 mac_pwr_on_pcie_8852b(struct mac_ax_adapter *adapter);
+#endif
 
+#if MAC_AX_SDIO_SUPPORT
 u32 mac_pwr_off_sdio_8852b(struct mac_ax_adapter *adapter);
+#endif
+#if MAC_AX_USB_SUPPORT
 u32 mac_pwr_off_usb_8852b(struct mac_ax_adapter *adapter);
+#endif
+#if MAC_AX_PCIE_SUPPORT
 u32 mac_pwr_off_pcie_8852b(struct mac_ax_adapter *adapter);
+#endif
+
 #if MAC_AX_FEATURE_HV
 u32 mac_enter_lps_sdio_8852b(struct mac_ax_adapter *adapter);
 u32 mac_enter_lps_usb_8852b(struct mac_ax_adapter *adapter);

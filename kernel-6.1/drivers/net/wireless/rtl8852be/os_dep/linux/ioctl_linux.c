@@ -58,6 +58,7 @@ extern u8 str_2char2num(u8 hch, u8 lch);
 extern void macstr2num(u8 *dst, u8 *src);
 extern u8 convert_ip_addr(u8 hch, u8 mch, u8 lch);
 
+#ifdef CONFIG_WIRELESS_EXT
 u32 rtw_rates[] = {1000000, 2000000, 5500000, 11000000,
 	6000000, 9000000, 12000000, 18000000, 24000000, 36000000, 48000000, 54000000};
 
@@ -115,6 +116,7 @@ static void indicate_wx_custom_event(_adapter *padapter, char *msg)
 	rtw_mfree(buff, IW_CUSTOM_MAX + 1);
 
 }
+#endif
 #endif
 
 #if 0
@@ -259,6 +261,7 @@ uint	rtw_is_cckratesonly_included(u8 *rate)
 }
 */
 
+#ifdef CONFIG_WIRELESS_EXT
 static inline char *iwe_stream_mac_addr_proess(_adapter *padapter,
 		struct iw_request_info *info, struct wlan_network *pnetwork,
 		char *start, char *stop, struct iw_event *iwe)
@@ -720,6 +723,7 @@ static char *translate_scan(_adapter *padapter,
 
 	return start;
 }
+#endif
 
 static int wpa_set_auth_algs(struct net_device *dev, u32 value)
 {
@@ -1105,6 +1109,7 @@ exit:
 	return ret;
 }
 
+#ifdef CONFIG_WIRELESS_EXT
 static int rtw_wx_get_name(struct net_device *dev,
 			   struct iw_request_info *info,
 			   union iwreq_data *wrqu, char *extra)
@@ -2075,7 +2080,7 @@ static int rtw_wx_get_scan(struct net_device *dev, struct iw_request_info *a,
 {
 	_list					*plist, *phead;
 	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
-	struct rtw_chset *chset = adapter_to_chset(padapter);
+	struct rf_ctl_t *rfctl = adapter_to_rfctl(padapter);
 	struct	mlme_priv	*pmlmepriv = &(padapter->mlmepriv);
 	_queue				*queue	= &(pmlmepriv->scanned_queue);
 	struct	wlan_network	*pnetwork = NULL;
@@ -2084,8 +2089,6 @@ static int rtw_wx_get_scan(struct net_device *dev, struct iw_request_info *a,
 	u32 ret = 0;
 	u32 wait_for_surveydone;
 	sint wait_status;
-	enum band_type band;
-	u8 ch;
 
 #ifdef CONFIG_P2P
 	struct	wifidirect_info	*pwdinfo = &padapter->wdinfo;
@@ -2146,14 +2149,12 @@ static int rtw_wx_get_scan(struct net_device *dev, struct iw_request_info *a,
 		}
 
 		pnetwork = LIST_CONTAINOR(plist, struct wlan_network, list);
-		band = pnetwork->network.Configuration.Band;
-		ch = pnetwork->network.Configuration.DSConfig;
 
 		/* report network only if the current channel set contains the channel to which this network belongs */
-		if (rtw_chset_search_bch(chset, band, ch) >= 0
-			&& rtw_mlme_band_check(padapter, ch) == _TRUE
+		if (rtw_network_chk_opch_status(rfctl, pnetwork)
+			&& rtw_network_chk_regu_ies(rfctl, pnetwork)
+			&& rtw_mlme_band_check(padapter, BSS_EX_OP_CH(&pnetwork->network)) == _TRUE
 			&& _TRUE == rtw_validate_ssid(&(pnetwork->network.Ssid))
-			&& !rtw_chset_is_bch_non_ocp(chset, band, ch)
 		)
 			ev = translate_scan(padapter, a, pnetwork, ev, stop);
 
@@ -2699,7 +2700,7 @@ static int rtw_wx_set_enc(struct net_device *dev,
 		ret = -EOPNOTSUPP;
 		goto exit;
 	}
-	
+
 
 exit:
 
@@ -2922,14 +2923,10 @@ static int rtw_wx_set_auth(struct net_device *dev,
 		*/
 		if (check_fwstate(&padapter->mlmepriv, WIFI_ASOC_STATE)) {
 			rtw_disassoc_cmd(padapter, 500, RTW_CMDF_WAIT_ACK);
-			if (1
-#ifdef CONFIG_STA_CMD_DISPR
-			    && (MLME_IS_STA(padapter) == _FALSE)
-#endif /* CONFIG_STA_CMD_DISPR */
-			    )
+			if (MLME_IS_STA(padapter) == _FALSE)
 				rtw_free_assoc_resources_cmd(padapter, _TRUE, RTW_CMDF_WAIT_ACK);
 			RTW_INFO("%s...call rtw_indicate_disconnect\n ", __FUNCTION__);
-			rtw_indicate_disconnect(padapter, 0, _FALSE);
+			rtw_indicate_disconnect(padapter, 0, _TRUE);
 
 			pmlmeinfo->disconnect_occurred_time = rtw_systime_to_ms(rtw_get_current_time());
 			pmlmeinfo->disconnect_code = DISCONNECTION_BY_SYSTEM_DUE_TO_HIGH_LAYER_COMMAND;
@@ -3285,7 +3282,7 @@ static int rtw_wx_priv_null(struct net_device *dev, struct iw_request_info *a,
 	return -1;
 }
 
-#ifdef CONFIG_RTW_80211K
+#if defined(CONFIG_RTW_80211K) //|| defined(CONFIG_RTW_FSM_RRM) TODO
 extern void rm_dbg_cmd(_adapter *padapter, char *s);
 static int rtw_wx_priv_rrm(struct net_device *dev, struct iw_request_info *a,
 			    union iwreq_data *wrqu, char *b)
@@ -3322,7 +3319,7 @@ static int rtw_wx_set_channel_plan(struct net_device *dev,
 
 	rtw_chplan_ioctl_input_mapping(&channel_plan_req, NULL);
 
-	if (_SUCCESS != rtw_set_channel_plan(padapter, channel_plan_req, RTW_CHPLAN_6G_UNSPECIFIED, RTW_REGD_SET_BY_USER))
+	if (_SUCCESS != rtw_set_channel_plan(padapter, channel_plan_req, RTW_CHPLAN_6G_UNSPECIFIED, RTW_ENV_NUM, RTW_REGD_SET_BY_USER))
 		return -EPERM;
 
 	return 0;
@@ -3453,11 +3450,6 @@ static void rtw_dbg_mode_hdl(_adapter *padapter, u32 id, u8 *pdata, u32 len)
 	case GEN_MP_IOCTL_SUBCODE(DEL_BA):
 		RTW_INFO("==> delete ba:%x\n", *(u8 *)pdata);
 		rtw_hal_set_hwreg(padapter, HW_VAR_BT_ISSUE_DELBA, pdata);
-		break;
-#endif
-#ifdef DBG_CONFIG_ERROR_DETECT
-	case GEN_MP_IOCTL_SUBCODE(GET_WIFI_STATUS):
-		*pdata = rtw_hal_sreset_get_wifi_status(padapter);
 		break;
 #endif
 
@@ -3739,12 +3731,13 @@ exit:
 	return ret;
 
 }
+#endif
 
 #ifdef DBG_CMD_QUEUE
 u8 dump_cmd_id = 0;
 #endif
 
-#if 1
+#ifdef CONFIG_WIRELESS_EXT
 static int rtw_dbg_port(struct net_device *dev,
 			struct iw_request_info *info,
 			union iwreq_data *wrqu, char *extra)
@@ -3752,664 +3745,6 @@ static int rtw_dbg_port(struct net_device *dev,
 	int ret = 0;
 
 	return ret;
-}
-#else
-static int rtw_dbg_port(struct net_device *dev,
-			struct iw_request_info *info,
-			union iwreq_data *wrqu, char *extra)
-{
-	int ret = 0;
-	u8 major_cmd, minor_cmd;
-	u16 arg;
-	u32 extra_arg, *pdata, val32;
-	struct sta_info *psta;
-	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
-	struct mlme_priv *pmlmepriv = &(padapter->mlmepriv);
-	struct mlme_ext_priv	*pmlmeext = &padapter->mlmeextpriv;
-	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
-	struct security_priv *psecuritypriv = &padapter->securitypriv;
-	struct wlan_network *cur_network = &(pmlmepriv->cur_network);
-	struct sta_priv *pstapriv = &padapter->stapriv;
-
-
-	pdata = (u32 *)&wrqu->data;
-
-	val32 = *pdata;
-	arg = (u16)(val32 & 0x0000ffff);
-	major_cmd = (u8)(val32 >> 24);
-	minor_cmd = (u8)((val32 >> 16) & 0x00ff);
-
-	extra_arg = *(pdata + 1);
-
-	switch (major_cmd) {
-	case 0x70: /* read_reg */
-		switch (minor_cmd) {
-		case 1:
-			RTW_INFO("rtw_read8(0x%x)=0x%02x\n", arg, rtw_read8(padapter, arg));
-			break;
-		case 2:
-			RTW_INFO("rtw_read16(0x%x)=0x%04x\n", arg, rtw_read16(padapter, arg));
-			break;
-		case 4:
-			RTW_INFO("rtw_read32(0x%x)=0x%08x\n", arg, rtw_read32(padapter, arg));
-			break;
-		}
-		break;
-	case 0x71: /* write_reg */
-		switch (minor_cmd) {
-		case 1:
-			rtw_write8(padapter, arg, extra_arg);
-			RTW_INFO("rtw_write8(0x%x)=0x%02x\n", arg, rtw_read8(padapter, arg));
-			break;
-		case 2:
-			rtw_write16(padapter, arg, extra_arg);
-			RTW_INFO("rtw_write16(0x%x)=0x%04x\n", arg, rtw_read16(padapter, arg));
-			break;
-		case 4:
-			rtw_write32(padapter, arg, extra_arg);
-			RTW_INFO("rtw_write32(0x%x)=0x%08x\n", arg, rtw_read32(padapter, arg));
-			break;
-		}
-		break;
-	case 0x72: /* read_bb */
-		RTW_INFO("read_bbreg(0x%x)=0x%x\n", arg, rtw_phl_read_bbreg(padapter, arg, 0xffffffff));
-		break;
-	case 0x73: /* write_bb */
-		rtw_phl_write_bbreg(padapter, arg, 0xffffffff, extra_arg);
-		RTW_INFO("write_bbreg(0x%x)=0x%x\n", arg, rtw_phl_read_bbreg(padapter, arg, 0xffffffff));
-		break;
-	case 0x74: /* read_rf */
-		RTW_INFO("read RF_reg path(0x%02x),offset(0x%x),value(0x%08x)\n", minor_cmd, arg, rtw_hal_read_rfreg(padapter, minor_cmd, arg, 0xffffffff));
-		break;
-	case 0x75: /* write_rf */
-		rtw_phl_write_rfreg(GET_PHL_INFO(dvobj), minor_cmd, arg, 0xffffffff, extra_arg);
-		RTW_INFO("write RF_reg path(0x%02x),offset(0x%x),value(0x%08x)\n", minor_cmd, arg, rtw_hal_read_rfreg(padapter, minor_cmd, arg, 0xffffffff));
-		break;
-
-	case 0x76:
-		switch (minor_cmd) {
-		case 0x00: /* normal mode, */
-			padapter->recvinfo.is_signal_dbg = 0;
-			break;
-		case 0x01: /* dbg mode */
-			padapter->recvinfo.is_signal_dbg = 1;
-			extra_arg = extra_arg > 100 ? 100 : extra_arg;
-			padapter->recvinfo.signal_strength_dbg = extra_arg;
-			break;
-		}
-		break;
-	case 0x78:
-		break;
-	case 0x79: {
-		/*
-		* dbg 0x79000000 [value], set RESP_TXAGC to + value, value:0~15
-		* dbg 0x79010000 [value], set RESP_TXAGC to - value, value:0~15
-		*/
-		u8 value =  extra_arg & 0x0f;
-		u8 sign = minor_cmd;
-		u16 write_value = 0;
-
-		RTW_INFO("%s set RESP_TXAGC to %s %u\n", __func__, sign ? "minus" : "plus", value);
-
-		if (sign)
-			value = value | 0x10;
-
-		write_value = value | (value << 5);
-		rtw_write16(padapter, 0x6d9, write_value);
-	}
-		break;
-	case 0x7a:
-		receive_disconnect(padapter, pmlmeinfo->network.MacAddress
-				   , WLAN_REASON_EXPIRATION_CHK, _FALSE);
-		pmlmeinfo->disconnect_occurred_time = rtw_systime_to_ms(rtw_get_current_time());
-		pmlmeinfo->disconnect_code = DISCONNECTION_BY_DRIVER_DUE_TO_IOCTL_DBG_PORT;
-		pmlmeinfo->wifi_reason_code = WLAN_REASON_UNSPECIFIED;
-		break;
-	case 0x7F:
-		switch (minor_cmd) {
-		case 0x0:
-			RTW_INFO("fwstate=0x%x\n", get_fwstate(pmlmepriv));
-			break;
-		case 0x01:
-			RTW_INFO("auth_alg=0x%x, enc_alg=0x%x, auth_type=0x%x, enc_type=0x%x\n",
-				psecuritypriv->dot11AuthAlgrthm, psecuritypriv->dot11PrivacyAlgrthm,
-				psecuritypriv->ndisauthtype, psecuritypriv->ndisencryptstatus);
-			break;
-		case 0x03:
-			RTW_INFO("qos_option=%d\n", pmlmepriv->qospriv.qos_option);
-#ifdef CONFIG_80211N_HT
-			RTW_INFO("ht_option=%d\n", pmlmepriv->htpriv.ht_option);
-#endif /* CONFIG_80211N_HT */
-			break;
-		case 0x04:
-			RTW_INFO("cur_ch=%d\n", pmlmeext->chandef.chan);
-			RTW_INFO("cur_bw=%d\n", pmlmeext->chandef.bw);
-			RTW_INFO("cur_ch_off=%d\n", pmlmeext->chandef.offset);
-
-			RTW_INFO("oper_ch=%d\n", rtw_get_oper_ch(padapter));
-			RTW_INFO("oper_bw=%d\n", rtw_get_oper_bw(padapter));
-			RTW_INFO("oper_ch_offet=%d\n", rtw_get_oper_choffset(padapter));
-
-			break;
-		case 0x05:
-			psta = rtw_get_stainfo(pstapriv, cur_network->network.MacAddress);
-			if (psta) {
-				RTW_INFO("SSID=%s\n", cur_network->network.Ssid.Ssid);
-				RTW_INFO("sta's macaddr:" MAC_FMT "\n", MAC_ARG(psta->phl_sta->mac_addr));
-				RTW_INFO("cur_channel=%d, cur_bwmode=%d, cur_ch_offset=%d\n",
-					pmlmeext->chandef.chan, pmlmeext->chandef.bw, pmlmeext->chandef.offset);
-				RTW_INFO("rtsen=%d, cts2slef=%d\n", psta->rtsen, psta->cts2self);
-				RTW_INFO("state=0x%x, aid=%d, macid=%d, raid=%d\n",
-					psta->state, psta->phl_sta->aid, psta->phl_sta->macid, psta->phl_sta->ra_info.rate_id);
-#ifdef CONFIG_80211N_HT
-				RTW_INFO("qos_en=%d, ht_en=%d, init_rate=%d\n", psta->qos_option, psta->htpriv.ht_option, psta->init_rate);
-				RTW_INFO("bwmode=%d, ch_offset=%d, sgi_20m=%d,sgi_40m=%d\n"
-					, psta->phl_sta->chandef.bw, psta->htpriv.ch_offset, psta->htpriv.sgi_20m, psta->htpriv.sgi_40m);
-				RTW_INFO("ampdu_enable = %d\n", psta->ampdu_priv.ampdu_enable);
-				RTW_INFO("agg_enable_bitmap=%x, candidate_tid_bitmap=%x\n", psta->ampdu_priv.agg_enable_bitmap, psta->ampdu_priv.candidate_tid_bitmap);
-#endif /* CONFIG_80211N_HT */
-
-				sta_rx_reorder_ctl_dump(RTW_DBGDUMP, psta);
-			} else
-				RTW_INFO("can't get sta's macaddr, cur_network's macaddr:" MAC_FMT "\n", MAC_ARG(cur_network->network.MacAddress));
-			break;
-		case 0x06: {
-				u64 tsf = 0;
-
-				tsf = rtw_hal_get_tsftr_by_port(padapter, extra_arg);
-				RTW_INFO(" PORT-%d TSF :%21lld\n", extra_arg, tsf);
-		}
-			break;
-		case 0x07:
-			RTW_INFO("bSurpriseRemoved=%s, bDriverStopped=%s\n"
-				, dev_is_surprise_removed(adapter_to_dvobj(padapter)) ? "True" : "False"
-				, dev_is_drv_stopped(adapter_to_dvobj(padapter)) ? "True" : "False");
-			break;
-		case 0x08: {
-			struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
-			struct recv_priv  *precvpriv = &adapter_to_dvobj(padapter)->recvpriv;
-
-			RTW_INFO("free_xmitbuf_cnt=%d, free_xmitframe_cnt=%d"
-				", free_xmit_extbuf_cnt=%d, free_xframe_ext_cnt=%d"
-				 ", free_recvframe_cnt=%d\n",
-				pxmitpriv->free_xmitbuf_cnt, pxmitpriv->free_xmitframe_cnt,
-				pxmitpriv->free_xmit_extbuf_cnt, pxmitpriv->free_xframe_ext_cnt,
-				 precvpriv->free_recvframe_cnt);
-		}
-			break;
-		case 0x09: {
-			int i;
-			_list	*plist, *phead;
-
-#ifdef CONFIG_AP_MODE
-			RTW_INFO_DUMP("sta_dz_bitmap:", pstapriv->sta_dz_bitmap, pstapriv->aid_bmp_len);
-			RTW_INFO_DUMP("tim_bitmap:", pstapriv->tim_bitmap, pstapriv->aid_bmp_len);
-#endif
-			_rtw_spinlock_bh(&pstapriv->sta_hash_lock);
-
-			for (i = 0; i < NUM_STA; i++) {
-				phead = &(pstapriv->sta_hash[i]);
-				plist = get_next(phead);
-
-				while ((rtw_end_of_queue_search(phead, plist)) == _FALSE) {
-					psta = LIST_CONTAINOR(plist, struct sta_info, hash_list);
-
-					plist = get_next(plist);
-
-					if (extra_arg == psta->phl_sta->aid) {
-						RTW_INFO("sta's macaddr:" MAC_FMT "\n", MAC_ARG(psta->phl_sta->mac_addr));
-						RTW_INFO("rtsen=%d, cts2slef=%d\n", psta->rtsen, psta->cts2self);
-						RTW_INFO("state=0x%x, aid=%d, macid=%d, raid=%d\n",
-							psta->state, psta->phl_sta->aid, psta->phl_sta->macid, psta->phl_sta->ra_info.rate_id);
-#ifdef CONFIG_80211N_HT
-						RTW_INFO("qos_en=%d, ht_en=%d, init_rate=%d\n", psta->qos_option, psta->htpriv.ht_option, psta->init_rate);
-						RTW_INFO("bwmode=%d, ch_offset=%d, sgi_20m=%d,sgi_40m=%d\n",
-							psta->phl_sta->chandef.bw, psta->htpriv.ch_offset, psta->htpriv.sgi_20m,
-							psta->htpriv.sgi_40m);
-						RTW_INFO("ampdu_enable = %d\n", psta->ampdu_priv.ampdu_enable);
-						RTW_INFO("agg_enable_bitmap=%x, candidate_tid_bitmap=%x\n", psta->ampdu_priv.agg_enable_bitmap, psta->ampdu_priv.candidate_tid_bitmap);
-#endif /* CONFIG_80211N_HT */
-
-#ifdef CONFIG_AP_MODE
-						RTW_INFO("capability=0x%x\n", psta->capability);
-						RTW_INFO("flags=0x%x\n", psta->flags);
-						RTW_INFO("wpa_psk=0x%x\n", psta->wpa_psk);
-						RTW_INFO("wpa2_group_cipher=0x%x\n", psta->wpa2_group_cipher);
-						RTW_INFO("wpa2_pairwise_cipher=0x%x\n", psta->wpa2_pairwise_cipher);
-						RTW_INFO("qos_info=0x%x\n", psta->qos_info);
-#endif
-						RTW_INFO("dot118021XPrivacy=0x%x\n", psta->dot118021XPrivacy);
-
-						sta_rx_reorder_ctl_dump(RTW_DBGDUMP, psta);
-					}
-
-				}
-			}
-
-			_rtw_spinunlock_bh(&pstapriv->sta_hash_lock);
-
-		}
-			break;
-
-		case 0x0b: { /* Enable=1, Disable=0 driver control vrtl_carrier_sense. */
-			/* u8 driver_vcs_en; */ /* Enable=1, Disable=0 driver control vrtl_carrier_sense. */
-			/* u8 driver_vcs_type; */ /* force 0:disable VCS, 1:RTS-CTS, 2:CTS-to-self when vcs_en=1. */
-
-			if (arg == 0) {
-				RTW_INFO("disable driver ctrl vcs\n");
-				padapter->driver_vcs_en = 0;
-			} else if (arg == 1) {
-				RTW_INFO("enable driver ctrl vcs = %d\n", extra_arg);
-				padapter->driver_vcs_en = 1;
-
-				if (extra_arg > 2)
-					padapter->driver_vcs_type = 1;
-				else
-					padapter->driver_vcs_type = extra_arg;
-			}
-		}
-			break;
-		case 0x0c: { /* dump rx/tx packet */
-			if (arg == 0) {
-				RTW_INFO("dump rx packet (%d)\n", extra_arg);
-				/* pHalData->bDumpRxPkt =extra_arg;						 */
-				rtw_hal_set_def_var(padapter, HAL_DEF_DBG_DUMP_RXPKT, &(extra_arg));
-			} else if (arg == 1) {
-				RTW_INFO("dump tx packet (%d)\n", extra_arg);
-				rtw_hal_set_def_var(padapter, HAL_DEF_DBG_DUMP_TXPKT, &(extra_arg));
-			}
-		}
-			break;
-		case 0x0e: {
-			if (arg == 0) {
-				RTW_INFO("disable driver ctrl rx_ampdu_factor\n");
-				padapter->driver_rx_ampdu_factor = 0xFF;
-			} else if (arg == 1) {
-
-				RTW_INFO("enable driver ctrl rx_ampdu_factor = %d\n", extra_arg);
-
-				if (extra_arg > 0x03)
-					padapter->driver_rx_ampdu_factor = 0xFF;
-				else
-					padapter->driver_rx_ampdu_factor = extra_arg;
-			}
-		}
-			break;
-		#ifdef DBG_CONFIG_ERROR_DETECT
-		case 0x0f: {
-			if (extra_arg == 0) {
-				RTW_INFO("###### silent reset test.......#####\n");
-				rtw_hal_sreset_reset(padapter);
-			} else {
-				struct rtw_phl_com_t *phl_com = GET_PHL_COM(padapter);
-				struct sreset_priv *psrtpriv = &pHalData->srestpriv;
-				psrtpriv->dbg_trigger_point = extra_arg;
-			}
-
-		}
-			break;
-		case 0x15: {
-			struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(padapter);
-			RTW_INFO("==>silent resete cnts:%d\n", pwrpriv->ips_enter_cnts);
-		}
-			break;
-
-		#endif
-
-		case 0x10: /* driver version display */
-			dump_drv_version(RTW_DBGDUMP);
-			break;
-		case 0x11: { /* dump linked status */
-			int pre_mode;
-			pre_mode = padapter->bLinkInfoDump;
-			/* rtw_hal_linked_info_dump(padapter,extra_arg); */
-			if (extra_arg == 1 || (extra_arg == 0 && pre_mode == 1)) /* not consider pwr_saving 0: */
-				padapter->bLinkInfoDump = extra_arg;
-
-			else if ((extra_arg == 2) || (extra_arg == 0 && pre_mode == 2)) { /* consider power_saving */
-				/* RTW_INFO("rtw_hal_linked_info_dump =%s\n", (padapter->bLinkInfoDump)?"enable":"disable") */
-				rtw_hal_linked_info_dump(padapter, extra_arg);
-			}
-
-
-
-		}
-			break;
-#ifdef CONFIG_80211N_HT
-		case 0x12: { /* set rx_stbc */
-			struct registry_priv	*pregpriv = &padapter->registrypriv;
-			/* 0: disable, bit(0):enable 2.4g, bit(1):enable 5g, 0x3: enable both 2.4g and 5g */
-			/* default is set to enable 2.4GHZ for IOT issue with bufflao's AP at 5GHZ */
-			if (extra_arg == 0 || extra_arg == 1 || extra_arg == 2 || extra_arg == 3) {
-				pregpriv->rx_stbc = extra_arg;
-				RTW_INFO("set rx_stbc=%d\n", pregpriv->rx_stbc);
-			} else {
-				RTW_INFO("get rx_stbc=%d\n", pregpriv->rx_stbc);
-			}
-		}
-			break;
-		case 0x13: { /* set ampdu_enable */
-			struct registry_priv	*pregpriv = &padapter->registrypriv;
-			/* 0: disable, 0x1:enable */
-			if (extra_arg < 2) {
-				pregpriv->ampdu_enable = extra_arg;
-				RTW_INFO("set ampdu_enable=%d\n", pregpriv->ampdu_enable);
-			} else {
-				RTW_INFO("get ampdu_enable=%d\n", pregpriv->ampdu_enable);
-			}
-		}
-			break;
-#endif
-		case 0x14: { /* get wifi_spec */
-			struct registry_priv	*pregpriv = &padapter->registrypriv;
-			RTW_INFO("get wifi_spec=%d\n", pregpriv->wifi_spec);
-
-		}
-			break;
-
-#ifdef DBG_FIXED_CHAN
-		case 0x17: {
-			struct mlme_ext_priv	*pmlmeext = &(padapter->mlmeextpriv);
-			printk("===>  Fixed channel to %d\n", extra_arg);
-			pmlmeext->fixed_chan = extra_arg;
-
-		}
-			break;
-#endif
-#ifdef CONFIG_80211N_HT
-		case 0x19: {
-			struct registry_priv	*pregistrypriv = &padapter->registrypriv;
-			/* extra_arg : */
-			/* BIT0: Enable VHT LDPC Rx, BIT1: Enable VHT LDPC Tx, */
-			/* BIT4: Enable HT LDPC Rx, BIT5: Enable HT LDPC Tx */
-			if (arg == 0) {
-				RTW_INFO("driver disable LDPC\n");
-				pregistrypriv->ldpc_cap = 0x00;
-			} else if (arg == 1) {
-				RTW_INFO("driver set LDPC cap = 0x%x\n", extra_arg);
-				pregistrypriv->ldpc_cap = (u8)(extra_arg & 0x33);
-			}
-		}
-			break;
-		case 0x1a: {
-			struct registry_priv	*pregistrypriv = &padapter->registrypriv;
-			/* extra_arg : */
-			/* BIT0: Enable VHT STBC Rx, BIT1: Enable VHT STBC Tx, */
-			/* BIT4: Enable HT STBC Rx, BIT5: Enable HT STBC Tx */
-			if (arg == 0) {
-				RTW_INFO("driver disable STBC\n");
-				pregistrypriv->stbc_cap = 0x00;
-			} else if (arg == 1) {
-				RTW_INFO("driver set STBC cap = 0x%x\n", extra_arg);
-				pregistrypriv->stbc_cap = (u8)(extra_arg & 0x33);
-			}
-		}
-			break;
-#endif /* CONFIG_80211N_HT */
-		case 0x1b: {
-			struct registry_priv	*pregistrypriv = &padapter->registrypriv;
-
-			if (arg == 0) {
-				RTW_INFO("disable driver ctrl max_rx_rate, reset to default_rate_set\n");
-				init_mlme_default_rate_set(padapter);
-#ifdef CONFIG_80211N_HT
-				pregistrypriv->ht_enable = (u8)rtw_ht_enable;
-#endif /* CONFIG_80211N_HT */
-			} else if (arg == 1) {
-
-				int i;
-				u8 max_rx_rate;
-
-				RTW_INFO("enable driver ctrl max_rx_rate = 0x%x\n", extra_arg);
-
-				max_rx_rate = (u8)extra_arg;
-
-				if (max_rx_rate < 0xc) { /* max_rx_rate < MSC0->B or G -> disable HT */
-#ifdef CONFIG_80211N_HT
-					pregistrypriv->ht_enable = 0;
-#endif /* CONFIG_80211N_HT */
-					for (i = 0; i < NumRates; i++) {
-						if (pmlmeext->datarate[i] > max_rx_rate)
-							pmlmeext->datarate[i] = 0xff;
-					}
-
-				}
-#ifdef CONFIG_80211N_HT
-				else if (max_rx_rate < 0x1c) { /* mcs0~mcs15 */
-					u32 mcs_bitmap = 0x0;
-
-					for (i = 0; i < ((max_rx_rate + 1) - 0xc); i++)
-						mcs_bitmap |= BIT(i);
-
-					set_mcs_rate_by_mask(pmlmeext->default_supported_mcs_set, mcs_bitmap);
-				}
-#endif /* CONFIG_80211N_HT							 */
-			}
-		}
-			break;
-		case 0x1c: { /* enable/disable driver control AMPDU Density for peer sta's rx */
-			if (arg == 0) {
-				RTW_INFO("disable driver ctrl ampdu density\n");
-				padapter->driver_ampdu_spacing = 0xFF;
-			} else if (arg == 1) {
-
-				RTW_INFO("enable driver ctrl ampdu density = %d\n", extra_arg);
-
-				if (extra_arg > 0x07)
-					padapter->driver_ampdu_spacing = 0xFF;
-				else
-					padapter->driver_ampdu_spacing = extra_arg;
-			}
-		}
-			break;
-
-
-#if defined(CONFIG_SDIO_HCI) && defined(CONFIG_SDIO_INDIRECT_ACCESS) && defined(DBG_SDIO_INDIRECT_ACCESS)
-		case 0x1f:
-			{
-				int i, j = 0, test_cnts = 0;
-				static u8 test_code = 0x5A;
-				static u32 data_misatch_cnt = 0, d_acc_err_cnt = 0;
-
-				u32 d_data, i_data;
-				u32 imr;
-
-				test_cnts = extra_arg;
-				for (i = 0; i < test_cnts; i++) {
-					if (RTW_CANNOT_IO(adapter_to_dvobj(padapter)))
-						break;
-
-					rtw_write8(padapter, 0x07, test_code);
-
-					d_data = rtw_read32(padapter, 0x04);
-					imr =  rtw_read32(padapter, 0x10250014);
-					rtw_write32(padapter, 0x10250014, 0);
-					rtw_msleep_os(50);
-
-					i_data = rtw_sd_iread32(padapter, 0x04);
-
-					rtw_write32(padapter, 0x10250014, imr);
-
-					if (d_data != i_data) {
-						data_misatch_cnt++;
-						RTW_ERR("d_data :0x%08x, i_data : 0x%08x\n", d_data, i_data);
-					}
-
-					if (test_code != (i_data >> 24)) {
-						d_acc_err_cnt++;
-						rtw_write8(padapter, 0x07, 0xAA);
-						RTW_ERR("test_code :0x%02x, i_data : 0x%08x\n", test_code, i_data);
-					}
-					if ((j++) == 100) {
-						rtw_msleep_os(2000);
-						RTW_INFO(" Indirect access testing..........%d/%d\n", i, test_cnts);
-						j = 0;
-					}
-
-					test_code = ~test_code;
-					rtw_msleep_os(50);
-				}
-				RTW_INFO("========Indirect access test=========\n");
-				RTW_INFO(" test_cnts = %d\n", test_cnts);
-				RTW_INFO(" direct & indirect read32 data missatch cnts = %d\n", data_misatch_cnt);
-				RTW_INFO(" indirect rdata is not equal to wdata cnts = %d\n", d_acc_err_cnt);
-				RTW_INFO("========Indirect access test=========\n\n");
-				data_misatch_cnt = d_acc_err_cnt = 0;
-
-			}
-			break;
-#endif
-		case 0x20:
-			{
-				if (arg == 0xAA) {
-					u8 page_offset, page_num;
-
-					page_offset = (u8)(extra_arg >> 16);
-					page_num = (u8)(extra_arg & 0xFF);
-					rtw_hal_dump_rsvd_page(RTW_DBGDUMP, padapter, page_offset, page_num);
-				}
-#ifdef CONFIG_SUPPORT_FIFO_DUMP
-				else {
-					u8 fifo_sel;
-					u32 addr, size;
-
-					fifo_sel = (u8)(arg & 0x0F);
-					addr = (extra_arg >> 16) & 0xFFFF;
-					size = extra_arg & 0xFFFF;
-					rtw_dump_fifo(RTW_DBGDUMP, padapter, fifo_sel, addr, size);
-				}
-#endif
-			}
-			break;
-
-		case 0x23: {
-			RTW_INFO("turn %s the bNotifyChannelChange Variable\n", (extra_arg == 1) ? "on" : "off");
-			padapter->bNotifyChannelChange = extra_arg;
-			break;
-		}
-		case 0x24: {
-#ifdef CONFIG_P2P
-			RTW_INFO("turn %s the bShowGetP2PState Variable\n", (extra_arg == 1) ? "on" : "off");
-			padapter->bShowGetP2PState = extra_arg;
-#endif /* CONFIG_P2P */
-			break;
-		}
-#ifdef CONFIG_GPIO_API
-		case 0x25: { /* Get GPIO register */
-			/*
-			* dbg 0x7f250000 [gpio_num], Get gpio value, gpio_num:0~7
-			*/
-
-			u8 value;
-			RTW_INFO("Read GPIO Value  extra_arg = %d\n", extra_arg);
-			value = rtw_hal_get_gpio(padapter, extra_arg);
-			RTW_INFO("Read GPIO Value = %d\n", value);
-			break;
-		}
-		case 0x26: { /* Set GPIO direction */
-
-			/* dbg 0x7f26000x [y], Set gpio direction,
-			* x: gpio_num,4~7  y: indicate direction, 0~1
-			*/
-
-			int value;
-			RTW_INFO("Set GPIO Direction! arg = %d ,extra_arg=%d\n", arg , extra_arg);
-			value = rtw_hal_config_gpio(padapter, arg, extra_arg);
-			RTW_INFO("Set GPIO Direction %s\n", (value == -1) ? "Fail!!!" : "Success");
-			break;
-		}
-		case 0x27: { /* Set GPIO output direction value */
-			/*
-			* dbg 0x7f27000x [y], Set gpio output direction value,
-			* x: gpio_num,4~7  y: indicate direction, 0~1
-			*/
-
-			int value;
-			RTW_INFO("Set GPIO Value! arg = %d ,extra_arg=%d\n", arg , extra_arg);
-			value = rtw_hal_set_gpio_output_value(padapter, arg, extra_arg);
-			RTW_INFO("Set GPIO Value %s\n", (value == -1) ? "Fail!!!" : "Success");
-			break;
-		}
-#endif
-#ifdef DBG_CMD_QUEUE
-		case 0x28: {
-			dump_cmd_id = extra_arg;
-			RTW_INFO("dump_cmd_id:%d\n", dump_cmd_id);
-		}
-			break;
-#endif /* DBG_CMD_QUEUE */
-		case 0xaa: {
-			if ((extra_arg & 0x7F) > 0x3F)
-				extra_arg = 0xFF;
-			RTW_INFO("chang data rate to :0x%02x\n", extra_arg);
-			padapter->fix_rate = extra_arg;
-		}
-			break;
-		case 0xdd: { /* registers dump , 0 for mac reg,1 for bb reg, 2 for rf reg */
-			if (extra_arg == 0)
-				mac_reg_dump(RTW_DBGDUMP, padapter);
-			else if (extra_arg == 1)
-				bb_reg_dump(RTW_DBGDUMP, padapter);
-			else if (extra_arg == 2)
-				rf_reg_dump(RTW_DBGDUMP, padapter);
-			else if (extra_arg == 11)
-				bb_reg_dump_ex(RTW_DBGDUMP, padapter);
-		}
-			break;
-
-		case 0xee: {
-			RTW_INFO(" === please control /proc  to trun on/off PHYDM func ===\n");
-		}
-			break;
-
-		case 0xfd:
-			rtw_write8(padapter, 0xc50, arg);
-			RTW_INFO("wr(0xc50)=0x%x\n", rtw_read8(padapter, 0xc50));
-			rtw_write8(padapter, 0xc58, arg);
-			RTW_INFO("wr(0xc58)=0x%x\n", rtw_read8(padapter, 0xc58));
-			break;
-		case 0xfe:
-			RTW_INFO("rd(0xc50)=0x%x\n", rtw_read8(padapter, 0xc50));
-			RTW_INFO("rd(0xc58)=0x%x\n", rtw_read8(padapter, 0xc58));
-			break;
-		case 0xff: {
-			RTW_INFO("dbg(0x210)=0x%x\n", rtw_read32(padapter, 0x210));
-			RTW_INFO("dbg(0x608)=0x%x\n", rtw_read32(padapter, 0x608));
-			RTW_INFO("dbg(0x280)=0x%x\n", rtw_read32(padapter, 0x280));
-			RTW_INFO("dbg(0x284)=0x%x\n", rtw_read32(padapter, 0x284));
-			RTW_INFO("dbg(0x288)=0x%x\n", rtw_read32(padapter, 0x288));
-
-			RTW_INFO("dbg(0x664)=0x%x\n", rtw_read32(padapter, 0x664));
-
-
-			RTW_INFO("\n");
-
-			RTW_INFO("dbg(0x430)=0x%x\n", rtw_read32(padapter, 0x430));
-			RTW_INFO("dbg(0x438)=0x%x\n", rtw_read32(padapter, 0x438));
-
-			RTW_INFO("dbg(0x440)=0x%x\n", rtw_read32(padapter, 0x440));
-
-			RTW_INFO("dbg(0x458)=0x%x\n", rtw_read32(padapter, 0x458));
-
-			RTW_INFO("dbg(0x484)=0x%x\n", rtw_read32(padapter, 0x484));
-			RTW_INFO("dbg(0x488)=0x%x\n", rtw_read32(padapter, 0x488));
-
-			RTW_INFO("dbg(0x444)=0x%x\n", rtw_read32(padapter, 0x444));
-			RTW_INFO("dbg(0x448)=0x%x\n", rtw_read32(padapter, 0x448));
-			RTW_INFO("dbg(0x44c)=0x%x\n", rtw_read32(padapter, 0x44c));
-			RTW_INFO("dbg(0x450)=0x%x\n", rtw_read32(padapter, 0x450));
-		}
-			break;
-		}
-		break;
-	default:
-		RTW_INFO("error dbg cmd!\n");
-		break;
-	}
-
-
-	return ret;
-
 }
 #endif
 
@@ -5043,7 +4378,7 @@ static int rtw_del_sta(struct net_device *dev, struct ieee_param *param)
 		rtw_stapriv_asoc_list_lock(pstapriv);
 		if (rtw_is_list_empty(&psta->asoc_list) == _FALSE) {
 			rtw_stapriv_asoc_list_del(pstapriv, psta);
-			updated = ap_free_sta(padapter, psta, _TRUE, WLAN_REASON_DEAUTH_LEAVING, _TRUE, _FALSE);
+			updated = ap_free_sta(padapter, psta, _TRUE, 0, WLAN_REASON_DEAUTH_LEAVING, _TRUE);
 
 		}
 		rtw_stapriv_asoc_list_unlock(pstapriv);
@@ -5552,6 +4887,7 @@ out:
 }
 #endif
 
+#ifdef CONFIG_WIRELESS_EXT
 static int rtw_wx_set_priv(struct net_device *dev,
 			   struct iw_request_info *info,
 			   union iwreq_data *awrq,
@@ -5684,7 +5020,7 @@ static int rtw_wx_set_priv(struct net_device *dev,
 	case ANDROID_WIFI_CMD_COUNTRY: {
 		char country_code[10];
 		sscanf(ext, "%*s %s", country_code);
-		rtw_set_country(padapter, country_code, RTW_REGD_SET_BY_USER);
+		rtw_set_country(padapter, country_code, RTW_ENV_NUM, RTW_REGD_SET_BY_USER);
 		sprintf(ext, "OK");
 	}
 		break;
@@ -5721,6 +5057,8 @@ FREE_EXT:
 	return ret;
 
 }
+#endif
+
 #ifdef CONFIG_WOWLAN
 static int rtw_wowlan_ctrl(struct net_device *dev,
 			   struct iw_request_info *info,
@@ -6234,7 +5572,7 @@ static int rtw_mp_customer_str(
 }
 #endif /* CONFIG_RTW_CUSTOMER_STR */
 
-
+#ifdef CONFIG_WIRELESS_EXT
 #ifdef CONFIG_SDIO_INDIRECT_ACCESS
 #define DBG_MP_SDIO_INDIRECT_ACCESS 1
 static int rtw_mp_sd_iread(struct net_device *dev
@@ -6497,7 +5835,7 @@ static int rtw_priv_get(struct net_device *dev,
 #endif
 
 	} else {
-			switch (subcmd) {
+		switch (subcmd) {
 #ifdef CONFIG_SDIO_INDIRECT_ACCESS
 			case MP_SD_IREAD:
 				status = rtw_mp_sd_iread(dev, info, wrqu, extra);
@@ -6514,8 +5852,8 @@ static int rtw_priv_get(struct net_device *dev,
 #endif
 			default:
 				return -EIO;
-			}
 		}
+	}
 
 	return status;
 }
@@ -8140,7 +7478,7 @@ static const struct iw_priv_args rtw_private_args[] = {
 		SIOCIWFIRSTPRIV + 0x16,
 		IW_PRIV_TYPE_CHAR | 64, 0, "pm_set"
 	},
-#ifdef CONFIG_RTW_80211K
+#if defined(CONFIG_RTW_80211K) //|| defined(CONFIG_RTW_FSM_RRM) TODO
 	{
 		SIOCIWFIRSTPRIV + 0x17,
 		IW_PRIV_TYPE_CHAR | 1024, IW_PRIV_TYPE_CHAR | 1024 , "rrm"
@@ -8228,7 +7566,7 @@ static const struct iw_priv_args rtw_mp_private_args[] = {
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_txpower"},
 	{ MP_ANT_TX , IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_ant_tx"},
-	{ MP_ANT_RX , IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, 
+	{ MP_ANT_RX , IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_ant_rx"},
 	{ WRITE_REG , IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "write_reg" },
@@ -8272,7 +7610,7 @@ static const struct iw_priv_args rtw_mp_private_args[] = {
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_rx" },
 	{ MP_HW_TX_MODE, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_hxtx" },
-	{ MP_PWRLMT, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, 
+	{ MP_PWRLMT, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_pwrlmt" },
 	{ MP_PWRBYRATE, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_pwrbyrate" },
@@ -8281,13 +7619,13 @@ static const struct iw_priv_args rtw_mp_private_args[] = {
 	{ MP_LCK, IW_PRIV_TYPE_CHAR | 1024, 0, "mp_lck"},
 	{ BT_EFUSE_FILE, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "bt_efuse_file" },
-	{ MP_SWRFPath, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, 
+	{ MP_SWRFPath, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_swrfpath" },
-	{ MP_LINK, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, 
+	{ MP_LINK, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_link" },
 	{ MP_DPK, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_dpk"},
-	{ MP_DPK_TRK, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, 
+	{ MP_DPK_TRK, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_dpk_trk" },
 	{ MP_GET_TSSIDE, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
 				IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_get_tsside" },
@@ -8370,7 +7708,7 @@ static iw_handler rtw_private_handler[] = {
 	rtw_tdls,						/* 0x14 */
 	rtw_tdls_get,					/* 0x15 */
 
-#ifdef CONFIG_RTW_80211K
+#if defined(CONFIG_RTW_80211K) //|| defined(CONFIG_RTW_FSM_RRM) TODO
 	rtw_wx_priv_rrm,				/* 0x17 */
 #else
 	rtw_wx_priv_null,				/* 0x17 */
@@ -8436,7 +7774,6 @@ static struct iw_statistics *rtw_get_wireless_stats(struct net_device *dev)
 }
 #endif
 
-#ifdef CONFIG_WIRELESS_EXT
 struct iw_handler_def rtw_handlers_def = {
 	.standard = rtw_handlers,
 	.num_standard = sizeof(rtw_handlers) / sizeof(iw_handler),
@@ -8450,7 +7787,6 @@ struct iw_handler_def rtw_handlers_def = {
 	.get_wireless_stats = rtw_get_wireless_stats,
 #endif
 };
-#endif
 
 /* copy from net/wireless/wext.c start
  * ----------------------------------------------------------------
@@ -8886,6 +8222,7 @@ static int rtw_ioctl_wext_private(struct net_device *dev, struct ifreq *rq)
 #endif /* CONFIG_COMPAT */
 		return rtw_ioctl_standard_wext_private(dev, rq);
 }
+#endif /* CONFIG_WIRELESS_EXT */
 
 int rtw_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
@@ -8906,9 +8243,11 @@ int rtw_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 		break;
 #endif
 #endif /* CONFIG_AP_MODE */
+#ifdef CONFIG_WIRELESS_EXT
 	case SIOCDEVPRIVATE:
 		ret = rtw_ioctl_wext_private(dev, rq);
 		break;
+#endif
 	case (SIOCDEVPRIVATE+1):
 		ret = rtw_android_priv_cmd(dev, rq, cmd);
 		break;

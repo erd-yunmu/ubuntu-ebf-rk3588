@@ -38,13 +38,13 @@ void halbb_spatial_reuse_set_pwr_ref(struct bb_info *bb, u32 val)
 {
 	struct rtw_hal_com_t *hal_com = bb->hal_com;
 	struct bb_spatial_reuse_info *bb_sr = &bb->bb_sr_i;
-	struct bb_spatial_reuse_cr_info *cr = &bb_sr->bb_spatial_reuse_cr_i;
+	struct bb_spatial_reuse_cr_info *cr = &bb->bb_cmn_hooker->bb_spatial_reuse_cr_i;
 	
 	BB_DBG(bb, DBG_PWR_CTRL, "[%s] set pwr_ref to {%d}dBm", __func__,
 		  (val & 0x7f));
 
 	bb_sr->txpwr_ref = (val & 0x7f);
-	rtw_hal_mac_write_msk_pwr_reg(hal_com, HW_PHY_0, cr->r_sr_txpwr_ref,
+	halbb_write_mask_pwr_reg_cmn(bb, HW_PHY_0, cr->r_sr_txpwr_ref,
 								  cr->r_sr_txpwr_ref_m, bb_sr->txpwr_ref);
 }
 
@@ -79,6 +79,8 @@ void halbb_spatial_reuse_update(struct bb_info *bb)
 
 void halbb_spatial_reuse(struct bb_info *bb)
 {
+	halbb_show_cr_cnt(bb, BB_WD_SPATIAL_REUSE);
+
 	BB_DBG(bb, DBG_PWR_CTRL, "[%s]", __func__);
 	
 	if (halbb_spatial_reuse_abort(bb))
@@ -118,13 +120,30 @@ void halbb_spatial_reuse_init(struct bb_info *bb)
 
 void halbb_spatial_reuse_en(struct bb_info *bb, bool sr_en)
 {
-	struct bb_spatial_reuse_info *bb_sr = &bb->bb_sr_i;
-	struct rtw_mac_ax_sr_info *sr_info = &bb_sr->ax_sr_info;
+	struct rtw_mac_ax_sr_info *sr_info = &bb->bb_sr_i.ax_sr_info;
 
 	BB_DBG(bb, DBG_PWR_CTRL, "[%s]", __func__);
 
 	sr_info->sr_en = (sr_en)? 1 : 0;
 	halbb_spatial_reuse_update(bb);
+}
+
+void halbb_spatial_reuse_en_cmn(struct bb_info *bb_0, bool sr_en, enum phl_phy_idx phy_idx)
+{
+	struct bb_info *bb = bb_0;
+	struct rtw_mac_ax_sr_info *sr_info;
+
+#ifdef HALBB_DBCC_SUPPORT
+	HALBB_GET_PHY_PTR(bb_0, bb, phy_idx);
+#endif
+
+	sr_info = &bb->bb_sr_i.ax_sr_info;
+	sr_info->sr_en = (sr_en)? 1 : 0;
+	halbb_spatial_reuse_update(bb);
+#ifdef HALBB_COMPILE_AX_SERIOUS
+	if(sr_info->sr_en)
+		halbb_set_reg_cmn(bb, 0x0620, 0x3F00, 0x1C, phy_idx);
+#endif
 }
 
 bool halbb_spatial_reuse_is_en(struct bb_info *bb)
@@ -134,9 +153,20 @@ bool halbb_spatial_reuse_is_en(struct bb_info *bb)
 	return (bb->bb_sr_i.ax_sr_info.sr_en)? true : false;
 }
 
+bool halbb_spatial_reuse_is_en_cmn(struct bb_info *bb_0, enum phl_phy_idx phy_idx)
+{
+	struct bb_info *bb = bb_0;
+
+#ifdef HALBB_DBCC_SUPPORT
+	HALBB_GET_PHY_PTR(bb_0, bb, phy_idx);
+#endif
+	return (bb->bb_sr_i.ax_sr_info.sr_en)? true : false;
+}
+
+
 void halbb_cr_cfg_spatial_reuse_init(struct bb_info *bb)
 {
-	struct bb_spatial_reuse_cr_info *cr = &bb->bb_sr_i.bb_spatial_reuse_cr_i;
+	struct bb_spatial_reuse_cr_info *cr = &bb->bb_cmn_hooker->bb_spatial_reuse_cr_i;
 	
 	BB_DBG(bb, DBG_PWR_CTRL, "[%s]", __func__);
 
@@ -190,9 +220,9 @@ void halbb_spatial_reuse_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 	else if (_os_strcmp(input[1], "sr_en") == 0) {
 		HALBB_SCAN(input[2], DCMD_HEX, &val[0]);
 		if (val[0] == 0)
-			halbb_spatial_reuse_en(bb, false);
+			halbb_spatial_reuse_en_cmn(bb, false, bb->bb_phy_idx);
 		else
-			halbb_spatial_reuse_en(bb, true);
+			halbb_spatial_reuse_en_cmn(bb, true, bb->bb_phy_idx);
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			   		"sr_en = %s\n", (val[0])? "true" : "false");
 	}
@@ -223,5 +253,30 @@ void halbb_spatial_reuse_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 	}
 }
 
+#else
+void halbb_spatial_reuse_en(struct bb_info *bb, bool sr_en)
+{
+	return;
+}
+
+
+void halbb_spatial_reuse_en_cmn(struct bb_info *bb_0, bool sr_en, enum phl_phy_idx phy_idx)
+{
+	BB_WARNING("[%s] SR not supported\n", __func__);
+	return;
+}
+
+bool halbb_spatial_reuse_is_en(struct bb_info *bb)
+{
+	return false;
+}
+
+bool halbb_spatial_reuse_is_en_cmn(struct bb_info *bb_0, enum phl_phy_idx phy_idx)
+{
+	BB_WARNING("[%s] SR not supported\n", __func__);
+	return false;
+}
+
 #endif
+
 

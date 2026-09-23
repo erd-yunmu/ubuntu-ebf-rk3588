@@ -41,7 +41,7 @@ u32 switch_efuse_bank_8852b(struct mac_ax_adapter *adapter,
 			bank_efuse_info->log_map_size =
 				&hw_info->dav_log_efuse_size;
 			bank_efuse_info->efuse_start =
-				&hw_info->dav_efuse_start_addr;
+				&efuse_param->dav_efuse_start_addr;
 			break;
 		}
 
@@ -53,7 +53,7 @@ u32 switch_efuse_bank_8852b(struct mac_ax_adapter *adapter,
 		bank_efuse_info->efuse_end = &efuse_param->efuse_end;
 		bank_efuse_info->phy_map_size = &hw_info->efuse_size;
 		bank_efuse_info->log_map_size = &hw_info->log_efuse_size;
-		bank_efuse_info->efuse_start = &hw_info->wl_efuse_start_addr;
+		bank_efuse_info->efuse_start = &efuse_param->wl_efuse_start_addr;
 		break;
 	case MAC_AX_EFUSE_BANK_BT:
 		bank_efuse_info->phy_map = &efuse_param->bt_efuse_map;
@@ -65,7 +65,7 @@ u32 switch_efuse_bank_8852b(struct mac_ax_adapter *adapter,
 		bank_efuse_info->efuse_end = &efuse_param->bt_efuse_end;
 		bank_efuse_info->phy_map_size = &hw_info->bt_efuse_size;
 		bank_efuse_info->log_map_size = &hw_info->bt_log_efuse_size;
-		bank_efuse_info->efuse_start = &hw_info->bt_efuse_start_addr;
+		bank_efuse_info->efuse_start = &efuse_param->bt_efuse_start_addr;
 		break;
 	default:
 		return MACEFUSEBANK;
@@ -134,6 +134,47 @@ void disable_efuse_sw_pwr_cut_8852b(struct mac_ax_adapter *adapter,
 	} else {
 		disable_efuse_pwr_cut_dav(adapter, is_write);
 	}
+}
+
+u32 efuse_info_init_8852b(struct mac_ax_adapter *adapter)
+{
+	struct mac_ax_efuse_ofld_info *ofld_info = &adapter->efuse_ofld_info;
+	enum mac_ax_intf intf = adapter->env_info.intf;
+	struct mac_ax_hw_info *hw_info = adapter->hw_info;
+
+	PLTFM_MUTEX_INIT(&adapter->efuse_param.efuse_tbl.lock);
+
+	adapter->efuse_param.dv_sel = DDV;
+	adapter->efuse_param.efuse_ctrl = R_AX_EFUSE_CTRL;
+	adapter->efuse_param.read_efuse_cnt = EFUSE_WAIT_CNT;
+	adapter->efuse_param.bt_dis_state = BT_DIS_STATE_INIT;
+	adapter->efuse_param.wl_efuse_start_addr = 0;
+	adapter->efuse_param.dav_efuse_start_addr = 0;
+	adapter->efuse_param.bt_efuse_start_addr = hw_info->wl_efuse_size;
+	adapter->efuse_param.bt_efuse_axic_use_be_parser = 0;
+	adapter->efuse_param.hidden_valid = 0;
+
+	ofld_info->buf = (u8 *)PLTFM_MALLOC(CMD_OFLD_MAX_LEN);
+	if (!ofld_info->buf)
+		return MACBUFALLOC;
+
+	switch (intf) {
+	case MAC_AX_INTF_PCIE:
+		adapter->efuse_param.limit_efuse_size = LIMIT_EFUSE_SIZE_PCIE_AX;
+		break;
+	case MAC_AX_INTF_USB:
+		adapter->efuse_param.limit_efuse_size = LIMIT_EFUSE_SIZE_USB_AX;
+		break;
+	case MAC_AX_INTF_SDIO:
+		adapter->efuse_param.limit_efuse_size = LIMIT_EFUSE_SIZE_SDIO_AX;
+		break;
+	default:
+		adapter->efuse_param.limit_efuse_size = LIMIT_EFUSE_SIZE_PCIE_AX;
+		PLTFM_MSG_ERR("[ERR]Unknown intf : %d\n", intf);
+		break;
+	}
+
+	return MACSUCCESS;
 }
 
 #endif /* MAC_AX_8852B_SUPPORT */

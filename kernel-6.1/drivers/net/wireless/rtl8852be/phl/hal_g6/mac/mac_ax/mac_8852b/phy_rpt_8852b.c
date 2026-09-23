@@ -14,8 +14,10 @@
  ******************************************************************************/
 
 #include "phy_rpt_8852b.h"
+#include "../../feature_cfg.h"
 
 #if MAC_AX_8852B_SUPPORT
+#if MAC_FEAT_PHY_RPT
 
 #define MAC_AX_DISP_QID_HOST 0x2
 #define MAC_AX_DISP_QID_WLCPU 0xB
@@ -42,4 +44,5 @@ u32 mac_cfg_per_pkt_phy_rpt_8852b(struct mac_ax_adapter *adapter,
 	return MACNOTSUP;
 }
 
+#endif /* #if MAC_FEAT_PHY_RPT */
 #endif /* #if MAC_AX_8852B_SUPPORT */

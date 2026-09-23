@@ -17,43 +17,7 @@
 #include "coex.h"
 #include "mac_priv.h"
 
-#define RPWM_SEQ_NUM_MAX                3
-#define CPWM_SEQ_NUM_MAX                3
-
-//RPWM bit definition
-#define PS_RPWM_TOGGLE			BIT(15)
-#define PS_RPWM_ACK             BIT(14)
-#define PS_RPWM_SEQ_NUM_SH      12
-#define PS_RPWM_SEQ_NUM_MSK     0x3
-#define PS_RPWM_NOTIFY_WAKE     BIT(8)
-#define PS_RPWM_STATE_SH        0
-#define PS_RPWM_STATE_MSK       0x7
-
-//CPWM bit definition
-#define PS_CPWM_TOGGLE			BIT(15)
-#define PS_CPWM_ACK             BIT(14)
-#define PS_CPWM_SEQ_NUM_SH      12
-#define PS_CPWM_SEQ_NUM_MSK     0x3
-#define PS_CPWM_RSP_SEQ_NUM_SH  8
-#define PS_CPWM_RSP_SEQ_NUM_MSK 0x3
-#define PS_CPWM_STATE_SH        0
-#define PS_CPWM_STATE_MSK       0x7
-
-//(workaround) CPWM register is in OFF area
-//LPS debug message bit definition
-#define B_PS_LDM_32K_EN         BIT(31)
-#define B_PS_LDM_32K_EN_SH      31
-
-// Bcn rx rate
-#define R_RXBCNHIT_RATE R_AX_USER_DEFINED_0
-#define B_AX_BCN_RATE_SH 0
-#define B_AX_BCN_RATE_MSK 0xff
-#define B_AX_BCN_HIT_RATE_SH 8
-#define B_AX_BCN_HIT_RATE_MSK 0xff
-#define B_AX_BCN_NO_HIT_RATE_SH 16
-#define B_AX_BCN_NO_HIT_RATE_MSK 0xff
-#define B_AX_ROLE_IDX_SH 24
-#define B_AX_ROLE_IDX_MSK 0xff
+#if MAC_FEAT_LPS
 
 static u32 lps_status[4] = {0};
 static u32 ips_status[4] = {0};
@@ -147,7 +111,7 @@ static void send_rpwm(struct mac_ax_adapter *adapter,
 	else
 		rpwm_value &= ~PS_RPWM_TOGGLE;
 
-	switch (adapter->hw_info->intf) {
+	switch (adapter->env_info.intf) {
 #if MAC_AX_USB_SUPPORT
 	case MAC_AX_INTF_USB:
 #if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
@@ -158,10 +122,9 @@ static void send_rpwm(struct mac_ax_adapter *adapter,
 			MAC_REG_W16(R_AX_USB_D2F_F2D_INFO + 2, rpwm_value);
 #endif
 
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D))
 			MAC_REG_W16(R_AX_USB_D2F_F2D_INFO_V1 + 2, rpwm_value);
 #endif
@@ -178,10 +141,9 @@ static void send_rpwm(struct mac_ax_adapter *adapter,
 			MAC_REG_W16(R_AX_SDIO_HRPWM1 + 2, rpwm_value);
 #endif
 
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D))
 			MAC_REG_W16(R_AX_SDIO_HRPWM1_V1 + 2, rpwm_value);
 #endif
@@ -203,10 +165,9 @@ static void send_rpwm(struct mac_ax_adapter *adapter,
 			MAC_REG_W16(R_AX_PCIE_HRPWM, rpwm_value);
 #endif
 
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D))
 			MAC_REG_W16(R_AX_PCIE_HRPWM_V1, rpwm_value);
 #endif
@@ -215,7 +176,7 @@ static void send_rpwm(struct mac_ax_adapter *adapter,
 #endif //MAC_AX_PCIE_SUPPORT
 	default:
 		PLTFM_MSG_ERR("%s: invalid interface = %d!!\n",
-			      __func__, adapter->hw_info->intf);
+			      __func__, adapter->env_info.intf);
 
 		break;
 	}
@@ -417,9 +378,9 @@ static u32 chk_cur_pwr_state(struct mac_ax_adapter *adapter,
 	u32 ret = MACSUCCESS;
 #endif
 #if MAC_AX_USB_SUPPORT
-#define USB_ON_IOH_SW_RST_RETRY_CNT 100
-#define USB_ON_IOH_SW_RST_WAIT_US 50
-	u32 val32, cnt;
+	struct mac_ax_ops *mac_ops = adapter_to_mac_ops(adapter);
+	u8 dummyval = 0;
+	u32 ret_val;
 #endif
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 
@@ -446,29 +407,18 @@ static u32 chk_cur_pwr_state(struct mac_ax_adapter *adapter,
 		cpwm = MAC_REG_R16(R_AX_CPWM);
 #endif
 
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-		switch (adapter->hw_info->intf) {
+		switch (adapter->env_info.intf) {
 #if MAC_AX_USB_SUPPORT
 		case MAC_AX_INTF_USB:
-			if (chk_patch_usb_on_ioh_sw_rst(adapter) == PATCH_ENABLE) {
-				val32 = MAC_REG_R32(R_AX_USB_IO_OFFREG_WDT_V1) |
-						    B_AX_ON_IOH_SW_RST_V1;
-				MAC_REG_W32(R_AX_USB_IO_OFFREG_WDT_V1, val32);
-				cnt = USB_ON_IOH_SW_RST_RETRY_CNT;
-				while (--cnt) {
-					val32 = MAC_REG_R32(R_AX_USB_IO_OFFREG_WDT_V1);
-					if (!(val32 & B_AX_OFF_IOH_RST_STS_V1))
-						break;
-					PLTFM_DELAY_US(USB_ON_IOH_SW_RST_WAIT_US);
-				}
-				if (!cnt)
-					PLTFM_MSG_ERR("%s: reset off wrapper polling timeout!!\n",
-						      __func__);
-			}
+			ret_val = mac_ops->set_hw_value(adapter, MAC_AX_HW_SET_USB_IOH_SW_RST,
+							&dummyval);
+			if (ret_val != MACSUCCESS)
+				PLTFM_MSG_ERR("%s: USB_IOH_SW_RST fail: %d!!\n",
+					      __func__, ret_val);
 			cpwm = MAC_REG_R16(R_AX_USB_D2F_F2D_INFO_V1);
 			break;
 #endif // MAC_AX_USB_SUPPORT
@@ -486,7 +436,7 @@ static u32 chk_cur_pwr_state(struct mac_ax_adapter *adapter,
 #endif // MAC_AX_PCIE_SUPPORT
 		default:
 			PLTFM_MSG_ERR("%s: invalid interface = %d!!\n",
-				      __func__, adapter->hw_info->intf);
+				      __func__, adapter->env_info.intf);
 			return MACCPWMINTFERR;
 			break;
 		}
@@ -525,13 +475,12 @@ static u32 chk_cur_pwr_state(struct mac_ax_adapter *adapter,
 
 	if (adapter->mac_pwr_info.pwr_in_lps) {
 		adapter->mac_pwr_info.pwr_in_lps = 0;
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 #if MAC_AX_PCIE_SUPPORT
-			if (adapter->hw_info->intf == MAC_AX_INTF_PCIE) {
+			if (adapter->env_info.intf == MAC_AX_INTF_PCIE) {
 				ret = p_ops->sync_trx_bd_idx(adapter);
 				if (ret != MACSUCCESS) {
 					PLTFM_MSG_ERR("sync trx bd fail: %d\n",
@@ -601,18 +550,19 @@ u32 mac_ps_pwr_state(struct mac_ax_adapter *adapter,
 
 void show_rx_bcn_info(struct mac_ax_adapter *adapter)
 {
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 	u8 role_idx, bcn_rate, hit_rate, no_hit_rate;
+	u32 bcn_rate_info;
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-		role_idx = (u8)GET_FIELD(MAC_REG_R32(R_RXBCNHIT_RATE), B_AX_ROLE_IDX);
-		bcn_rate = (u8)GET_FIELD(MAC_REG_R32(R_RXBCNHIT_RATE), B_AX_BCN_RATE);
-		hit_rate = (u8)GET_FIELD(MAC_REG_R32(R_RXBCNHIT_RATE), B_AX_BCN_HIT_RATE);
-		no_hit_rate = (u8)GET_FIELD(MAC_REG_R32(R_RXBCNHIT_RATE), B_AX_BCN_NO_HIT_RATE);
+		bcn_rate_info = MAC_REG_R32(R_RXBCNHIT_RATE);
+		role_idx = (u8)GET_FIELD(bcn_rate_info, B_AX_ROLE_IDX);
+		bcn_rate = (u8)GET_FIELD(bcn_rate_info, B_AX_BCN_RATE);
+		hit_rate = (u8)GET_FIELD(bcn_rate_info, B_AX_BCN_HIT_RATE);
+		no_hit_rate = (u8)GET_FIELD(bcn_rate_info, B_AX_BCN_NO_HIT_RATE);
 		PLTFM_MSG_ALWAYS("role_idx: %d, bcn_rx_rate = %d%%, hit_rate = %d%%, no_hit_rate = %d%%\n",
 				 role_idx, bcn_rate, hit_rate, no_hit_rate);
 	}
@@ -632,6 +582,12 @@ u32 mac_chk_leave_lps(struct mac_ax_adapter *adapter, u8 macid)
 	u32 reg_sleep = 0;
 	u8 macid_grp = macid >> MACID_GRP_SH;
 	u8 macid_sh = macid & MACID_GRP_MASK;
+
+	/* If FWIPS is also enabled in the same MACID, it should be followed by
+	 * leaving LPS. Bypass this check preventing from polling timeout.
+	 */
+	if (ips_status[macid_grp] & BIT(macid_sh))
+		return MACSUCCESS;
 
 	role = mac_role_srch(adapter, macid);
 
@@ -679,39 +635,14 @@ u32 mac_chk_leave_lps(struct mac_ax_adapter *adapter, u8 macid)
 	show_rx_bcn_info(adapter);
 
 #if MAC_AX_PCIE_SUPPORT
-	if (adapter->hw_info->intf == MAC_AX_INTF_PCIE) {
-		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
-			struct mac_ax_pcie_ltr_param ltr_param = {
-				1,
-				0,
-				MAC_AX_PCIE_DEFAULT,
-				MAC_AX_PCIE_DEFAULT,
-				MAC_AX_PCIE_LTR_SPC_DEF,
-				MAC_AX_PCIE_LTR_IDLE_TIMER_DEF,
-				{MAC_AX_PCIE_DEFAULT, 0},
-				{MAC_AX_PCIE_DEFAULT, 0},
-				{MAC_AX_PCIE_DEFAULT, 0},
-				{MAC_AX_PCIE_DEFAULT, 0},
-				{MAC_AX_PCIE_DEFAULT, 0},
-				MAC_AX_PCIE_IGNORE,
-				MAC_AX_PCIE_IGNORE,
-				MAC_AX_PCIE_IGNORE,
-				PCIE_LTR_IDX_INVALID,
-				PCIE_LTR_IDX_INVALID,
-				PCIE_LTR_IDX_INVALID
-			};
-			u32 ret;
+	if (adapter->env_info.intf == MAC_AX_INTF_PCIE) {
+		struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
+		u32 ret;
 
-			ret = ops->ltr_set_pcie(adapter, &ltr_param);
-			if (ret != MACSUCCESS) {
-				PLTFM_MSG_ERR("[ERR]pcie ltr set fail %d\n", ret);
-				return ret;
-			}
-#endif
+		ret = p_ops->ltr_dyn_ctrl(adapter, LTR_DYN_CTRL_LEAVE_LPS, 0);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]%s pcie ltr dyn ctrl fail %d\n", __func__, ret);
+			return ret;
 		}
 	}
 #endif
@@ -839,6 +770,12 @@ u32 mac_chk_leave_ips(struct mac_ax_adapter *adapter, u8 macid)
 	u8 macid_grp = macid >> MACID_GRP_SH;
 	u8 macid_sh = macid & MACID_GRP_MASK;
 
+	/* If LPS is also enabled in the same MACID, it should be followed by
+	 * leaving FWIPS. Bypass this check preventing from polling timeout.
+	 */
+	if (lps_status[macid_grp] & BIT(macid_sh))
+		return MACSUCCESS;
+
 	role = mac_role_srch(adapter, macid);
 
 	if (!role) {
@@ -880,39 +817,14 @@ u32 mac_chk_leave_ips(struct mac_ax_adapter *adapter, u8 macid)
 		return MACPSSTATFAIL;
 
 #if MAC_AX_PCIE_SUPPORT
-	if (adapter->hw_info->intf == MAC_AX_INTF_PCIE) {
-		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
-			struct mac_ax_pcie_ltr_param ltr_param = {
-				1,
-				0,
-				MAC_AX_PCIE_DEFAULT,
-				MAC_AX_PCIE_DEFAULT,
-				MAC_AX_PCIE_LTR_SPC_DEF,
-				MAC_AX_PCIE_LTR_IDLE_TIMER_DEF,
-				{MAC_AX_PCIE_DEFAULT, 0},
-				{MAC_AX_PCIE_DEFAULT, 0},
-				{MAC_AX_PCIE_DEFAULT, 0},
-				{MAC_AX_PCIE_DEFAULT, 0},
-				{MAC_AX_PCIE_DEFAULT, 0},
-				MAC_AX_PCIE_IGNORE,
-				MAC_AX_PCIE_IGNORE,
-				MAC_AX_PCIE_IGNORE,
-				PCIE_LTR_IDX_INVALID,
-				PCIE_LTR_IDX_INVALID,
-				PCIE_LTR_IDX_INVALID
-			};
-			u32 ret;
+	if (adapter->env_info.intf == MAC_AX_INTF_PCIE) {
+		struct mac_ax_priv_ops *p_ops = adapter_to_priv_ops(adapter);
+		u32 ret;
 
-			ret = ops->ltr_set_pcie(adapter, &ltr_param);
-			if (ret != MACSUCCESS) {
-				PLTFM_MSG_ERR("[ERR]pcie ltr set fail %d\n", ret);
-				return ret;
-			}
-#endif
+		ret = p_ops->ltr_dyn_ctrl(adapter, LTR_DYN_CTRL_LEAVE_IPS, 0);
+		if (ret != MACSUCCESS) {
+			PLTFM_MSG_ERR("[ERR]%s pcie ltr dyn ctrl fail %d\n", __func__, ret);
+			return ret;
 		}
 	}
 #endif
@@ -937,6 +849,16 @@ u32 mac_ps_notify_wake(struct mac_ax_adapter *adapter)
 	struct ps_rpwm_parm parm;
 
 	PLTFM_MEMSET(&parm, 0, sizeof(struct ps_rpwm_parm));
+
+#if MAC_AX_8852BT_SUPPORT || MAC_AX_8852D_SUPPORT
+	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT) ||
+	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
+		parm.notify_wake = 1;
+		send_rpwm(adapter, &parm);
+
+		return MACSUCCESS;
+	}
+#endif
 
 	if (adapter->mac_pwr_info.pwr_in_lps == 0) {
 		PLTFM_MSG_ERR("%s: Not in power saving!\n", __func__);
@@ -1170,15 +1092,15 @@ u32 set_pwr_st_cfg(struct mac_ax_adapter *adapter,
 	case REQ_PWR_ST_MP_INTER_BCN:
 		// set LPS option
 #if MAC_AX_PCIE_SUPPORT
-		if (adapter->hw_info->intf == MAC_AX_INTF_PCIE)
+		if (adapter->env_info.intf == MAC_AX_INTF_PCIE)
 			MAC_REG_W32(R_AX_WLLPS_CTRL, MP_INTER_BCN_LPS_OP_PCIE);
 #endif
 #if MAC_AX_USB_SUPPORT
-		if (adapter->hw_info->intf == MAC_AX_INTF_USB)
+		if (adapter->env_info.intf == MAC_AX_INTF_USB)
 			MAC_REG_W32(R_AX_WLLPS_CTRL, MP_INTER_BCN_LPS_OP_USB);
 #endif
 #if MAC_AX_SDIO_SUPPORT
-		if (adapter->hw_info->intf == MAC_AX_INTF_USB)
+		if (adapter->env_info.intf == MAC_AX_INTF_USB)
 			MAC_REG_W32(R_AX_WLLPS_CTRL, MP_INTER_BCN_LPS_OP_SDIO);
 #endif
 		// enter LPS
@@ -1267,7 +1189,8 @@ u32 send_h2c_req_pwr_lvl(struct mac_ax_adapter *adapter,
 	cpu_to_le32(SET_WORD(parm->macid, FWCMD_H2C_PS_POWER_LEVEL_MACID) |
 		    SET_WORD(parm->bcn_to_val, FWCMD_H2C_PS_POWER_LEVEL_BCN_TO_VAL) |
 		    SET_WORD(parm->ps_lvl, FWCMD_H2C_PS_POWER_LEVEL_PS_LVL) |
-		    SET_WORD(parm->trx_lvl, FWCMD_H2C_PS_POWER_LEVEL_TRX_LVL));
+		    SET_WORD(parm->trx_lvl, FWCMD_H2C_PS_POWER_LEVEL_TRX_LVL) |
+		    SET_WORD(parm->dtim_to_val, FWCMD_H2C_PS_POWER_LEVEL_DTIM_TO_VAL));
 
 	ret = mac_h2c_common(adapter, &h2c_info, (u32 *)fwcmd_req_pwr_lvl);
 
@@ -1298,9 +1221,13 @@ u32 mac_req_pwr_lvl_cfg(struct mac_ax_adapter *adapter,
 	else if (pwr_lvl_info->bcn_to_val > REQ_BCN_TO_VAL_MAX)
 		pwr_lvl_info->bcn_to_val = REQ_BCN_TO_VAL_MAX;
 
+	if (pwr_lvl_info->dtim_to_val < REQ_DTIM_TO_VAL_MIN)
+		pwr_lvl_info->dtim_to_val = REQ_DTIM_TO_VAL_MIN;
+
 	parm.bcn_to_val = pwr_lvl_info->bcn_to_val;
 	parm.ps_lvl = pwr_lvl_info->ps_lvl;
 	parm.trx_lvl = pwr_lvl_info->trx_lvl;
+	parm.dtim_to_val = pwr_lvl_info->dtim_to_val;
 
 	ret = send_h2c_req_pwr_lvl(adapter, &parm);
 
@@ -1345,13 +1272,34 @@ u32 mac_lps_option_cfg(struct mac_ax_adapter *adapter,
 	PLTFM_MEMSET(&parm, 0, sizeof(struct lps_option_cfg));
 
 #if MAC_AX_USB_SUPPORT
-	if (adapter->hw_info->intf == MAC_AX_INTF_USB) {
+	if (adapter->env_info.intf == MAC_AX_INTF_USB) {
 		parm.req_lps_option = lps_opt->req_xtal_option;
 		ret = send_h2c_lps_option_cfg(adapter, &parm);
 	}
 #endif //MAC_AX_USB_SUPPORT
 	return ret;
 }
+
+u32 mac_chk_mac_pwr_state(struct mac_ax_adapter *adapter, u32 *pwr_state,
+			  enum mac_ax_chk_mac_pwr_state_action action)
+{
+	u32 chk_val;
+	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
+
+	if (action == MAC_AX_CHK_MAC_PWR_STATE_ACTIVE)
+		chk_val = MAC_PWR_STATE_ACTIVE;
+	else if (action == MAC_AX_CHK_MAC_PWR_STATE_LPS)
+		chk_val = MAC_PWR_STATE_LPS;
+	else
+		return MACWRONGPARA;
+
+	*pwr_state = MAC_REG_R32(R_AX_IC_PWR_STATE);
+	if (chk_val == GET_FIELD(*pwr_state, B_AX_WLMAC_PWR_STE))
+		return MACSUCCESS;
+
+	return MACPWRSTATEERR;
+}
+#endif // #if MAC_FEAT_LPS
 
 u32 send_h2c_tbtt_tuning(struct mac_ax_adapter *adapter,
 			 struct tbtt_tuning_cfg *parm)
@@ -1391,11 +1339,13 @@ u32 mac_tbtt_tuning_cfg(struct mac_ax_adapter *adapter,
 {
 	u32 ret = MACSUCCESS;
 	struct tbtt_tuning_cfg parm;
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT
+#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || \
+MAC_AX_8852BT_SUPPORT
 	struct mac_ax_port_cfg_para cfg_para;
 
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
 		is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
+		is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT) ||
 		is_chip_id(adapter, MAC_AX_CHIP_ID_8851B)) {
 
 		cfg_para.mbssid_idx = 0;
@@ -1425,3 +1375,4 @@ u32 mac_tbtt_tuning_cfg(struct mac_ax_adapter *adapter,
 
 	return ret;
 }
+

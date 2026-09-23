@@ -81,7 +81,7 @@ void phl_reset_rx_stats(struct rtw_stats *stats)
 	stats->rx_byte_total = 0;
 	stats->rx_tp_kbits = 0;
 	stats->last_rx_time_ms = 0;
-	stats->rxtp.last_calc_time_ms = 0;
+	stats->rxtp.last_calc_bits = 0;
 	stats->rxtp.last_calc_time_ms = 0;
 	stats->rx_traffic.lvl = RTW_TFC_IDLE;
 	stats->rx_traffic.sts = 0;
@@ -183,7 +183,7 @@ void phl_release_phl_rx(struct phl_info_t *phl_info,
 
 	rx_pkt_pool = (struct phl_rx_pkt_pool *)phl_info->rx_pkt_pool;
 
-	_os_mem_set(phl_to_drvpriv(phl_info), &phl_rx->r, 0, sizeof(phl_rx->r));
+	_os_mem_set(drv_priv, &phl_rx->r, 0, sizeof(phl_rx->r));
 	phl_rx->type = RTW_RX_TYPE_MAX;
 	phl_rx->rxbuf_ptr = NULL;
 	INIT_LIST_HEAD(&phl_rx->list);
@@ -488,8 +488,8 @@ phl_rx_handle_sta_process(struct phl_info_t *phl_info,
 		if (role) {
 			rlink = phl_get_rlink_by_hw_band(role, m->bb_sel);
 
-			sta = rtw_phl_get_stainfo_by_addr(phl_info,
-			                                  role, rlink, m->ta);
+			sta = rtw_phl_get_stainfo_by_addr(phl_info, role, rlink,
+							  m->ta, false);
 		}
 	}
 
@@ -606,8 +606,6 @@ out:
 	          r->head_seq_num, r->tid);
 }
 
-#define HT_RX_REORDER_BUF_TIMEOUT_MS 500
-
 /*
  * If the MPDU at head_seq_num is ready,
  *     1. release all subsequent MPDUs with consecutive SN and
@@ -656,10 +654,8 @@ static void phl_reorder_release(struct phl_info_t *phl_info,
 				continue;
 			}
 			if (skipped && (s32)(r->reorder_time[j] +
-				HT_RX_REORDER_BUF_TIMEOUT_MS - cur_time) > 0)
+				r->sta->reorder_timeout - cur_time) > 0)
 				goto set_release_timer;
-
-			PHL_TRACE(COMP_PHL_RECV, _PHL_INFO_, "release an RX reorder frame due to timeout on earlier frames\n");
 
 			phl_release_reorder_frame(phl_info, r, j, frames);
 
@@ -669,22 +665,23 @@ static void phl_reorder_release(struct phl_info_t *phl_info,
 			r->head_seq_num =
 				(r->head_seq_num + skipped) & SEQ_MASK;
 
-			PHL_TRACE(COMP_PHL_RECV, _PHL_INFO_, "release an RX reorder frame, new head_seq 0x%03x (tid=%u)\n",
+			PHL_TRACE(COMP_PHL_RECV, _PHL_INFO_, "release an Rx reorder frame, new head_seq 0x%03x (tid=%u)\n",
 			          r->head_seq_num, r->tid);
 			skipped = 0;
 		}
-	} else while (r->reorder_buf[index]) {
-		phl_release_reorder_frame(phl_info, r, index, frames);
-		index = reorder_index(r, r->head_seq_num);
+	} else {
+		while (r->reorder_buf[index]) {
+			phl_release_reorder_frame(phl_info, r, index, frames);
+			index = reorder_index(r, r->head_seq_num);
+		}
 	}
 
 	if (r->stored_mpdu_num) {
 
 set_release_timer:
-
+		PHL_TRACE(COMP_PHL_RECV, _PHL_DEBUG_, "set reorder timer with timeout %d\n", r->sta->reorder_timeout);
 		if (!r->removed)
-			_os_set_timer(r->drv_priv, &r->sta->reorder_timer,
-			              HT_RX_REORDER_BUF_TIMEOUT_MS);
+			_os_set_timer(r->drv_priv, &r->sta->reorder_timer, r->sta->reorder_timeout);
 	}
 }
 
@@ -748,7 +745,7 @@ void rtw_phl_flush_reorder_buf(void *phl, struct rtw_phl_stainfo_t *sta)
 	_os_list frames;
 	u8 i = 0;
 
-	PHL_INFO("%s: sta=0x%p\n", __FUNCTION__, sta);
+	PHL_INFO("%s: sta=0x%p\n", __func__, sta);
 
 	INIT_LIST_HEAD(&frames);
 
@@ -764,6 +761,25 @@ void rtw_phl_flush_reorder_buf(void *phl, struct rtw_phl_stainfo_t *sta)
 	_phl_indic_new_rxpkt(phl_info);
 #endif
 
+}
+
+void rtw_phl_set_reorder_timeout(void *phl, struct rtw_phl_stainfo_t *sta, u16 value)
+{
+	struct phl_info_t *phl_info = (struct phl_info_t *)phl;
+	void *drv_priv = NULL;
+
+	if (!phl || !sta)
+		return;
+	drv_priv = phl_to_drvpriv(phl_info);
+
+	if (value == 0)
+		return;
+
+	PHL_INFO("%s: sta=0x%p, value %d\n", __func__, sta, value);
+
+	_os_spinlock(drv_priv, &sta->tid_rx_lock, _bh, NULL);
+	sta->reorder_timeout = value;
+	_os_spinunlock(drv_priv, &sta->tid_rx_lock, _bh, NULL);
 }
 
 #ifdef PHL_RXSC_AMPDU
@@ -842,6 +858,8 @@ static bool phl_manage_sta_reorder_buf(struct phl_info_t *phl_info,
 	buf_size = r->buf_size;
 	head_seq_num = r->head_seq_num;
 
+	PHL_TRACE(COMP_PHL_RECV, _PHL_DEBUG_, "Get mpdu seq 0x%03x (tid=%u)\n", mpdu_seq_num, r->tid);
+
 	/*
 	 * If the current MPDU's SN is smaller than the SSN, it shouldn't
 	 * be reordered.
@@ -873,14 +891,21 @@ static bool phl_manage_sta_reorder_buf(struct phl_info_t *phl_info,
 		return true;
 	}
 
-	/*
+	/**
 	 * If frame the sequence number exceeds our buffering window
 	 * size release some previous frames to make room for this one.
 	 */
 	if (!seq_less(mpdu_seq_num, head_seq_num + buf_size)) {
-		head_seq_num = seq_inc(seq_sub(mpdu_seq_num, buf_size));
-		/* release stored frames up to new head to stack */
-		phl_release_reorder_frames(phl_info, r, head_seq_num, frames);
+		if (seq_less(mpdu_seq_num, head_seq_num + (SEQ_MODULO >> 1))) {
+			head_seq_num = seq_inc(seq_sub(mpdu_seq_num, buf_size));
+			/* release stored frames up to new head to stack */
+			phl_release_reorder_frames(phl_info, r, head_seq_num, frames);
+		} else {
+			PHL_TRACE(COMP_PHL_RECV, _PHL_WARNING_, "Rx drop (out of window): seq 0x%03x, head 0x%03x (tid=%u)\n",
+			          meta->seq, r->head_seq_num, r->tid);
+			hci_trx_ops->recycle_rx_pkt(phl_info, pkt);
+			return true;
+		}
 	}
 
 	/* Now the new frame is always in the range of the reordering buffer */
@@ -1313,13 +1338,16 @@ void rtw_phl_rx_bar(void *phl, struct rtw_phl_stainfo_t *sta, u8 tid, u16 seq)
 		return;
 	}
 
-	if (seq_less(seq, r->head_seq_num)) {
+	/* WinStart + 2^11 <= SSN <= WinStart */
+	if (seq_less(seq, r->head_seq_num) ||
+	    seq_less(r->head_seq_num + (SEQ_MODULO >> 1), seq)) {
 		_os_spinunlock(drv_priv, &sta->tid_rx_lock, _bh, NULL);
 		PHL_TRACE(COMP_PHL_RECV, _PHL_WARNING_, "%s: bar seq 0x%03x, preceding head 0x%03x (tid=%u)\n",
 				  __func__, seq, r->head_seq_num, tid);
 		return;
 	}
 
+	/* WinStart < SSN < WinStart + 2^11 */
 	PHL_TRACE(COMP_PHL_RECV, _PHL_INFO_, "%s: bar seq 0x%03x, head 0x%03x (tid=%u)\n",
 			  __func__, seq, r->head_seq_num, tid);
 
@@ -1968,7 +1996,7 @@ void phl_rx_proc_snif_info(struct phl_info_t *phl_info, struct rtw_phl_rx_pkt *p
 #ifdef CONFIG_PHL_RX_PSTS_PER_PKT
 			if (NULL != normal_f_phl_rx) {
 				if (true == phl_rx->r.phy_info.is_snif_i_vld) {
-					_os_mem_cpy(phl_to_drvpriv(phl_info),
+					_os_mem_cpy(d,
 						    &normal_f_phl_rx->r.phy_info,
 						    &phl_rx->r.phy_info,
 						    sizeof(struct rtw_phl_ppdu_phy_info));
@@ -2029,7 +2057,7 @@ void _phl_rx_proc_snif_info_ex(struct phl_info_t *phl_info,
 		if (NULL != ops->os_process_snif_info) {
 
 			if (true == ppdu_sts->r.phy_info.is_snif_i_vld) {
-				_os_mem_cpy(phl_to_drvpriv(phl_info),
+				_os_mem_cpy(d,
 					    &normal_rx->r.phy_info,
 					    &ppdu_sts->r.phy_info,
 					    sizeof(struct rtw_phl_ppdu_phy_info));
@@ -2177,6 +2205,7 @@ phl_rx_proc_ppdu_sts(struct phl_info_t *phl_info, struct rtw_phl_rx_pkt *phl_rx)
 			}
 		}
 	}
+	ppdu_sts_ent->frame_type = RTW_FRAME_TYPE_MAX;
 #ifdef CONFIG_PHL_SNIFFER_SUPPORT
 	/* sniffer info for high performance mode : only process once in recving ppdu_sts */
 	if (SNIFFER_INFO_MODE_HIGH_PERFORMANCE == ppdu_info->sniffer_info_mode) {

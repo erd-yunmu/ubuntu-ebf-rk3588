@@ -23,8 +23,7 @@
 #include <rtw_recv_shortcut.h>
 #endif
 
-#define IBSS_START_MAC_ID	2
-#define NUM_STA MACID_NUM_SW_LIMIT
+#define NUM_STA STA_NUM_SW_LIMIT
 
 #ifndef CONFIG_RTW_MACADDR_ACL
 	#define CONFIG_RTW_MACADDR_ACL 1
@@ -136,21 +135,13 @@ struct	stainfo_stats	{
 	u64	rx_bytes;
 	u64	rx_bc_bytes;
 	u64	rx_mc_bytes;
-	u64	last_rx_bytes;
-	u64 last_rx_bc_bytes;
-	u64 last_rx_mc_bytes;
 	u64	rx_drops; /* TBD */
-	u32 rx_tp_kbits;
-	u32 smooth_rx_tp_kbits;
 
 	u64	tx_pkts;
 	u64	last_tx_pkts;
 
 	u64	tx_bytes;
-	u64	last_tx_bytes;
 	u64 tx_drops; /* TBD */
-	u32 tx_tp_kbits;
-	u32 smooth_tx_tp_kbits;
 
 	/* unicast only */
 	u64 last_rx_data_uc_pkts; /* For Read & Clear requirement in proc_get_rx_stat() */
@@ -263,14 +254,12 @@ struct rtw_atlm_param {
 };
 #endif
 
-#ifdef CONFIG_AP_CMD_DISPR
 struct rtw_add_del_sta_obj {
 	_list list;
 	struct sta_info *sta;
 	u8 is_add_sta;
 	u16 aid;
 };
-#endif
 
 struct sta_info {
 
@@ -303,7 +292,7 @@ struct sta_info {
 	uint qos_option;
 	u16 hwseq;
 
-#ifdef CONFIG_RTW_80211K
+#if defined(CONFIG_RTW_80211K) || defined(CONFIG_RTW_FSM_RRM)
 	u8 rm_en_cap[5];
 	u8 rm_diag_token;
 #endif /* CONFIG_RTW_80211K */
@@ -455,6 +444,9 @@ struct sta_info {
 	struct rtw_sta_ft_info_t ft_peer;
 	u8 ft_pairwise_key_installed;
 #endif
+#ifdef CONFIG_RTW_FSM_BTM
+	struct btm_obj *btm;
+#endif
 
 #ifdef CONFIG_NATIVEAP_MLME
 	u8 wpa_ie[32];
@@ -515,9 +507,7 @@ struct sta_info {
 	u16 pid; /* pairing id */
 #endif
 
-#ifdef CONFIG_AP_CMD_DISPR
 	struct rtw_add_del_sta_obj *add_del_sta_obj;
-#endif
 
 #endif /* CONFIG_AP_MODE	 */
 
@@ -743,10 +733,9 @@ struct	sta_priv {
 	_lock active_time_lock;
 	u8 asoc_list_cnt;
 	u8 auth_list_cnt;
-#ifdef CONFIG_AP_CMD_DISPR
+
 	_list add_sta_list;
 	u8 add_sta_list_cnt;
-#endif
 
 	unsigned int auth_to;  /* sec, time to expire in authenticating. */
 	unsigned int assoc_to; /* sec, time to expire before associating. */
@@ -831,6 +820,7 @@ extern u32 rtw_alloc_stainfo_hw(struct	sta_priv *stapriv, struct sta_info *psta)
 extern u32 rtw_free_stainfo(_adapter *padapter , struct sta_info *psta);
 u32	rtw_free_stainfo_sw(_adapter *padapter, struct sta_info *psta);
 extern void rtw_free_all_stainfo(_adapter *padapter);
+bool rtw_is_self_addr_stainfo(_adapter *adapter, struct sta_info *sta);
 extern bool rtw_is_self_stainfo(_adapter *padapter, struct sta_info *sta);
 extern u32 rtw_free_mld_stainfo(_adapter *padapter, struct rtw_phl_mld_t *mld);
 extern struct sta_info *rtw_get_stainfo_by_macid(struct sta_priv *pstapriv, u16 macid);
@@ -854,6 +844,7 @@ void rtw_stapriv_asoc_list_lock(struct sta_priv *stapriv);
 void rtw_stapriv_asoc_list_unlock(struct sta_priv *stapriv);
 void rtw_stapriv_asoc_list_add(struct sta_priv *stapriv, struct sta_info *sta);
 void rtw_stapriv_asoc_list_del(struct sta_priv *stapriv, struct sta_info *sta);
+void rtw_stapriv_auth_list_del(struct sta_priv *stapriv, struct sta_info *sta);
 #endif
 
 #if CONFIG_RTW_MACADDR_ACL

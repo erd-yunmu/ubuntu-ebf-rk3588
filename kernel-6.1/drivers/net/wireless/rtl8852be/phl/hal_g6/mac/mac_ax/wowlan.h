@@ -21,6 +21,7 @@
 #include "fwcmd.h"
 #include "role.h"
 #include "gpio_cmd.h"
+#if MAC_FEAT_WOWLAN
 
 #define WOW_GET_STOP_TRX_C2H_CNT 10000
 #define WOW_GET_STOP_TRX_C2H_DLY 10
@@ -45,6 +46,8 @@
 #define R_AX_DBG_WOW_READY 0x815E
 #define MASK_DBG_WOW_READY 0xFF
 
+
+
 enum DBG_FW_WOW_CPU_IO_RX_STATE {
 	WOW_CPU_RX_DIS = 0,
 	WOW_CPU_RX_EN = 1
@@ -54,6 +57,31 @@ enum DBG_FW_WOWLAN_READY {
 	WOWLAN_NOT_READY = 0x00,
 	WOWLAN_SLEEP_READY = 0x01,
 	WOWLAN_RESUME_READY = 0x02
+};
+
+enum APF_CMD {
+	APF_CMD_DISABLE = 0,
+	APF_CMD_ENABLE  = 1,
+	APF_CMD_REPORT  = 2,
+	APF_CMD_STANDBY = 3,
+	APF_CMD_CLEAR   = 4,
+	APF_CMD_CHANGE  = 5
+};
+
+enum APF_STATUS {
+	APF_DISABLE    = 0,
+	APF_ENABLE     = 1,
+	APF_UNFINISHED = 2,
+	APF_STANDBY    = 3,
+};
+
+enum FW_PROXY_OFLD_TYPE {
+	TYPE_MDNS    = 0x00,
+	TYPE_LLMNR   = 0x01,
+	TYPE_NETBIOS = 0x02,
+	TYPE_SNMP    = 0x03,
+	TYPE_ICMP    = 0x04,
+	TYPE_WSD     = 0x10
 };
 
 /**
@@ -970,6 +998,35 @@ u32 mac_proxy_ptcl_pattern(struct mac_ax_adapter *adapter,
  * @retval u32
  */
 u32 mac_proxy_snmp(struct mac_ax_adapter *adapter, struct rtw_hal_mac_proxy_snmp *cfg);
+u32 mac_proxy_llmnr(struct mac_ax_adapter *adapter, struct rtw_hal_mac_proxy_llmnr *llmnr);
+u32 mac_mdns_ofld(struct mac_ax_adapter *adapter, struct rtw_hal_mac_mdns_ofld *pmdns_ofld);
+u32 mac_apf_ofld(struct mac_ax_adapter *adapter, struct rtw_hal_mac_apf *papf_ofld);
+u32 mac_apf_ofld_ctrl(struct mac_ax_adapter *adapter
+		, struct rtw_hal_mac_apf_ctrl *papf_ofld_ctrl
+		, enum rtw_fw_type fw_type);
+u32 mac_check_proxy_done(struct mac_ax_adapter *adapter, u8 *fw_ret);
+u32 mac_apf_get_report(struct mac_ax_adapter *adapter,
+		       struct rtw_hal_mac_apf_report *papf_ofld_rpt);
+
+/**
+ * @brief mac_proxy_llmnr
+ *
+ * @param *adapter
+ * @param *llmnr
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 mac_proxy_llmnr(struct mac_ax_adapter *adapter, struct rtw_hal_mac_proxy_llmnr *llmnr);
+/**
+ * @brief mac_mdns_ofld
+ *
+ * @param *adapter
+ * @param *pmdns_ofld
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 mac_mdns_ofld(struct mac_ax_adapter *adapter, struct rtw_hal_mac_mdns_ofld *pmdns_ofld);
+
 /**
  * @}
  */
@@ -1017,5 +1074,60 @@ u32 mac_tcp_keepalive(struct mac_ax_adapter* adapter,
 /**
  * @}
  */
+
+/**
+ * @addtogroup WakeOnWlan
+ * @{
+ */
+
+/**
+ * @brief mac_wow_h2c_check
+ *
+ * @param *adapter
+ * @param parm
+ * @return Please Place Description here.
+ * @retval u32
+ */
+void mac_wow_h2c_filter_en(struct mac_ax_adapter *adapter, u8 en);
+/**
+ * @}
+ */
+
+ /**
+  * @addtogroup WakeOnWlan
+  * @{
+  */
+
+ /**
+  * @brief mac_wow_h2c_check
+  *
+  * @param *adapter
+  * @param parm
+  * @return Please Place Description here.
+  * @retval u32
+  */
+u32 mac_wow_h2c_check(struct mac_ax_adapter *adapter,
+		      u8 cat, u8 cla, u8 func, u8 del_type);
+/**
+ * @}
+ */
+
+/**
+ * @addtogroup WakeOnWlan
+ * @{
+ */
+/**
+ * @brief mac_wow_dbg_dump
+ *
+ * @param *adapter
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 mac_wow_dbg_dump(struct mac_ax_adapter *adapter);
+/**
+ * @}
+ */
+
+#endif /* MAC_FEAT_WOWLAN */
 
 #endif // #define _MAC_AX_WOWLAN_H_

@@ -287,14 +287,6 @@ RTW_FUNC_2G_5G_ONLY bool rtw_chbw_to_freq_range(u8 ch, u8 bw, u8 offset, u32 *hi
 
 struct rf_ctl_t;
 
-void txpwr_idx_get_dbm_str(s8 idx, u8 txgi_max, s8 txgi_ww, u8 txgi_pdbm, SIZE_T cwidth, char dbm_str[], u8 dbm_str_len);
-
-#define MBM_PDBM 100
-#define UNSPECIFIED_MBM 32767 /* maximum of s16 */
-
-void txpwr_mbm_get_dbm_str(s16 mbm, SIZE_T cwidth, char dbm_str[], u8 dbm_str_len);
-s16 mb_of_ntx(u8 ntx);
-
 #if CONFIG_TXPWR_LIMIT
 void dump_regd_exc_list(void *sel, struct rf_ctl_t *rfctl);
 #endif

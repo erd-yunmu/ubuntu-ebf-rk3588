@@ -18,84 +18,94 @@
 #ifdef MAC_FW_8852B_U2
 #ifdef MAC_FW_CATEGORY_NICCE
 extern u32 array_length_8852b_u2_nicce;
-extern u8 array_8852b_u2_nicce[325304];
+extern u8 array_8852b_u2_nicce[341512];
 #endif /* MAC_FW_CATEGORY_NICCE */
 
 #ifdef MAC_FW_CATEGORY_NICCE_BPLUS
 extern u32 array_length_8852b_u2_nicce_bplus;
-extern u8 array_8852b_u2_nicce_bplus[327608];
+extern u8 array_8852b_u2_nicce_bplus[295464];
 #endif /* MAC_FW_CATEGORY_NICCE_BPLUS */
 
 #ifdef MAC_FW_CATEGORY_NIC_PLE
 extern u32 array_length_8852b_u2_nic_ple;
-extern u8 array_8852b_u2_nic_ple[276056];
+extern u8 array_8852b_u2_nic_ple[281640];
 #endif /* MAC_FW_CATEGORY_NIC_PLE */
 
 #ifdef MAC_FW_CATEGORY_NIC
 extern u32 array_length_8852b_u2_nic;
-extern u8 array_8852b_u2_nic[271448];
+extern u8 array_8852b_u2_nic[276760];
 #endif /* MAC_FW_CATEGORY_NIC */
 
 #ifdef MAC_FW_CATEGORY_NIC_BPLUS
 extern u32 array_length_8852b_u2_nic_bplus;
-extern u8 array_8852b_u2_nic_bplus[274632];
+extern u8 array_8852b_u2_nic_bplus[271640];
 #endif /* MAC_FW_CATEGORY_NIC_BPLUS */
+
+#ifdef MAC_FW_CATEGORY_WOWLANCE
+extern u32 array_length_8852b_u2_wowlance;
+extern u8 array_8852b_u2_wowlance[276568];
+#endif /* MAC_FW_CATEGORY_WOWLANCE */
 
 #ifdef MAC_FW_CATEGORY_WOWLAN_PLE
 extern u32 array_length_8852b_u2_wowlan_ple;
-extern u8 array_8852b_u2_wowlan_ple[277104];
+extern u8 array_8852b_u2_wowlan_ple[278016];
 #endif /* MAC_FW_CATEGORY_WOWLAN_PLE */
 
 #ifdef MAC_FW_CATEGORY_WOWLAN
 extern u32 array_length_8852b_u2_wowlan;
-extern u8 array_8852b_u2_wowlan[276960];
+extern u8 array_8852b_u2_wowlan[277824];
 #endif /* MAC_FW_CATEGORY_WOWLAN */
 
 #ifdef MAC_FW_CATEGORY_WOWLAN_BPLUS
 extern u32 array_length_8852b_u2_wowlan_bplus;
-extern u8 array_8852b_u2_wowlan_bplus[264352];
+extern u8 array_8852b_u2_wowlan_bplus[268712];
 #endif /* MAC_FW_CATEGORY_WOWLAN_BPLUS */
 
 #endif /* MAC_FW_8852B_U2 */
 #ifdef MAC_FW_8852B_U3
 #ifdef MAC_FW_CATEGORY_NICCE
 extern u32 array_length_8852b_u3_nicce;
-extern u8 array_8852b_u3_nicce[325232];
+extern u8 array_8852b_u3_nicce[341432];
 #endif /* MAC_FW_CATEGORY_NICCE */
 
 #ifdef MAC_FW_CATEGORY_NICCE_BPLUS
 extern u32 array_length_8852b_u3_nicce_bplus;
-extern u8 array_8852b_u3_nicce_bplus[327536];
+extern u8 array_8852b_u3_nicce_bplus[295384];
 #endif /* MAC_FW_CATEGORY_NICCE_BPLUS */
 
 #ifdef MAC_FW_CATEGORY_NIC_PLE
 extern u32 array_length_8852b_u3_nic_ple;
-extern u8 array_8852b_u3_nic_ple[275984];
+extern u8 array_8852b_u3_nic_ple[281568];
 #endif /* MAC_FW_CATEGORY_NIC_PLE */
 
 #ifdef MAC_FW_CATEGORY_NIC
 extern u32 array_length_8852b_u3_nic;
-extern u8 array_8852b_u3_nic[271376];
+extern u8 array_8852b_u3_nic[276688];
 #endif /* MAC_FW_CATEGORY_NIC */
 
 #ifdef MAC_FW_CATEGORY_NIC_BPLUS
 extern u32 array_length_8852b_u3_nic_bplus;
-extern u8 array_8852b_u3_nic_bplus[274560];
+extern u8 array_8852b_u3_nic_bplus[271568];
 #endif /* MAC_FW_CATEGORY_NIC_BPLUS */
+
+#ifdef MAC_FW_CATEGORY_WOWLANCE
+extern u32 array_length_8852b_u3_wowlance;
+extern u8 array_8852b_u3_wowlance[276488];
+#endif /* MAC_FW_CATEGORY_WOWLANCE */
 
 #ifdef MAC_FW_CATEGORY_WOWLAN_PLE
 extern u32 array_length_8852b_u3_wowlan_ple;
-extern u8 array_8852b_u3_wowlan_ple[277024];
+extern u8 array_8852b_u3_wowlan_ple[277944];
 #endif /* MAC_FW_CATEGORY_WOWLAN_PLE */
 
 #ifdef MAC_FW_CATEGORY_WOWLAN
 extern u32 array_length_8852b_u3_wowlan;
-extern u8 array_8852b_u3_wowlan[276880];
+extern u8 array_8852b_u3_wowlan[277752];
 #endif /* MAC_FW_CATEGORY_WOWLAN */
 
 #ifdef MAC_FW_CATEGORY_WOWLAN_BPLUS
 extern u32 array_length_8852b_u3_wowlan_bplus;
-extern u8 array_8852b_u3_wowlan_bplus[264280];
+extern u8 array_8852b_u3_wowlan_bplus[268640];
 #endif /* MAC_FW_CATEGORY_WOWLAN_BPLUS */
 
 #endif /* MAC_FW_8852B_U3 */

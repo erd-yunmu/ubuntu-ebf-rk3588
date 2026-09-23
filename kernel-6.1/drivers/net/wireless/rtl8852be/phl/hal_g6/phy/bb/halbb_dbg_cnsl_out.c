@@ -184,7 +184,7 @@ void halbb_edcca_cmn_log_cnsl(struct bb_info *bb, u32 *_used, char *output,
 			      u32 *_out_len)
 {
 	struct bb_edcca_info *bb_edcca = &bb->bb_edcca_i;
-	struct bb_edcca_cr_info *cr = &bb->bb_edcca_i.bb_edcca_cr_i;
+	struct bb_edcca_cr_info *cr = &bb->bb_cmn_hooker->bb_edcca_cr_i;
 	u8 edcca_p_th = 0;
 	u8 edcca_s_th = 0;
 	u8 edcca_diff = 0;
@@ -250,6 +250,9 @@ void halbb_basic_dbg_msg_pmac_cnsl(struct bb_info *bb, u32 *_used,
 	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 		    "[FA]{CCK, OFDM, All}: %d, %d, %d\n",
 		    fa->cnt_cck_fail, fa->cnt_ofdm_fail, fa->cnt_fail_all);
+	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+		    " *[CCA Spoofing Cnt] {CCK, OFDM} = {%d, %d}, *[AMPDU Miss] = {%d}\n",
+		    cca->cnt_cck_spoofing, cca->cnt_ofdm_spoofing, crc->cnt_ampdu_miss);
 	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 		    " *[CCK]sfd/sig_GG=%d/%d, *[OFDM]Prty=%d, Rate=%d, LSIG_brk_s/l=%d/%d, SBD=%d\n",
 		    cck_fa->sfd_gg_cnt, cck_fa->sig_gg_cnt,
@@ -713,6 +716,102 @@ void halbb_basic_dbg_msg_tx_dbg_reg_cnsl(struct bb_info *bb, u32 *_used,
 	}
 }
 
+void halbb_basic_dbg_msg_tx_hist_cnsl(struct bb_info *bb, u32 *_used,
+				      char *output, u32 *_out_len)
+{
+	struct bb_ra_tx_hist_c2h_rpt *tx_hist = &bb->bb_tx_hist_rpt_i;
+	u32 tx_ok_cnt = 0, tx_tot_cnt = 0;
+	u32 i = 0;
+
+	if (!(bb->cmn_dbg_msg_component & BB_BASIC_DBG_04_TX)) {
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used, "Disabled\n");
+		return;
+	}
+
+	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used, "=== [Tx rate hist][MPDU cnt]=================\n");
+	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used, "ra_tbtt_cnt=%d\n", tx_hist->ra_tbtt_cnt);
+	/*@======CCK=========================================================*/
+	for (i = 0; i < 4; i++)
+		tx_tot_cnt += tx_hist->tx_rate_tot_cnt_hist[i];
+
+	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+	       "*CCK       tx_cnt:{%03d| %03d, %03d, %03d, %03d}\n",
+	       tx_tot_cnt,
+	       tx_hist->tx_rate_tot_cnt_hist[0],
+	       tx_hist->tx_rate_tot_cnt_hist[1],
+	       tx_hist->tx_rate_tot_cnt_hist[2],
+	       tx_hist->tx_rate_tot_cnt_hist[3]);
+
+	tx_ok_cnt = 0;
+	tx_tot_cnt = 0;
+	/*@======OFDM========================================================*/
+	for (i = 4; i < 12; i++)
+		tx_tot_cnt += tx_hist->tx_rate_tot_cnt_hist[i];
+
+	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+	       "*OFDM      tx_cnt:{%03d| %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d}\n",
+	       tx_tot_cnt,
+	       tx_hist->tx_rate_tot_cnt_hist[4],
+	       tx_hist->tx_rate_tot_cnt_hist[5],
+	       tx_hist->tx_rate_tot_cnt_hist[6],
+	       tx_hist->tx_rate_tot_cnt_hist[7],
+	       tx_hist->tx_rate_tot_cnt_hist[8],
+	       tx_hist->tx_rate_tot_cnt_hist[9],
+	       tx_hist->tx_rate_tot_cnt_hist[10],
+	       tx_hist->tx_rate_tot_cnt_hist[11]);
+
+	tx_ok_cnt = 0;
+	tx_tot_cnt = 0;
+	/*@======XHT 1SS=====================================================*/
+	for (i = 12; i < 26; i++)
+		tx_tot_cnt += tx_hist->tx_rate_tot_cnt_hist[i];
+
+	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+	       "*XHT 1-SS  tx_cnt:{%03d| %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d}\n",
+	       tx_tot_cnt,
+	       tx_hist->tx_rate_tot_cnt_hist[12],
+	       tx_hist->tx_rate_tot_cnt_hist[13],
+	       tx_hist->tx_rate_tot_cnt_hist[14],
+	       tx_hist->tx_rate_tot_cnt_hist[15],
+	       tx_hist->tx_rate_tot_cnt_hist[16],
+	       tx_hist->tx_rate_tot_cnt_hist[17],
+	       tx_hist->tx_rate_tot_cnt_hist[18],
+	       tx_hist->tx_rate_tot_cnt_hist[19],
+	       tx_hist->tx_rate_tot_cnt_hist[20],
+	       tx_hist->tx_rate_tot_cnt_hist[21],
+	       tx_hist->tx_rate_tot_cnt_hist[22],
+	       tx_hist->tx_rate_tot_cnt_hist[23],
+	       tx_hist->tx_rate_tot_cnt_hist[24],
+	       tx_hist->tx_rate_tot_cnt_hist[25]);
+
+	tx_ok_cnt = 0;
+	tx_tot_cnt = 0;
+	/*@======XHT 2SS=====================================================*/
+	for (i = 26; i < 40; i++)
+		tx_tot_cnt += tx_hist->tx_rate_tot_cnt_hist[i];
+
+	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+	       "*XHT 2-SS  tx_cnt:{%03d| %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d, %03d}\n",
+	       tx_tot_cnt,
+	       tx_hist->tx_rate_tot_cnt_hist[26],
+	       tx_hist->tx_rate_tot_cnt_hist[27],
+	       tx_hist->tx_rate_tot_cnt_hist[28],
+	       tx_hist->tx_rate_tot_cnt_hist[29],
+	       tx_hist->tx_rate_tot_cnt_hist[30],
+	       tx_hist->tx_rate_tot_cnt_hist[31],
+	       tx_hist->tx_rate_tot_cnt_hist[32],
+	       tx_hist->tx_rate_tot_cnt_hist[33],
+	       tx_hist->tx_rate_tot_cnt_hist[34],
+	       tx_hist->tx_rate_tot_cnt_hist[35],
+	       tx_hist->tx_rate_tot_cnt_hist[36],
+	       tx_hist->tx_rate_tot_cnt_hist[37],
+	       tx_hist->tx_rate_tot_cnt_hist[38],
+	       tx_hist->tx_rate_tot_cnt_hist[39]);
+
+	tx_ok_cnt = 0;
+	tx_tot_cnt = 0;
+}
+
 void halbb_basic_dbg_msg_tx_info_cnsl(struct bb_info *bb, u32 *_used,
 				      char *output, u32 *_out_len)
 {
@@ -721,7 +820,7 @@ void halbb_basic_dbg_msg_tx_info_cnsl(struct bb_info *bb, u32 *_used,
 	struct rtw_ra_sta_info	*ra;
 	struct rtw_rate_info *rate_info;
 	u16 sta_cnt = 0;
-	u8 i = 0;
+	u16 i = 0;
 	u8 tmp = 0;
 	u16 curr_tx_rt = 0;
 	enum rtw_gi_ltf curr_gi_ltf = RTW_GILTF_LGI_4XHE32;
@@ -772,7 +871,7 @@ void halbb_basic_dbg_msg_rx_info_cnsl(struct bb_info *bb, u32 *_used,
 	struct bb_cmn_rpt_info	*cmn_rpt = &bb->bb_cmn_rpt_i;
 	struct bb_pkt_cnt_cap_info *pkt_cnt_cap = &cmn_rpt->bb_pkt_cnt_all_i;
 	struct bb_physts_pop_info *pop_info = &cmn_rpt->bb_physts_pop_i;
-	struct bb_dbg_cr_info *cr = &bb->bb_dbg_i.bb_dbg_cr_i;
+	struct bb_dbg_cr_info *cr = &bb->bb_cmn_hooker->bb_dbg_cr_i;
 	struct bb_physts_info *physts = &bb->bb_physts_i;
 	u8 tmp = 0;
 	u32 bb_monitor1 = 0;
@@ -1113,6 +1212,73 @@ void halbb_basic_dbg_msg_physts_su_cnsl(struct bb_info *bb, u32 *_used,
 
 	}
 
+	/*@======EHT==========================================================*/
+	if (pkt_cnt->eht_pkt_not_zero) {
+		for (i = 0; i < rate_num; i++) {
+			ss_ofst = EHT_NUM_MCS * i;
+
+			for (j = 0; j < EHT_NUM_MCS ; j++) {
+				pkt_cnt_ss += pkt_cnt->pkt_cnt_eht[ss_ofst + j];
+			}
+
+			if (pkt_cnt_ss == 0) {
+				rssi_avg_tmp = 0;
+				rssi_tmp[0] = 0;
+				rssi_tmp[1] = 0;
+			} else {
+				rssi_avg_tmp = avg->rssi_t_avg >> 1;
+				rssi_tmp[0] = avg->rssi_t[0] >> 1;
+				rssi_tmp[1] = avg->rssi_t[1] >> 1;
+			}
+			if (bb->num_rf_path >= 2)
+				BB_DBG_CNSL(*_out_len, *_used, output + *_used,
+					    *_out_len - *_used,
+					    "*EHT %d-SS RSSI:{%02d| %02d,%02d} cnt:{%03d| %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}\n",
+					    (i + 1),
+					    rssi_avg_tmp, rssi_tmp[0], rssi_tmp[1],
+					    pkt_cnt_ss,
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 0],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 1],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 2],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 3],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 4],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 5],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 6],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 7],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 8],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 9],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 10],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 11],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 12],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 13]);
+			else
+				BB_DBG_CNSL(*_out_len, *_used, output + *_used,
+					    *_out_len - *_used,
+					    "*EHT %d-SS RSSI:{%02d| %02d} cnt:{%03d| %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}\n",
+					    (i + 1),
+					    rssi_avg_tmp, rssi_tmp[0],
+					    pkt_cnt_ss,
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 0],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 1],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 2],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 3],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 4],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 5],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 6],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 7],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 8],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 9],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 10],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 11],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 12],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 13]);
+
+			pkt_cnt_ss = 0;
+		}
+
+	}
+
+
 	/*@======SC_BW========================================================*/
 
 	if (pkt_cnt->sc20_occur) {
@@ -1183,12 +1349,12 @@ void halbb_basic_dbg_msg_physts_su_cnsl(struct bb_info *bb, u32 *_used,
 #endif
 
 	/*RX Utility*/
-	avg_phy_rate = halbb_rx_avg_phy_rate(bb);
-	utility = halbb_rx_utility(bb, avg_phy_rate, bb->num_rf_path, bb->hal_com->band[0].cur_chandef.bw);
+	//avg_phy_rate = halbb_rx_avg_phy_rate(bb);
+	//utility = halbb_trx_utility(bb, avg_phy_rate, bb->num_rf_path, bb->hal_com->band[0].cur_chandef.bw);
 
 	BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 		    "Avg_rx_rate = %d, rx_utility=( %d / 1000 )\n",
-		    avg_phy_rate, utility);
+		    bb->bb_link_i.avg_phy_rate, bb->bb_link_i.rx_utility);
 }
 
 
@@ -1457,6 +1623,72 @@ void halbb_basic_dbg_msg_physts_mu_cnsl(struct bb_info *bb, u32 *_used,
 
 	}
 
+	/*@======EHT==========================================================*/
+	if (pkt_cnt->eht_pkt_not_zero) {
+		for (i = 0; i < rate_num; i++) {
+			ss_ofst = EHT_NUM_MCS * i;
+
+			for (j = 0; j < EHT_NUM_MCS ; j++) {
+				pkt_cnt_ss += pkt_cnt->pkt_cnt_eht[ss_ofst + j];
+			}
+
+			if (pkt_cnt_ss == 0) {
+				rssi_avg_tmp = 0;
+				rssi_tmp[0] = 0;
+				rssi_tmp[1] = 0;
+			} else {
+				rssi_avg_tmp = avg->rssi_t_avg >> 1;
+				rssi_tmp[0] = avg->rssi_t[0] >> 1;
+				rssi_tmp[1] = avg->rssi_t[1] >> 1;
+			}
+			if (bb->num_rf_path >= 2)
+				BB_DBG_CNSL(*_out_len, *_used, output + *_used,
+					    *_out_len - *_used,
+					    "*[MU] EHT %d-SS RSSI:{%02d| %02d,%02d} cnt:{%03d| %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}\n",
+					    (i + 1),
+					    rssi_avg_tmp, rssi_tmp[0], rssi_tmp[1],
+					    pkt_cnt_ss,
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 0],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 1],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 2],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 3],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 4],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 5],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 6],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 7],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 8],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 9],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 10],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 11],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 12],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 13]);
+			else
+				BB_DBG_CNSL(*_out_len, *_used, output + *_used,
+					    *_out_len - *_used,
+					    "*[MU] EHT %d-SS RSSI:{%02d| %02d} cnt:{%03d| %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}\n",
+					    (i + 1),
+					    rssi_avg_tmp, rssi_tmp[0],
+					    pkt_cnt_ss,
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 0],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 1],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 2],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 3],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 4],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 5],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 6],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 7],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 8],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 9],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 10],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 11],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 12],
+					    pkt_cnt->pkt_cnt_eht[ss_ofst + 13]);
+
+			pkt_cnt_ss = 0;
+		}
+
+	}
+
 	/*@======SC_BW========================================================*/
 
 	if (pkt_cnt->sc20_occur) {
@@ -1538,7 +1770,7 @@ void halbb_dm_summary_cnsl(struct bb_info *bb, u32 *_used,
 	struct rtw_phl_com_t *phl = bb->phl_com;
 	struct dev_cap_t *dev = &phl->dev_cap;
 #endif
-	struct bb_dig_cr_info *cr = &bb->bb_dig_i.bb_dig_cr_i;
+	struct bb_dig_cr_info *cr = &bb->bb_cmn_hooker->bb_dig_cr_i;
 	u8 i = 0;
 	u8 lna = 0, tia = 0, rxbb = 0;
 	u8 ofdm_pd_th = 0, ofdm_pd_th_en = 0, cck_pd_th_en = 0;
@@ -1815,6 +2047,7 @@ void halbb_basic_dbg_message_cnsl_dbg(struct bb_info *bb, char input[][16], u32 
 
 	if (bb->bb_link_i.is_linked) {
 		halbb_basic_dbg_msg_tx_info_cnsl(bb, _used, output, _out_len);
+		halbb_basic_dbg_msg_tx_hist_cnsl(bb, _used, output, _out_len);
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "\n");
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,

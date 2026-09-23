@@ -47,9 +47,6 @@
 #if MAC_AX_8851B_SUPPORT
 #include "mac_8851b/mac_txccxrpt.h"
 #endif
-#if MAC_AX_8851E_SUPPORT
-#include "mac_8851e/mac_txccxrpt.h"
-#endif
 #if MAC_AX_8852D_SUPPORT
 #include "mac_8852d/mac_txccxrpt.h"
 #endif
@@ -93,6 +90,18 @@
 	delay_ofld(adapter, val, lc)
 #define CMD_OFLD \
 	mac_cmd_ofld(adapter)
+
+/* IO offload releated */
+#define MAC_AX_CMD_OFLD_POLL_CNT 4000
+#define MAC_AX_CMD_OFLD_POLL_US 50
+
+/* IO offload base offset releated */
+#define BASE_BITS 0x00FF0000
+#define MAC_BASE_OFFSET (0x18600000 & BASE_BITS)
+#define BB_BASE_OFFSET (0x18610000 & BASE_BITS)
+#define RF_ADIE_BASE_OFFSET (BB_BASE_OFFSET | BIT(23))
+#define RF_PATH_B_BASE_OFFSET 0x1000
+
 /**
  * @enum PKT_OFLD_OP
  *
@@ -107,6 +116,7 @@
  * @var PKT_OFLD_OP::PKT_OFLD_OP_MAX
  * Please Place Description here.
  */
+
 enum PKT_OFLD_OP {
 	PKT_OFLD_OP_ADD = 0,
 	PKT_OFLD_OP_DEL = 1,
@@ -119,8 +129,6 @@ enum PKT_OFLD_OP {
  *
  * @brief FW_OFLD_OP
  *
- * @var FW_OFLD_OP::FW_OFLD_OP_DUMP_EFUSE
- * Please Place Description here.
  * @var FW_OFLD_OP::FW_OFLD_OP_PACKET_OFLD
  * Please Place Description here.
  * @var FW_OFLD_OP::FW_OFLD_OP_READ_OFLD
@@ -133,7 +141,6 @@ enum PKT_OFLD_OP {
  * Please Place Description here.
  */
 enum FW_OFLD_OP {
-	FW_OFLD_OP_DUMP_EFUSE = 0,
 	FW_OFLD_OP_PACKET_OFLD = 1,
 	FW_OFLD_OP_READ_OFLD = 2,
 	FW_OFLD_OP_WRITE_OFLD = 3,
@@ -291,28 +298,6 @@ struct scan_chinfo_list {
 	u8 size;
 };
 
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-/**
- * @brief mac_get_wlanfw_cap
- *
- * @param *adapter
- * @param size
- * @param buf
- * @param mac_cap
- * @param outsrc_cap
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_get_wlanfw_cap(struct mac_ax_adapter *adapter, struct rtw_wcpu_cap_t *wcpu_cap);
-/**
- * @}
- * @}
- */
 
 /**
  * @addtogroup Firmware
@@ -363,133 +348,6 @@ u32 mac_check_fwofld_done(struct mac_ax_adapter *adapter, u8 op);
  */
 
 /**
- * @brief mac_clear_write_request
- *
- * @param *adapter
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_clear_write_request(struct mac_ax_adapter *adapter);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_add_write_request
- *
- * @param *adapter
- * @param *req
- * @param *value
- * @param *mask
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_add_write_request(struct mac_ax_adapter *adapter,
-			  struct mac_ax_write_req *req,
-			  u8 *value, u8 *mask);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_write_ofld
- *
- * @param *adapter
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_write_ofld(struct mac_ax_adapter *adapter);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_clear_conf_request
- *
- * @param *adapter
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_clear_conf_request(struct mac_ax_adapter *adapter);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_add_conf_request
- *
- * @param *adapter
- * @param *req
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_add_conf_request(struct mac_ax_adapter *adapter,
-			 struct mac_ax_conf_ofld_req *req);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_conf_ofld
- *
- * @param *adapter
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_conf_ofld(struct mac_ax_adapter *adapter);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
  * @brief mac_read_pkt_ofld
  *
  * @param *adapter
@@ -502,6 +360,12 @@ u32 mac_read_pkt_ofld(struct mac_ax_adapter *adapter, u8 id);
  * @}
  * @}
  */
+
+void mac_pkt_ofld_unset_bitmap(struct mac_ax_adapter *adapter, u8 *bitmap, u16 index);
+
+u8 mac_pkt_ofld_get_bitmap(u8 *bitmap, u16 index);
+
+u32 mac_pkt_ofld_watchdog(struct mac_ax_adapter *adapter);
 
 /**
  * @addtogroup Firmware
@@ -566,137 +430,6 @@ u32 mac_add_pkt_ofld(struct mac_ax_adapter *adapter, u8 *pkt, u16 len, u8 *id);
  */
 u32 mac_pkt_ofld_packet(struct mac_ax_adapter *adapter,
 			u8 **pkt_buf, u16 *pkt_len, u8 *pkt_id);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_dump_efuse_ofld
- *
- * @param *adapter
- * @param efuse_size
- * @param type
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_dump_efuse_ofld(struct mac_ax_adapter *adapter, u32 efuse_size,
-			u8 type);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_efuse_ofld_map
- *
- * @param *adapter
- * @param *efuse_map
- * @param efuse_size
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_efuse_ofld_map(struct mac_ax_adapter *adapter, u8 *efuse_map,
-		       u32 efuse_size);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_clear_read_request
- *
- * @param *adapter
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_clear_read_request(struct mac_ax_adapter *adapter);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_add_read_request
- *
- * @param *adapter
- * @param *req
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_add_read_request(struct mac_ax_adapter *adapter,
-			 struct mac_ax_read_req *req);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_read_ofld
- *
- * @param *adapter
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_read_ofld(struct mac_ax_adapter *adapter);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Firmware
- * @{
- * @addtogroup FW_Offload
- * @{
- */
-
-/**
- * @brief mac_read_ofld_value
- *
- * @param *adapter
- * @param **val_buf
- * @param *val_len
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_read_ofld_value(struct mac_ax_adapter *adapter,
-			u8 **val_buf, u16 *val_len);
 /**
  * @}
  * @}
@@ -824,10 +557,13 @@ u32 mac_get_fw_cap(struct mac_ax_adapter *adapter, u32 *val);
  */
 
 u32 write_mac_reg_ofld(struct mac_ax_adapter *adapter,
-		       u16 offset, u32 mask, u32 val, u8 lc);
+		       u32 offset, u32 mask, u32 val, u8 lc);
+
+u32 write_mac_reg_auto_ofld(struct mac_ax_adapter *adapter,
+			    u32 offset, u32 mask, u32 val, u8 lc);
 
 u32 poll_mac_reg_ofld(struct mac_ax_adapter *adapter,
-		      u16 offset, u32 mask, u32 val, u8 lc);
+		      u32 offset, u32 mask, u32 val, u8 lc);
 
 u32 delay_ofld(struct mac_ax_adapter *adapter, u32 val, u8 lc);
 /**
@@ -849,7 +585,7 @@ u32 delay_ofld(struct mac_ax_adapter *adapter, u32 val, u8 lc);
  * @retval u32
  */
 u32 write_mac_reg_ofld_v1(struct mac_ax_adapter *adapter,
-			  u16 offset, u32 mask, u32 val, u8 lc);
+			  u32 offset, u32 mask, u32 val, u8 lc);
 /**
  * @}
  * @}
@@ -874,7 +610,7 @@ u32 write_mac_reg_ofld_v1(struct mac_ax_adapter *adapter,
  * @retval u32
  */
 u32 poll_mac_reg_ofld_v1(struct mac_ax_adapter *adapter,
-			 u16 offset, u32 mask, u32 val, u8 lc);
+			 u32 offset, u32 mask, u32 val, u8 lc);
 /**
  * @}
  * @}
@@ -921,7 +657,7 @@ u32 delay_ofld_v1(struct mac_ax_adapter *adapter, u32 val);
  * @retval u32
  */
 u32 move_mac_reg_ofld(struct mac_ax_adapter *adapter,
-		      u16 offset0, u16 offset1, u32 mask0, u32 mask1, u8 lc);
+		      u32 offset0, u32 offset1, u32 mask0, u32 mask1, u8 lc);
 /**
  * @}
  * @}

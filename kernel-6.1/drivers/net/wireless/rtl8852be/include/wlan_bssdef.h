@@ -16,7 +16,7 @@
 #define __WLAN_BSSDEF_H__
 
 
-#define MAX_IE_SZ	768
+#define MAX_IE_SZ	1840 /* mbssid in beacon defined in WIFI Alliance */
 
 
 #ifdef PLATFORM_LINUX
@@ -57,11 +57,6 @@ typedef enum _NDIS_802_11_NETWORK_INFRASTRUCTURE {
 	Ndis802_11_mesh,
 } NDIS_802_11_NETWORK_INFRASTRUCTURE, *PNDIS_802_11_NETWORK_INFRASTRUCTURE;
 
-typedef struct _NDIS_802_11_FIXED_IEs {
-	u8  Timestamp[8];
-	u16  BeaconInterval;
-	u16  Capabilities;
-} NDIS_802_11_FIXED_IEs, *PNDIS_802_11_FIXED_IEs;
 
 typedef struct _NDIS_802_11_VARIABLE_IEs {
 	u8  ElementID;
@@ -142,12 +137,6 @@ typedef enum _NDIS_802_11_NETWORK_INFRASTRUCTURE {
 	Ndis802_11APMode
 } NDIS_802_11_NETWORK_INFRASTRUCTURE, *PNDIS_802_11_NETWORK_INFRASTRUCTURE;
 
-typedef struct _NDIS_802_11_FIXED_IEs {
-	u8  Timestamp[8];
-	u16  BeaconInterval;
-	u16  Capabilities;
-} NDIS_802_11_FIXED_IEs, *PNDIS_802_11_FIXED_IEs;
-
 typedef struct _NDIS_802_11_VARIABLE_IEs {
 	u8  ElementID;
 	u8  Length;
@@ -190,9 +179,6 @@ typedef struct _NDIS_802_11_WEP {
 
 #endif /* PLATFORM_FREEBSD */
 
-#ifndef Ndis802_11APMode
-#define Ndis802_11APMode (Ndis802_11InfrastructureMax+1)
-#endif
 
 /*RTW_WKARD_CORE_RSSI_V1 - GEORGIA MUST REFINE*/
 typedef struct _WLAN_PHY_INFO {
@@ -203,7 +189,7 @@ typedef struct _WLAN_PHY_INFO {
 	u8	Optimum_antenna;  /* for Antenna diversity */
 	u8	is_cck_rate;	/* 1:cck_rate */
 	s8	rx_snr[4];
-#ifdef CONFIG_RTW_80211K
+#if defined (CONFIG_RTW_80211K) || defined(CONFIG_RTW_FSM_RRM)
 	u32	free_cnt; 	/* freerun counter */
 	u8	rm_en_cap[5];
 #endif
@@ -260,7 +246,8 @@ typedef struct _WLAN_BSSID_EX {
 	u8 is_complete_profile;
 #endif
 #ifdef CONFIG_STA_MULTIPLE_BSSID
-	u8 is_mbssid;
+	u8 is_mbssid;/*is_nontx = non-transmitted BSSID*/
+	u8 tx_bssid[ETH_ALEN];/*transmitted BSSID*/
 	u8 mbssid_index;
 #endif
 	u32  IELength;

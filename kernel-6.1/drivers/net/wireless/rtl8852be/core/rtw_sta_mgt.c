@@ -237,6 +237,9 @@ u32	_rtw_init_sta_priv(struct	sta_priv *pstapriv)
 {
 	_adapter *adapter = container_of(pstapriv, _adapter, stapriv);
 	/* struct macid_ctl_t *macid_ctl = adapter_to_macidctl(adapter); */
+#ifdef CONFIG_AP_MODE
+	struct registry_priv *regsty = adapter_to_regsty(adapter);
+#endif
 	struct sta_info *psta;
 	s32 i;
 	u32 ret = _FAIL;
@@ -284,6 +287,8 @@ u32	_rtw_init_sta_priv(struct	sta_priv *pstapriv)
 #ifdef CONFIG_AP_MODE
 	pstapriv->max_aid = rtw_phl_get_macid_max_num(
 				GET_PHL_INFO(adapter_to_dvobj(pstapriv->padapter)));
+	if (regsty->max_ap_assoc_sta)
+		pstapriv->max_aid = rtw_min(pstapriv->max_aid, regsty->max_ap_assoc_sta);
 	pstapriv->rr_aid = 0;
 	pstapriv->started_aid = 1;
 	pstapriv->sta_aid = rtw_zmalloc(pstapriv->max_aid * sizeof(struct sta_info *));
@@ -303,10 +308,10 @@ u32	_rtw_init_sta_priv(struct	sta_priv *pstapriv)
 	_rtw_spinlock_init(&pstapriv->auth_list_lock);
 	pstapriv->asoc_list_cnt = 0;
 	pstapriv->auth_list_cnt = 0;
-#ifdef CONFIG_AP_CMD_DISPR
+
 	_rtw_init_listhead(&pstapriv->add_sta_list);
 	pstapriv->add_sta_list_cnt = 0;
-#endif
+
 #ifdef CONFIG_RTW_TOKEN_BASED_XMIT
 	pstapriv->tbtx_asoc_list_cnt = 0;
 #endif
@@ -324,6 +329,8 @@ u32	_rtw_init_sta_priv(struct	sta_priv *pstapriv)
 	_rtw_memset(pstapriv->atmel_rc_pattern, 0, ETH_ALEN);
 #endif
 	pstapriv->max_num_sta = NUM_STA;
+	if (regsty->max_ap_assoc_sta)
+		pstapriv->max_num_sta = rtw_min(pstapriv->max_num_sta, regsty->max_ap_assoc_sta);
 
 #endif
 
@@ -670,31 +677,25 @@ static void _rtw_alloc_phl_stainfo(struct sta_info *sta, struct	sta_priv *stapri
 				const u8 *hwaddr, enum rtw_device_type dtype, u16 main_id,
 				u8 link_idx, enum phl_cmd_type cmd_type)
 {
-		enum rtw_phl_status pstatus = RTW_PHL_STATUS_SUCCESS;
-		void *phl = GET_PHL_INFO(adapter_to_dvobj(stapriv->padapter));
-		struct rtw_wifi_role_t *wrole = stapriv->padapter->phl_role;
-		struct rtw_wifi_role_link_t *rlink = sta->padapter_link->wrlink;
-		bool alloc = _TRUE, only_hw = _FALSE;
+	enum rtw_phl_status pstatus = RTW_PHL_STATUS_SUCCESS;
+	void *phl = GET_PHL_INFO(adapter_to_dvobj(stapriv->padapter));
+	struct rtw_wifi_role_t *wrole = stapriv->padapter->phl_role;
+	struct rtw_wifi_role_link_t *rlink = sta->padapter_link->wrlink;
+	bool alloc = _TRUE, only_hw = _FALSE;
 
-	if (sta != NULL) {
-		/* Do not use this function in interrupt context  */
-		pstatus = rtw_phl_cmd_alloc_stainfo(phl, &sta->phl_sta,
-						(u8 *)hwaddr, wrole,
-						dtype,
-						main_id,
-						rlink,
-						alloc, only_hw,
-						cmd_type, 0);
+	/* Do not use this function in interrupt context  */
+	pstatus = rtw_phl_cmd_alloc_stainfo(phl, &sta->phl_sta, (u8 *)hwaddr,
+					    wrole, dtype, main_id, rlink, alloc,
+					    only_hw, cmd_type, 0);
 
-		if (sta->phl_sta) {
-			rtw_dump_phl_sta_info(RTW_DBGDUMP, sta);
-		} else {
-			RTW_ERR(FUNC_ADPT_FMT ": fail to alloc PHL sta "
-				"for " MAC_FMT " (status=%d)!\n",
-				FUNC_ADPT_ARG(stapriv->padapter),
-				MAC_ARG(hwaddr),
-				pstatus);
-		}
+	if (sta->phl_sta) {
+		rtw_dump_phl_sta_info(RTW_DBGDUMP, sta);
+	} else {
+		RTW_ERR(FUNC_ADPT_FMT ": fail to alloc PHL sta "
+			"for " MAC_FMT " (status=%d)!\n",
+			FUNC_ADPT_ARG(stapriv->padapter),
+			MAC_ARG(hwaddr),
+			pstatus);
 	}
 }
 
@@ -1120,6 +1121,19 @@ void rtw_free_all_stainfo(_adapter *padapter)
 
 exit:
 	return;
+}
+
+bool rtw_is_self_addr_stainfo(_adapter *adapter, struct sta_info *sta)
+{
+	struct _ADAPTER_LINK *alink;
+	u8 lidx;
+
+	for (lidx = 0; lidx < adapter->adapter_link_num; lidx++) {
+		alink = GET_LINK(adapter, lidx);
+		if (_rtw_memcmp(alink->wrlink->mac_addr, sta->phl_sta->mac_addr, 6))
+			return true;
+	}
+	return false;
 }
 
 bool rtw_is_self_stainfo(_adapter *padapter, struct sta_info *sta)
@@ -1548,6 +1562,12 @@ void rtw_stapriv_asoc_list_del(struct sta_priv *stapriv, struct sta_info *sta)
 #endif
 	STA_SET_MESH_PLINK(sta, NULL);
 }
+
+void rtw_stapriv_auth_list_del(struct sta_priv *stapriv, struct sta_info *sta)
+{
+	rtw_list_delete(&sta->auth_list);
+	stapriv->auth_list_cnt--;
+}
 #endif /* CONFIG_AP_MODE */
 
 #if CONFIG_RTW_MACADDR_ACL
@@ -1663,6 +1683,7 @@ void dump_macaddr_acl(void *sel, _adapter *adapter)
 	struct sta_priv *stapriv = &adapter->stapriv;
 	struct wlan_acl_pool *acl;
 	int i, j;
+	char mac_addr_str[MAC_FMT_LEN];
 
 	for (j = 0; j < RTW_ACL_PERIOD_NUM; j++) {
 		RTW_PRINT_SEL(sel, "period:%s(%d)\n", acl_period_str(j), j);
@@ -1673,7 +1694,7 @@ void dump_macaddr_acl(void *sel, _adapter *adapter)
 		for (i = 0; i < NUM_ACL; i++) {
 			if (acl->aclnode[i].valid == _FALSE)
 				continue;
-			RTW_PRINT_SEL(sel, MAC_FMT"\n", MAC_ARG(acl->aclnode[i].addr));
+			RTW_PRINT_SEL(sel, "%s\n", get_macaddr_str(mac_addr_str, sel, acl->aclnode[i].addr));
 		}
 		RTW_PRINT_SEL(sel, "\n");
 	}
@@ -1850,13 +1871,14 @@ void dump_pre_link_sta_ctl(void *sel, struct sta_priv *stapriv)
 {
 	struct pre_link_sta_ctl_t *pre_link_sta_ctl = &stapriv->pre_link_sta_ctl;
 	int i;
+	char mac_addr_str[MAC_FMT_LEN];
 
 	RTW_PRINT_SEL(sel, "num:%d/%d\n", pre_link_sta_ctl->num, RTW_PRE_LINK_STA_NUM);
 
 	for (i = 0; i < RTW_PRE_LINK_STA_NUM; i++) {
 		if (pre_link_sta_ctl->node[i].valid == _FALSE)
 			continue;
-		RTW_PRINT_SEL(sel, MAC_FMT"\n", MAC_ARG(pre_link_sta_ctl->node[i].addr));
+		RTW_PRINT_SEL(sel, "%s\n", get_macaddr_str(mac_addr_str, sel, pre_link_sta_ctl->node[i].addr));
 	}
 }
 #endif /* CONFIG_RTW_PRE_LINK_STA */

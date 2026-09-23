@@ -47,9 +47,16 @@ phl_custom_init_role_link_cap(struct phl_info_t *phl_info,
                          u8 hw_band,
                          struct role_link_cap_t *role_link_cap);
 
+enum rtw_phl_status phl_custom_init_protocol_cap(
+    struct phl_info_t *phl_info, u8 hw_band, enum role_type rtype,
+    struct protocol_cap_t *protocol_cap);
+
 #else
 #define phl_register_custom_module(_phl_info, _band_idx) (RTW_PHL_STATUS_SUCCESS)
 #define phl_custom_init_role_link_cap(_phl_info, _hw_band, _role_link_cap) (RTW_PHL_STATUS_SUCCESS)
+#define phl_custom_init_protocol_cap(_phl_info, _hw_band, _rtype,              \
+				     _protocol_cap)                            \
+	(RTW_PHL_STATUS_SUCCESS)
 #endif
 
 #endif  /*_PHL_CUSTOMIZE_FEATURE_H_*/

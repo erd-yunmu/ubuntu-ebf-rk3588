@@ -99,7 +99,7 @@
 #endif
 
 extern int RTW_STATUS_CODE(int error_code);
-extern u16 rtw_warn_on_cnt;
+extern ATOMIC_T rtw_warn_on_cnt;
 
 #ifndef RTK_DMP_PLATFORM
 	#define CONFIG_USE_VMALLOC
@@ -350,6 +350,33 @@ bool _rtw_time_after_eq(systime a, systime b);
 #define rtw_time_before_eq(a, b) _rtw_time_after_eq(b, a)
 #endif
 
+#ifndef CONFIG_OSDEP_SPTIME_API
+sysptime rtw_sptime_get(void);
+sysptime rtw_sptime_get_raw(void);
+sysptime rtw_sptime_set(s64 secs, const u32 nsecs);
+sysptime rtw_sptime_zero(void);
+
+int rtw_sptime_cmp(const sysptime cmp1, const sysptime cmp2);
+sysptime rtw_sptime_sub(const sysptime lhs, const sysptime rhs);
+sysptime rtw_sptime_add(const sysptime lhs, const sysptime rhs);
+
+s64 rtw_sptime_to_ms(const sysptime sptime);
+sysptime rtw_ms_to_sptime(u64 ms);
+s64 rtw_sptime_to_us(const sysptime sptime);
+sysptime rtw_us_to_sptime(u64 us);
+s64 rtw_sptime_to_ns(const sysptime sptime);
+sysptime rtw_ns_to_sptime(u64 ns);
+#endif /* !CONFIG_OSDEP_SPTIME_API */
+
+#define rtw_sptime_eql(cmp1, cmp2) (rtw_sptime_cmp(cmp1, cmp2) == 0)
+#define rtw_sptime_is_zero(sptime) (rtw_sptime_cmp(sptime, rtw_sptime_zero()) == 0)
+#define rtw_sptime_diff_ms(start, end) rtw_sptime_to_ms(rtw_sptime_sub(end, start))
+#define rtw_sptime_diff_us(start, end) rtw_sptime_to_us(rtw_sptime_sub(end, start))
+#define rtw_sptime_diff_ns(start, end) rtw_sptime_to_ns(rtw_sptime_sub(end, start))
+#define rtw_sptime_pass_ms(start) rtw_sptime_diff_ms(start, rtw_sptime_get())
+#define rtw_sptime_pass_us(start) rtw_sptime_diff_us(start, rtw_sptime_get())
+#define rtw_sptime_pass_ns(start) rtw_sptime_diff_ns(start, rtw_sptime_get())
+
 void rtw_sleep_schedulable(int ms);
 
 void rtw_msleep_os(int ms);
@@ -522,11 +549,28 @@ static inline int largest_bit_64(u64 bitmask)
 		} \
 	} while (0)
 
+#define MAC_FMT_LEN 18
+#ifdef CONFIG_RTW_HIDDEN_MAC_ADDR
+#ifndef MAC_FMT
+#define MAC_FMT "%02x:%02x:%02x:xx:xx:xx"
+#endif
+#ifndef MAC_ARG
+#define MAC_ARG(x) ((u8 *)(x))[0], ((u8 *)(x))[1], ((u8 *)(x))[2]
+#endif
+#else /* CONFIG_RTW_HIDDEN_MAC_ADDR */
 #ifndef MAC_FMT
 #define MAC_FMT "%02x:%02x:%02x:%02x:%02x:%02x"
 #endif
 #ifndef MAC_ARG
 #define MAC_ARG(x) ((u8 *)(x))[0], ((u8 *)(x))[1], ((u8 *)(x))[2], ((u8 *)(x))[3], ((u8 *)(x))[4], ((u8 *)(x))[5]
+#endif
+#endif /* CONFIG_RTW_HIDDEN_MAC_ADDR */
+
+#ifndef MAC_FMT_SEL
+#define MAC_FMT_SEL "%02x:%02x:%02x:%02x:%02x:%02x"
+#endif
+#ifndef MAC_ARG_SEL
+#define MAC_ARG_SEL(x) ((u8 *)(x))[0], ((u8 *)(x))[1], ((u8 *)(x))[2], ((u8 *)(x))[3], ((u8 *)(x))[4], ((u8 *)(x))[5]
 #endif
 
 bool rtw_macaddr_is_larger(const u8 *a, const u8 *b);
@@ -562,7 +606,8 @@ void rtw_free_netdev(struct net_device *netdev);
 
 u64 rtw_modular64(u64 x, u64 y);
 u64 rtw_division64(u64 x, u64 y);
- u32 rtw_random32(void);
+s64 rtw_division64_s64(s64 x, s64 y);
+u32 rtw_random32(void);
 
 void rtw_wiphy_rfkill_set_hw_state(struct wiphy *wiphy, bool blocked);
 

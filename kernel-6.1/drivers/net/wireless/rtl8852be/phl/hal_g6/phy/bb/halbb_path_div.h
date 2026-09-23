@@ -25,9 +25,10 @@
 #ifndef __HALBB_PATH_DIV_H__
 #define __HALBB_PATH_DIV_H__
 
-#define PATH_DIV_VERSION "1.0"
+#define PATH_DIV_VERSION "1.5"
 /*@--------------------------[Define] ---------------------------------------*/
 #define	PATH_DIV_RSSI_GAP	4 /*@ 2dB*/
+#define	PATH_DIV_MAX_PATH	4
 
 /*@--------------------------[Structure]-------------------------------------*/
 #ifdef HALBB_COMPILE_AX_SERIOUS
@@ -68,6 +69,7 @@ struct bb_pathdiv_info {
 	struct bb_pathdiv_rssi_info bb_rssi_i;
 #endif
 	bool fix_path_en[PHL_MAX_STA_NUM]; /*@ debug mode*/
+	bool is_disable_6g_pathdiv;
 	enum bb_path path_sel_1ss;
 	enum bb_path path_sel[PHL_MAX_STA_NUM];
 	enum bb_path fix_path_sel[PHL_MAX_STA_NUM];/*@ debug mode*/
@@ -107,9 +109,8 @@ void halbb_pathdiv_reg_init(struct bb_info *bb);
 void halbb_pathdiv_init(struct bb_info *bb);
 void halbb_pathdiv_reset(struct bb_info *bb);
 void halbb_pathdiv_reset_stat(struct bb_info *bb);
-void halbb_set_cctrl_tbl(struct bb_info *bb, u16 macid, u16 cfg);
 void halbb_set_tx_path_by_cmac_tbl(struct bb_info *bb, u16 macid, enum bb_path tx_path_sel_1ss);
-void halbb_update_tx_path_div(struct bb_info *bb, struct rtw_phl_stainfo_t *sta);
+void halbb_set_tx_path(struct bb_info *bb, u16 macid, enum bb_path tx_path_sel_1ss);
 void halbb_path_diversity(struct bb_info *bb);
 void halbb_pathdiv_phy_sts(struct bb_info *bb, struct physts_rxd *desc);
 void halbb_pathdiv_dbg(struct bb_info *bb, char input[][16], u32 *_used,

@@ -36,28 +36,6 @@
 
 #define MAC_AX_BTGS1_NOTIFY BIT(0)
 
-u32 coex_mac_init_8852b(struct mac_ax_adapter *adapter)
-{
-	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
-	u32 ret = mac_write_lte_8852b(adapter, R_AX_LTECOEX_CTRL, 0);
-	u8 val = MAC_REG_R8(R_AX_SYS_SDIO_CTRL + 3);
-
-	if (ret != MACSUCCESS) {
-		PLTFM_MSG_ERR("Write LTE REG fail\n");
-		return ret;
-	}
-
-	ret = mac_write_lte_8852b(adapter, R_AX_LTECOEX_CTRL_2, 0);
-	if (ret != MACSUCCESS) {
-		PLTFM_MSG_ERR("Write LTE REG fail\n");
-		return ret;
-	}
-
-	MAC_REG_W8(R_AX_SYS_SDIO_CTRL + 3, val | BIT(2));
-
-	return MACSUCCESS;
-}
-
 u32 mac_write_lte_8852b(struct mac_ax_adapter *adapter,
 			const u32 offset, u32 val)
 {
@@ -98,12 +76,12 @@ u32 mac_write_lte_8852b(struct mac_ax_adapter *adapter,
 				PLTFM_DELAY_US(50);
 			}
 
-			PLTFM_MUTEX_LOCK(&adapter->hw_info->lte_rlock);
+			PLTFM_MUTEX_LOCK(&adapter->lock_info.lte_rlock);
 
 			MAC_REG_W32(R_AX_LTE_WDATA, val);
 			MAC_REG_W32(R_AX_LTE_CTRL, 0xC00F0000 | offset);
 
-			PLTFM_MUTEX_UNLOCK(&adapter->hw_info->lte_rlock);
+			PLTFM_MUTEX_UNLOCK(&adapter->lock_info.lte_rlock);
 
 			return MACSUCCESS;
 		}
@@ -119,16 +97,17 @@ u32 mac_write_lte_8852b(struct mac_ax_adapter *adapter,
 		PLTFM_DELAY_US(50);
 	}
 
-	PLTFM_MUTEX_LOCK(&adapter->hw_info->lte_rlock);
+	PLTFM_MUTEX_LOCK(&adapter->lock_info.lte_rlock);
 
 	MAC_REG_W32(R_AX_LTE_WDATA, val);
 	MAC_REG_W32(R_AX_LTE_CTRL, 0xC00F0000 | offset);
 
-	PLTFM_MUTEX_UNLOCK(&adapter->hw_info->lte_rlock);
+	PLTFM_MUTEX_UNLOCK(&adapter->lock_info.lte_rlock);
 
 	return MACSUCCESS;
 }
 
+#if MAC_FEAT_COEX
 u32 mac_read_lte_8852b(struct mac_ax_adapter *adapter,
 		       const u32 offset, u32 *val)
 {
@@ -145,12 +124,12 @@ u32 mac_read_lte_8852b(struct mac_ax_adapter *adapter,
 		PLTFM_DELAY_US(50);
 	}
 
-	PLTFM_MUTEX_LOCK(&adapter->hw_info->lte_rlock);
+	PLTFM_MUTEX_LOCK(&adapter->lock_info.lte_rlock);
 
 	MAC_REG_W32(R_AX_LTE_CTRL, 0x800F0000 | offset);
 	*val = MAC_REG_R32(R_AX_LTE_RDATA);
 
-	PLTFM_MUTEX_UNLOCK(&adapter->hw_info->lte_rlock);
+	PLTFM_MUTEX_UNLOCK(&adapter->lock_info.lte_rlock);
 
 	return MACSUCCESS;
 }
@@ -406,4 +385,29 @@ u32 mac_get_ctrl_path_8852b(struct mac_ax_adapter *adapter, u32 *wl)
 	return MACSUCCESS;
 }
 
+#else
+
+u32 coex_mac_init_8852b(struct mac_ax_adapter *adapter)
+{
+	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
+	u32 ret = mac_write_lte_8852b(adapter, R_AX_LTECOEX_CTRL, 0);
+	u8 val = MAC_REG_R8(R_AX_SYS_SDIO_CTRL + 3);
+
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("Write LTE REG fail\n");
+		return ret;
+	}
+
+	ret = mac_write_lte_8852b(adapter, R_AX_LTECOEX_CTRL_2, 0);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("Write LTE REG fail\n");
+		return ret;
+	}
+
+	MAC_REG_W8(R_AX_SYS_SDIO_CTRL + 3, val | BIT(2));
+
+	return MACSUCCESS;
+}
+
+#endif /* MAC_FEAT_COEX */
 #endif /* #if MAC_AX_8852B_SUPPORT */

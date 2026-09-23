@@ -25,7 +25,7 @@
 #include "../halrf_precomp.h"
 #ifdef RF_8852B_SUPPORT
 
-/*8852B DPK ver:0x12 20230628*/
+/*8852B DPK ver:0x14 20240614*/
 
 void _dpk_bkup_kip_8852b(
 	struct rf_info *rf,
@@ -125,8 +125,9 @@ u8 _dpk_one_shot_8852b(
 	enum rf_path path,
 	enum dpk_id id)
 {
+#ifdef HALRF_DZ_LOG
 	struct halrf_rfk_dz_rpt *rfk_dz = &rf->rfk_dz_rpt;
-
+#endif
 	u8 r_bff8 = 0x0, phy_map;
 	u16 dpk_cmd = 0x0;
 	u32 r_80fc = 0x0, cnt1 = 0, cnt2 = 0;
@@ -143,7 +144,9 @@ u8 _dpk_one_shot_8852b(
 	if (rf->phl_com->dev_cap.io_ofld) {
 		if (!halrf_polling_bb(rf, 0xbff8, MASKBYTE0, 0x55, 20000)) {
 			RF_DBG(rf, DBG_RF_DPK, " %s 0xbff8 == 0x55 Timeout !!!\n", __func__);
+#ifdef HALRF_DZ_LOG
 			rfk_dz->dpk_dz_code |= BIT(8 * path);
+#endif
 		}
 		r_bff8 = 0x0;
 	} else
@@ -165,7 +168,9 @@ u8 _dpk_one_shot_8852b(
 	if (rf->phl_com->dev_cap.io_ofld) {
 		if (!halrf_polling_bb(rf, 0x80fc, MASKLWORD, 0x8000, 2000)) {
 			RF_DBG(rf, DBG_RF_DPK, " %s 0x80fc == 0x8000 Timeout !!!\n", __func__);
+#ifdef HALRF_DZ_LOG
 			rfk_dz->dpk_dz_code |= BIT(8 * path);
+#endif
 		}
 		r_80fc = 0x0;
 	} else
@@ -193,7 +198,9 @@ u8 _dpk_one_shot_8852b(
 
 	if (cnt1 == 20000 || cnt2 == 20000) {
 		RF_DBG(rf, DBG_RF_DPK, "[DPK] one-shot over 20ms!!!!\n");
+#ifdef HALRF_DZ_LOG
 		rfk_dz->dpk_dz_code |= BIT(8 * path);
+#endif
 		return 1;
 	} else
 		return 0;
@@ -470,8 +477,12 @@ void _dpk_kip_set_rxagc_8852b(
 }
 
 void _dpk_read_rxsram_8852b(
-	struct rf_info *rf)
+	struct rf_info *rf,
+	enum rf_path path)
 {
+#ifdef HALRF_DZ_LOG
+	struct halrf_rfk_dz_rpt *rfk_dz = &rf->rfk_dz_rpt;
+#endif
 	u32 addr;
 
 	halrf_wreg(rf, 0x80e8, BIT(7), 0x1);	/*web_iqrx*/
@@ -480,8 +491,13 @@ void _dpk_read_rxsram_8852b(
 
 	for (addr = 0; addr < 0x200; addr++) {
 		halrf_wreg(rf, 0x80d8, MASKDWORD, 0x00010000 | addr);
+#ifdef HALRF_DZ_LOG
+		rfk_dz->dpk_rxsram[path][addr] = halrf_rreg(rf, 0x80fc, MASKDWORD);
+		RF_DBG(rf, DBG_RF_DPK, "[DPK] RXSRAM[%03d] = 0x%x\n", addr, rfk_dz->dpk_rxsram[path][addr]);
+#else
 		RF_DBG(rf, DBG_RF_DPK, "[DPK] RXSRAM[%03d] = 0x%x\n", addr,
 			halrf_rreg(rf, 0x80fc, MASKDWORD));
+#endif
 	}
 	halrf_wreg(rf, 0x80e8, BIT(7), 0x0);	/*web_iqrx*/
 	halrf_wreg(rf, 0x8074, BIT(31), 0x0);	/*rxsram_ctrl_sel*/
@@ -594,7 +610,10 @@ void _dpk_rf_setting_8852b(
 	/*debug rtxbw*/
 	halrf_wrf(rf, path, 0xde, BIT(2), 0x1);
 	/*txbb filter*/
-	halrf_wrf(rf, path, 0x1a, BIT(14) | BIT(13) | BIT(12), dpk->bp[path][kidx].bw + 1);
+	if (dpk->bp[path][kidx].band == BAND_ON_24G && dpk->bp[path][kidx].bw == CHANNEL_WIDTH_40)
+		halrf_wrf(rf, path, 0x1a, BIT(14) | BIT(13) | BIT(12), 0x3);
+	else
+		halrf_wrf(rf, path, 0x1a, BIT(14) | BIT(13) | BIT(12), dpk->bp[path][kidx].bw + 1);
 	/*rxbb filter*/
 	halrf_wrf(rf, path, 0x1a, BIT(11) | BIT(10), 0x0);
 
@@ -700,8 +719,9 @@ bool _dpk_sync_check_8852b(
 	u8 kidx)
 {
 	struct halrf_dpk_info *dpk = &rf->dpk;
+#ifdef HALRF_DZ_LOG
 	struct halrf_rfk_dz_rpt *rfk_dz = &rf->rfk_dz_rpt;
-
+#endif
 	u16 dc_i, dc_q;
 	u8 corr_val, corr_idx;
 	u32 corr, dc;
@@ -735,7 +755,9 @@ bool _dpk_sync_check_8852b(
 	dpk->dc_q[path][kidx] = dc_q;
 
 	if ((dc_i > 200) || (dc_q > 200) || (corr_val < 170)) {
+#ifdef HALRF_DZ_LOG
 		rfk_dz->dpk_dz_code |= BIT(8 * path + 1);
+#endif
 		return true;
 	} else
 		return false;
@@ -902,8 +924,12 @@ u8 _dpk_set_offset_8852b(
 
 u8 _dpk_pas_read_8852b(
 	struct rf_info *rf,
+	enum rf_path path,
 	u8 is_check)
 {
+#ifdef HALRF_DZ_LOG
+	struct halrf_rfk_dz_rpt *rfk_dz = &rf->rfk_dz_rpt;
+#endif
 	u8 i;
 	u32 tmp_val, val1_i = 0, val1_q = 0, val2_i = 0, val2_q = 0;
 
@@ -936,8 +962,13 @@ u8 _dpk_pas_read_8852b(
 	} else {
 		for (i = 0; i < 32; i++) {
 			halrf_wreg(rf, 0x80c0, MASKBYTE3, i); /*0x80C3*/
+#ifdef HALRF_DZ_LOG
+			rfk_dz->dpk_pas[path][i] = halrf_rreg(rf, 0x80fc, MASKDWORD);
+			RF_DBG(rf, DBG_RF_DPK, "[DPK] PAS_Read[%02d]= 0x%08x\n", i, rfk_dz->dpk_pas[path][i]);
+#else
 			RF_DBG(rf, DBG_RF_DPK, "[DPK] PAS_Read[%02d]= 0x%08x\n", i,
 				   halrf_rreg(rf, 0x80fc, MASKDWORD));
+#endif
 		}
 	}
 
@@ -956,9 +987,11 @@ u8 _dpk_agc_8852b(
 	u8 loss_only)
 {
 	struct halrf_dpk_info *dpk = &rf->dpk;
-
+#ifdef HALRF_DZ_LOG
+	struct halrf_rfk_dz_rpt *rfk_dz = &rf->rfk_dz_rpt;
+#endif
 	u8 tmp_txagc, tmp_rxbb = 0, i = 0, tmp_gl_idx = 0;
-	u8 goout = 0, agc_cnt = 0, limited_rxbb = 0;
+	u8 goout = 0, agc_cnt = 0, limited_rxbb = 0, gl_cnt = 0;
 	s8 offset = 0;
 	u16 dgain = 0;
 	u32 rf_18;
@@ -987,6 +1020,9 @@ u8 _dpk_agc_8852b(
 			if (_dpk_sync_check_8852b(rf, path, kidx) == true) {
 				tmp_txagc = 0xff;
 				goout = 1;
+
+				_dpk_read_rxsram_8852b(rf, path);
+
 				break;
 			}
 	
@@ -1032,14 +1068,16 @@ u8 _dpk_agc_8852b(
 			_dpk_gainloss_8852b(rf, phy, path, kidx);
 			halrf_write_fwofld_end(rf);		/*FW Offload End*/
 			tmp_gl_idx = _dpk_gainloss_read_8852b(rf);
-			/*_dpk_pas_read_8852a(rf, false);*/
+			/*_dpk_pas_read_8852b(rf, path, false);*/
 
-			if ((tmp_gl_idx == 0 && _dpk_pas_read_8852b(rf, true) == 1) || tmp_gl_idx >= 7)
+			if ((tmp_gl_idx == 0 && _dpk_pas_read_8852b(rf, path, true) == 1) || tmp_gl_idx >= 7)
 				i = 3; /*GL > criterion*/
 			else if (tmp_gl_idx == 0)
 				i = 4; /*GL < criterion*/
 			else 
 				i = 5;
+
+			gl_cnt++;
 			break;
 
 		case 3: /*GL > criterion*/
@@ -1104,6 +1142,13 @@ u8 _dpk_agc_8852b(
 			break;
 		}	
 	} while (!goout && (agc_cnt < 6));
+
+	if (gl_cnt >= 6) {
+		_dpk_pas_read_8852b(rf, path, false);
+#ifdef HALRF_DZ_LOG
+		rfk_dz->dpk_dz_code |= BIT(8 * path + 2);
+#endif
+	}
 
 	RF_DBG(rf, DBG_RF_DPK, "[DPK] Txagc / RXBB for DPK = 0x%x / 0x%x\n",
 		tmp_txagc, tmp_rxbb);
@@ -1570,6 +1615,10 @@ u8 _dpk_bypass_check_8852b(
 		result = 1;
 	} else if (fem->epa_6g && (rf->hal_com->band[phy].cur_chandef.band == BAND_ON_6G)) {
 		RF_DBG(rf, DBG_RF_DPK, "[DPK] Skip DPK due to 6G_ext_PA exist!!\n");
+		result = 1;
+	} else if ((rf->phl_com->dev_cap.rfe_type == 11 || rf->phl_com->dev_cap.rfe_type == 12) &&
+		   (rf->hal_com->band[phy].cur_chandef.band != BAND_ON_24G)) {
+		RF_DBG(rf, DBG_RF_DPK, "[DPK] Skip 5G DPK for rfe_type = 11 or 12\n");
 		result = 1;
 	} else
 		result = 0;

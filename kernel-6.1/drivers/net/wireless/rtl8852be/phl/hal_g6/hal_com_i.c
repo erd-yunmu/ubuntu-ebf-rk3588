@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2019 Realtek Corporation.
+ * Copyright(c) 2019 - 2024 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -161,8 +161,12 @@ rtw_hal_proc_cmd(void *hal, char proc_cmd, struct rtw_proc_cmd *incmd,
 			hal_status = RTW_HAL_STATUS_SUCCESS;
 	}
 	if(proc_cmd == RTW_PROC_CMD_MAC){
+#ifdef CONFIG_HAL_MAC_DBG
 		if(rtw_hal_mac_proc_cmd(hal_info, incmd, output, out_len))
 			hal_status = RTW_HAL_STATUS_SUCCESS;
+#else
+		hal_status = RTW_HAL_STATUS_NOT_SUPPORT;
+#endif
 	}
 #ifdef CONFIG_BTCOEX
 	if(proc_cmd == RTW_PROC_CMD_BTC){
@@ -281,7 +285,7 @@ enum rtw_hal_status rtw_hal_ppdu_sts_init(void *hal, struct hal_ppdu_sts_cfg *cf
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 
 	hal_status = hal_info->hal_ops.cfg_ppdu_sts(hal_info, cfg);
@@ -292,7 +296,7 @@ enum rtw_hal_status rtw_hal_ppdu_sts_init(void *hal, struct hal_ppdu_sts_cfg *cf
 	if (hal_status != RTW_HAL_STATUS_SUCCESS)
 		PHL_ERR("%s - failed\n", __func__);
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(hal_info->phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return hal_status;
 }
@@ -328,7 +332,7 @@ rtw_hal_reset(struct rtw_hal_com_t *hal_com, enum phl_phy_idx phy_idx, u8 band_i
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	PHL_INFO("%s: phy_idx(%d) band_idx(%d)\n", __FUNCTION__, phy_idx, band_idx);
 
@@ -347,7 +351,7 @@ rtw_hal_reset(struct rtw_hal_com_t *hal_com, enum phl_phy_idx phy_idx, u8 band_i
 			return status;
 		}
 
-		rtw_hal_bb_bb_reset_cmn(hal_info, true, phy_idx);
+		rtw_hal_bb_bb_reset_cmn(hal_com, true, phy_idx);
 	}else{
 		/*enable ppdu_sts*/
 		status = rtw_hal_ppdu_sts_cfg(hal_info, band_idx, true);
@@ -357,7 +361,7 @@ rtw_hal_reset(struct rtw_hal_com_t *hal_com, enum phl_phy_idx phy_idx, u8 band_i
 			return status;
 		}
 
-		rtw_hal_bb_bb_reset_cmn(hal_info, false, phy_idx);
+		rtw_hal_bb_bb_reset_cmn(hal_com, false, phy_idx);
 
 		status = rtw_hal_tx_pause(hal_com, band_idx, false, PAUSE_RSON_RESET);
 		if(status != RTW_HAL_STATUS_SUCCESS){
@@ -366,7 +370,7 @@ rtw_hal_reset(struct rtw_hal_com_t *hal_com, enum phl_phy_idx phy_idx, u8 band_i
 		}
 	}
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(hal_info->phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return status;
 }
@@ -445,6 +449,14 @@ void rtw_hal_dump_tx_status(void *hal, enum phl_band_idx bidx)
 
 }
 #endif
+
+void rtw_hal_get_mac_sel_tx_status(void *hal, enum phl_band_idx bidx, void *out_tx_cnt)
+{
+	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
+
+	rtw_hal_mac_get_sel_tx_cnt(hal_info, bidx, out_tx_cnt);
+
+}
 
 enum rtw_hal_status
 rtw_hal_tbtt_tuning(void *hal, enum phl_band_idx band,

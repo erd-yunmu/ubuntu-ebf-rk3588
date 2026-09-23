@@ -2558,7 +2558,7 @@ enum rtw_phl_status rtw_phl_twt_parse_setup_info(u8 *pkt, u16 length,
 		return pstatus;
 	}
 	twt_ele = pkt + TOKEN_OFFSET + TOKEN_LENGTH;
-	setup_info->dialog_token = GET_DIALOG_TOKEN(pkt + TOKEN_OFFSET);
+	setup_info->dialog_token = GET_ACTION_DT(pkt + TOKEN_OFFSET);
 	pstatus = rtw_phl_twt_parse_element(twt_ele, ele_length,
 						&setup_info->twt_element);
 	PHL_TRACE(COMP_PHL_TWT, _PHL_INFO_, "<== rtw_phl_twt_parse_setup_info(): pstatus(%d)\n",
@@ -2767,7 +2767,7 @@ enum rtw_phl_status phl_twt_accept_for_sta_mode(struct phl_info_t *phl,
 			MAC_ADDRESS_LENGTH);
 
 	rtw_phl_pkt_ofld_request(phl, sta->macid, PKT_TYPE_QOS_NULL,
-		&phl_twt_info->qos_null_pkt_token, &null_info, __func__);
+		&phl_twt_info->qos_null_pkt_token, &null_info, __func__, 0);
 
 	PHL_TRACE(COMP_PHL_TWT, _PHL_INFO_, "<== %s: pstatus:%d, config_id:%d\n",
 		__func__, pstatus, cfg_id);
@@ -2876,7 +2876,7 @@ enum rtw_phl_status phl_twt_teardown_for_sta_mode(struct phl_info_t *phl,
 	} while ((bitmap >> i) != 0);
 exit:
 	rtw_phl_pkt_ofld_cancel(phl, teardown_i->sta->macid,
-			PKT_TYPE_QOS_NULL, &phl_twt_info->qos_null_pkt_token);
+			PKT_TYPE_QOS_NULL, &phl_twt_info->qos_null_pkt_token, 0);
 
 	PHL_TRACE(COMP_PHL_TWT, _PHL_INFO_, "<== %s: pstatus(%d)\n",
 		__func__, pstatus);

@@ -143,7 +143,7 @@ rtw_hal_wow_cfg_nlo(void *hal, enum SCAN_OFLD_OP op, u16 mac_id,
 		goto end;
 
 	if (cfg->delay != 0) {
-		hstatus = rtw_hal_mac_get_tsf(hal, hw_band, hw_port, &tsf_h, &tsf_l);
+		hstatus = rtw_hal_mac_get_tsf(hal_info, hw_band, hw_port, &tsf_h, &tsf_l);
 		if (hstatus == RTW_HAL_STATUS_SUCCESS) {
 			tsf = ((u64)tsf_h << 32) | tsf_l;
 			tsf += cfg->delay * 1000;
@@ -172,10 +172,10 @@ rtw_hal_wow_cfg_nlo(void *hal, enum SCAN_OFLD_OP op, u16 mac_id,
 	}
 
 end:
-
+#ifdef CONFIG_PHL_SCANOFLD
 	hstatus = rtw_hal_mac_scan_ofld(hal_info, (u8)mac_id,
 				hw_band, hw_port, &info);
-
+#endif
 	if (hstatus != RTW_HAL_STATUS_SUCCESS)
 		return hstatus;
 
@@ -185,7 +185,9 @@ end:
 enum rtw_hal_status
 rtw_hal_wow_cfg_nlo_chnl_list(void *hal, struct rtw_nlo_info *cfg)
 {
+#ifdef CONFIG_PHL_SCANOFLD
 	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
+#endif
 	enum rtw_hal_status hstatus = RTW_HAL_STATUS_FAILURE;
 	u8 i = 0;
 
@@ -195,9 +197,11 @@ rtw_hal_wow_cfg_nlo_chnl_list(void *hal, struct rtw_nlo_info *cfg)
 	for (i = 0; i < cfg->channel_num; i++) {
 		/* set channel to mac */
 		cfg->channel_list[i].probe_req_id = cfg->probe_req_id;
+#ifdef CONFIG_PHL_SCANOFLD
 		hstatus = rtw_hal_mac_scan_ofld_add_ch(hal_info, HW_BAND_0,
 						&cfg->channel_list[i],
 						i == (cfg->channel_num-1) ? true : false);
+#endif
 		if (hstatus != RTW_HAL_STATUS_SUCCESS)
 			return hstatus;
 	}
@@ -219,6 +223,9 @@ enum rtw_hal_status rtw_hal_wow_init(struct rtw_phl_com_t *phl_com, void *hal,
 	if (hal_status != RTW_HAL_STATUS_SUCCESS)
 		return hal_status;
 
+	if (sta->rlink->mstate == MLME_LINKED)
+		rtw_hal_rf_fwredl_config(hal_info, rtw_hal_hw_band_to_phy_idx(sta->rlink->hw_band));
+
 	PHL_TRACE(COMP_PHL_WOW, _PHL_INFO_, "%s successfully done.\n", __func__);
 
 	FUNCOUT_WSTS(hal_status);
@@ -239,6 +246,12 @@ enum rtw_hal_status rtw_hal_wow_deinit(struct rtw_phl_com_t *phl_com, void *hal,
 	hal_status = hal_ops->hal_wow_deinit(phl_com, hal_info, sta);
 	if (hal_status != RTW_HAL_STATUS_SUCCESS)
 		return hal_status;
+
+	/* recover fw log settings after wowlan resume redl fw */
+	rtw_hal_fw_recover_log_cfg(hal);
+
+	if (sta->rlink->mstate == MLME_LINKED)
+		rtw_hal_rf_fwredl_config(hal_info, rtw_hal_hw_band_to_phy_idx(sta->rlink->hw_band));
 
 	PHL_TRACE(COMP_PHL_WOW, _PHL_INFO_, "%s successfully done.\n", __func__);
 
@@ -327,6 +340,22 @@ rtw_hal_wow_func_en(struct rtw_phl_com_t *phl_com, void *hal, u16 macid,
 			if (RTW_HAL_STATUS_SUCCESS != hstatus)
 				break;
 		}
+#ifdef CONFIG_PHL_MDNS_OFFLOAD
+		/* mDNS offload */
+		if (cfg->mdns_ofld_info->mdns_en) {
+			hstatus = rtw_hal_mac_cfg_mdns_ofld(hal_info, macid, true,
+			                                    cfg->mdns_ofld_info);
+			if (RTW_HAL_STATUS_SUCCESS != hstatus)
+				break;
+		}
+#endif
+
+		/* config wowlan csa */
+		if (cfg->wow_csa_cfg->en) {
+			hstatus = rtw_hal_mac_cfg_sta_csa(hal_info, macid, true, cfg->wow_csa_cfg);
+			if (RTW_HAL_STATUS_SUCCESS != hstatus)
+				break;
+		}
 	} while(0);
 
 	PHL_TRACE(COMP_PHL_WOW, _PHL_INFO_, "[wow] %s status(%u).\n", __func__, hstatus);
@@ -406,6 +435,22 @@ rtw_hal_wow_func_dis(struct rtw_phl_com_t *phl_com, void *hal, u16 macid,
 		if (RTW_HAL_STATUS_SUCCESS != hstatus)
 			PHL_TRACE(COMP_PHL_WOW, _PHL_INFO_, "[wow] rtw_hal_mac_cfg_periodic_wake failed \n");
 	}
+
+#ifdef CONFIG_PHL_MDNS_OFFLOAD
+	/* mDNS offload */
+	if (cfg->mdns_ofld_info->mdns_en) {
+		hstatus = rtw_hal_mac_cfg_mdns_ofld(hal_info, macid, false,
+		                                    cfg->mdns_ofld_info);
+		if (RTW_HAL_STATUS_SUCCESS != hstatus)
+			PHL_TRACE(COMP_PHL_WOW, _PHL_INFO_, "[wow] rtw_hal_mac_cfg_mdns_ofld failed \n");
+	}
+#endif
+	/* config wow csa */
+	if (cfg->wow_csa_cfg->en) {
+		hstatus = rtw_hal_mac_cfg_sta_csa(hal_info, macid, false, NULL);
+		if (RTW_HAL_STATUS_SUCCESS != hstatus)
+			PHL_TRACE(COMP_PHL_WOW, _PHL_INFO_, "[wow] rtw_halmac_cfg_sta_csa failed \n");
+	}
 	PHL_TRACE(COMP_PHL_WOW, _PHL_INFO_, "[wow] %s status(%u).\n", __func__, hstatus);
 
 	FUNCOUT();
@@ -452,11 +497,12 @@ enum rtw_hal_status rtw_hal_wow_func_stop(struct rtw_phl_com_t *phl_com, void *h
 	return hstatus;
 }
 
-enum rtw_hal_status rtw_hal_set_wowlan(struct rtw_phl_com_t *phl_com, void *hal, u8 enter)
+enum rtw_hal_status rtw_hal_set_wowlan(struct rtw_phl_com_t *phl_com, void *hal,
+				       enum mac_ax_wow_ctrl ctrl)
 {
 	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
 	enum rtw_hal_status hal_status = RTW_HAL_STATUS_FAILURE;
-	hal_status = rtw_hal_mac_set_wowlan(hal_info, enter);
+	hal_status = rtw_hal_mac_set_wowlan(hal_info, ctrl);
 
 	PHL_TRACE(COMP_PHL_WOW, _PHL_INFO_, "%s : status(%u).\n", __func__, hal_status);
 
@@ -517,4 +563,81 @@ enum rtw_hal_status rtw_hal_wow_drop_tx(void *hal, u8 band)
 	return hal_status;
 }
 
+enum rtw_hal_status rtw_hal_wow_req_tri_evt(void *hal)
+{
+	enum rtw_hal_status hal_status = RTW_HAL_STATUS_FAILURE;
+	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
+
+	hal_status = rtw_hal_mac_wow_req_tri_evt(hal_info);
+
+	PHL_TRACE(COMP_PHL_WOW, _PHL_INFO_, "%s : status(%u).\n", __func__, hal_status);
+
+	return hal_status;
+}
+
+enum rtw_hal_status rtw_hal_wow_req_diag_rpt(void *hal)
+{
+	enum rtw_hal_status hal_status = RTW_HAL_STATUS_FAILURE;
+	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
+
+	hal_status = rtw_hal_mac_wow_req_diag_rpt(hal_info);
+
+	PHL_TRACE(COMP_PHL_WOW, _PHL_INFO_, "%s : status(%u).\n", __func__, hal_status);
+
+	return hal_status;
+}
+
+enum rtw_hal_status rtw_hal_wow_dbg_dump(void *hal)
+{
+	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
+	enum rtw_hal_status hal_stats = RTW_HAL_STATUS_FAILURE;
+
+	hal_stats = rtw_hal_mac_wow_dbg_dump(hal_info);
+
+	if (RTW_HAL_STATUS_SUCCESS != hal_stats)
+		PHL_ERR("%s : Fail.\n", __func__);
+
+	return hal_stats;
+}
+
+#ifdef CONFIG_PHL_APF
+enum rtw_hal_status
+rtw_hal_init_apf(void *hal, struct phl_apf_info *info)
+{
+	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
+	struct mac_ax_adapter *mac = hal_to_mac(hal_info);
+	struct rtw_hal_mac_apf_ctrl *mac_apf_ctrl = &mac->apf_info;
+	enum rtw_hal_status hstatus = RTW_HAL_STATUS_SUCCESS;
+
+	/* hook phl & mac */
+	mac_apf_ctrl->ptr_apf_ram_buffer = (u32*)(info->ram.buf);
+	mac_apf_ctrl->ptr_status = (u32*)(&(info->apf_state));
+	return hstatus;
+}
+
+enum rtw_hal_status
+rtw_hal_ctrl_apf(void *hal, struct phl_apf_info *info) {
+	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
+	u8 i = 0, polling_cnt = 50, polling_delay = 5;
+	enum rtw_hal_status hstatus = RTW_HAL_STATUS_SUCCESS;
+
+	hstatus = rtw_hal_mac_ctrl_apf(hal_info, info);
+	if (hstatus != RTW_HAL_STATUS_SUCCESS) {
+		PHL_ERR("%s() hstatus(%u)\n", __func__, hstatus);
+		goto exit;
+	}
+
+	for (i = 0; i < polling_cnt; i++) {
+		if (info->apf_state != PHL_APF_UNFINISHED) {
+			goto exit;
+		} else {
+			_os_sleep_ms(NULL, polling_delay);
+		}
+	}
+	hstatus = RTW_HAL_STATUS_TIMEOUT;
+	PHL_ERR("%s() polling timeout!!\n", __func__);
+exit:
+	return hstatus;
+}
+#endif /* CONFIG_PHL_APF */
 #endif /* CONFIG_WOWLAN */

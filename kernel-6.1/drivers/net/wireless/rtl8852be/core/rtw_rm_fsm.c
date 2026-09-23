@@ -533,6 +533,7 @@ static int rm_state_idle(struct rm_obj *prm, enum RM_EV_ID evid)
 			prm->p.rpt = prm->q.rpt;
 			prm->p.ch_num = prm->q.ch_num;
 			prm->p.op_class = prm->q.op_class;
+			prm->p.band = prm->q.band;
 
 			if (prm->q.m_type == ch_load_req
 				|| prm->q.m_type == noise_histo_req) {
@@ -616,6 +617,8 @@ static int rm_state_idle(struct rm_obj *prm, enum RM_EV_ID evid)
 static int rm_state_do_meas(struct rm_obj *prm, enum RM_EV_ID evid)
 {
 	_adapter *padapter = prm->psta->padapter;
+	struct mlme_ext_priv *pmlmeext = &padapter->mlmeextpriv;
+	struct mlme_ext_info *pmlmeinfo = &(pmlmeext->mlmext_info);
 	u8 val8;
 	u64 val64;
 
@@ -687,6 +690,11 @@ static int rm_state_do_meas(struct rm_obj *prm, enum RM_EV_ID evid)
 		rm_set_clock(prm, RM_MEAS_TIMEOUT, RM_EV_meas_timer_expire);
 		break;
 	case RM_EV_survey_done:
+		if (pmlmeinfo->state == WIFI_FW_NULL_STATE) {
+			rm_state_goto(prm, RM_ST_END);
+			return _SUCCESS;
+		}
+
 		if (prm->q.action_code == RM_ACT_RADIO_MEAS_REQ) {
 			switch (prm->q.m_type) {
 			case bcn_req:
@@ -790,11 +798,18 @@ static int rm_state_wait_meas(struct rm_obj *prm, enum RM_EV_ID evid)
 
 static int rm_state_send_report(struct rm_obj *prm, enum RM_EV_ID evid)
 {
+	_adapter *padapter = prm->psta->padapter;
+	struct mlme_ext_priv *pmlmeext = &padapter->mlmeextpriv;
+	struct mlme_ext_info *pmlmeinfo = &(pmlmeext->mlmext_info);
 	u8 val8;
 
 
 	switch (evid) {
 	case RM_EV_state_in:
+		if (pmlmeinfo->state == WIFI_FW_NULL_STATE) {
+			rm_state_goto(prm, RM_ST_END);
+			return _SUCCESS;
+		}
 		/* we have to issue report */
 		if (prm->q.action_code == RM_ACT_RADIO_MEAS_REQ) {
 			switch (prm->q.m_type) {

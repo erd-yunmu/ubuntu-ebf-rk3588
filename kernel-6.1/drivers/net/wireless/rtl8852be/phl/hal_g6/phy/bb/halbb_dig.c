@@ -403,7 +403,7 @@ void halbb_dig_damping_chk_init(struct bb_info *bb)
 u8 halbb_get_lna_idx(struct bb_info *bb, enum rf_path path)
 {
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
-	const struct bb_dig_cr_info *cr = &bb_dig->bb_dig_cr_i;
+	const struct bb_dig_cr_info *cr = &bb->bb_cmn_hooker->bb_dig_cr_i;
 	u8 lna_idx = LNA_IDX_MAX;
 
 	/*lna initial gain index*/
@@ -426,7 +426,7 @@ u8 halbb_get_lna_idx(struct bb_info *bb, enum rf_path path)
 u8 halbb_get_tia_idx(struct bb_info *bb, enum rf_path path)
 {
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
-	const struct bb_dig_cr_info *cr = &bb_dig->bb_dig_cr_i;
+	const struct bb_dig_cr_info *cr = &bb->bb_cmn_hooker->bb_dig_cr_i;
 	u8 tia_idx = TIA_IDX_MAX;
 
 	switch (path) {
@@ -448,7 +448,7 @@ u8 halbb_get_tia_idx(struct bb_info *bb, enum rf_path path)
 u8 halbb_get_rxb_idx(struct bb_info *bb, enum rf_path path)
 {
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
-	const struct bb_dig_cr_info *cr = &bb_dig->bb_dig_cr_i;
+	const struct bb_dig_cr_info *cr = &bb->bb_cmn_hooker->bb_dig_cr_i;
 	u8 rxb_idx = RXB_IDX_MAX;
 
 	switch (path) {
@@ -570,6 +570,7 @@ u8 halbb_dig_igi_by_ofst(struct bb_info *bb, u8 igi_pre, s8 ofst)
 	igi_new = (u8)((s8)igi_pre + ofst);
 	dyn_min = SUBTRACT_TO_0(dig->igi_rssi, 10);
 	dyn_max = dyn_min + IGI_OFFSET_MAX;
+	dyn_min = SUBTRACT_TO_0(dyn_min, (dig->sr_coexist_en)? dig->igi_ofst_sr_coexist : 0);
 
 	#ifdef HALBB_DIG_DAMPING_CHK
 	/*@Limit Dyn min by damping*/
@@ -764,7 +765,7 @@ bool halbb_dig_fahm_latch(struct bb_info *bb)
 void halbb_sdagc_follow_pagc_config(struct bb_info *bb, bool set_en)
 {
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
-	const struct bb_dig_cr_info *cr = &bb_dig->bb_dig_cr_i;
+	const struct bb_dig_cr_info *cr = &bb->bb_cmn_hooker->bb_dig_cr_i;
 	u32 val = (set_en) ? 1 : 0;
 	u8 i = 0;
 
@@ -789,7 +790,7 @@ void halbb_dyn_pd_th_cck(struct bb_info *bb, u8 rssi, bool set_en)
 {
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
 	struct bb_dig_op_unit *bb_dig_u = bb_dig->p_cur_dig_unit;
-	const struct bb_dig_cr_info *cr = &bb_dig->bb_dig_cr_i;
+	const struct bb_dig_cr_info *cr = &bb->bb_cmn_hooker->bb_dig_cr_i;
 	u8 pd_dyn_max = bb_dig->igi_rssi + 5; /* PD_low upper bound */
 	u8 margin = bb_dig_u->pd_low_th_ofst; /* backoff of CCA ability */
 	u8 phy = bb->bb_phy_idx == HW_PHY_1 ? 1 : 0;
@@ -818,7 +819,7 @@ void halbb_dyn_pd_th_ofdm(struct bb_info *bb, u8 rssi, bool set_en)
 {
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
 	struct bb_dig_op_unit *bb_dig_u = bb_dig->p_cur_dig_unit;
-	const struct bb_dig_cr_info *cr = &bb_dig->bb_dig_cr_i;
+	const struct bb_dig_cr_info *cr = &bb->bb_cmn_hooker->bb_dig_cr_i;
 	u8 pd_dyn_max = bb_dig->igi_rssi + 5; /* PD_low upper bound */
 	u8 margin = bb_dig_u->pd_low_th_ofst; /* backoff of CCA ability */
 	u8 phy = bb->bb_phy_idx == HW_PHY_1 ? 1 : 0;
@@ -866,7 +867,7 @@ void halbb_dig_mode_update(struct bb_info *bb, enum dig_op_mode mode, enum phl_p
 void halbb_dig_gain_para_init(struct bb_info *bb)
 {
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
-	struct bb_dig_cr_info *cr = &bb_dig->bb_dig_cr_i;
+	struct bb_dig_cr_info *cr = &bb->bb_cmn_hooker->bb_dig_cr_i;
 	s8 *gain_arr = NULL;
 	u32 tmp_val, i = 0;
 
@@ -1040,7 +1041,11 @@ void halbb_dig_op_unit_para_reset_h(struct bb_info *bb)
 	unit_cur->force_gaincode = bb_dig->max_gaincode;
 	unit_cur->abs_igi_max = IGI_MAX_PERFORMANCE_MODE;
 	unit_cur->abs_igi_min = 0xc;
-	unit_cur->pd_low_th_ofst = 16;
+	/* Jira: PCIE-9751*/
+	if (bb->ic_type == BB_RTL8922A)
+		unit_cur->pd_low_th_ofst = 26;
+	else
+		unit_cur->pd_low_th_ofst = 16;
 #ifdef HALBB_DIG_TDMA_SUPPORT
 	unit_cur->state_identifier = DIG_TDMA_HIGH;
 #endif
@@ -1082,6 +1087,8 @@ void halbb_dig_para_reset(struct bb_info *bb)
 {
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
 
+	halbb_mem_set(bb, &bb_dig->dig_fa_i, 0, sizeof(struct bb_dig_fa_info));
+
 	bb_dig->pre_dig_mode = bb_dig->dig_mode;
 	bb_dig->p_cur_dig_unit = &bb_dig->dig_state_h_i;
 	bb_dig->need_update = false;
@@ -1105,7 +1112,6 @@ void halbb_dig_reset(struct bb_info *bb)
 
 	BB_DIG_DBG(bb, DIG_DBG_LV0, "[%s]=========>\n", __func__);
 
-	halbb_mem_set(bb, &bb_dig->dig_fa_i, 0, sizeof(struct bb_dig_fa_info));
 	halbb_dig_para_reset(bb);
 
 #ifdef HALBB_FW_OFLD_SUPPORT
@@ -1151,6 +1157,8 @@ void halbb_dig_init(struct bb_info *bb)
 	bb_dig->igi_pause_cnt = 0;
 	bb_dig->le_igi_ofst = 0;
 	bb_dig->dbg_lv = DIG_DBG_LV2;
+	bb_dig->sr_coexist_en = false;
+	bb_dig->igi_ofst_sr_coexist = 6;
 	bb_dig->dig_state_h_i.state_num_lmt = 3;
 	bb_dig->dig_state_h_i.sdagc_follow_pagc_en = false;
 #ifdef HALBB_DIG_TDMA_SUPPORT
@@ -1162,7 +1170,7 @@ void halbb_dig_init(struct bb_info *bb)
 #ifdef HALBB_DIG_DAMPING_CHK
 	halbb_dig_damping_chk_init(bb);
 #endif
-	halbb_dig_reset(bb);
+	halbb_dig_para_reset(bb);
 
 #ifdef HALBB_FW_OFLD_SUPPORT
 	BB_DBG(bb, DBG_DIG, "[%s][phy=%d]skip_io_init_en = %d\n",
@@ -1301,6 +1309,7 @@ void halbb_dig(struct bb_info *bb)
 	u8 igi_new, igi_pre = dig_u->igi_fa_rssi;
 	s8 ofst;
 
+	halbb_show_cr_cnt(bb, BB_WD_DIG);
 	BB_DIG_DBG(bb, DIG_DBG_LV0, "%s ======>\n", __func__);
 
 #ifdef HALBB_FW_OFLD_SUPPORT
@@ -1535,12 +1544,14 @@ void halbb_set_dig_pause_val(struct bb_info *bb, u32 *buf, u8 val_len)
 {
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
 	struct bb_dig_op_unit *dig_u = bb_dig->p_cur_dig_unit;
+	u8 phy = bb->bb_phy_idx == HW_PHY_1 ? 1 : 0;
+	enum channel_width cbw = bb->hal_com->band[phy].cur_chandef.bw;
+	u8 margin = dig_u->pd_low_th_ofst;
+	u8 target_pwr = 0;
+	u8 igi_new = 0;
 #ifdef BB_8852A_2_SUPPORT
 	struct agc_gaincode_set gaincode = bb_dig->max_gaincode;
 #endif
-	u8 phy = bb->bb_phy_idx == HW_PHY_1 ? 1 : 0;
-	enum channel_width cbw = bb->hal_com->band[phy].cur_chandef.bw;
-	u8 target_pwr, margin = dig_u->pd_low_th_ofst;
 
 	if (val_len != DIG_PAUSE_INFO_SIZE) {
 		BB_DIG_DBG(bb, DIG_DBG_LV0, "[Error][DIG]Need val_len=%d\n",
@@ -1549,6 +1560,24 @@ void halbb_set_dig_pause_val(struct bb_info *bb, u32 *buf, u8 val_len)
 	}
 	BB_DIG_DBG(bb, DIG_DBG_LV0, "[%s] Pd=-%d dB\n", __func__, buf[0]);
 
+#if 0
+	#ifdef HALBB_FW_OFLD_SUPPORT
+	if (!bb_dig->init_dig_cr_success) {
+		halbb_dig_init_io_en(bb);
+		BB_DBG(bb, DBG_DIG, "init_dig_cr_success = %d\n",
+			bb_dig->init_dig_cr_success);
+	}
+	#endif
+	igi_new = halbb_dig_igi_by_ofst(bb, RSSI_MAX - (u8)buf[0], 0); /*init IGI state*/
+	halbb_dig_cfg_bbcr(bb, igi_new);
+#else
+	#ifdef HALBB_FW_OFLD_SUPPORT
+	if (!bb_dig->init_dig_cr_success) {
+		halbb_dig_init_io_en(bb);
+		BB_DBG(bb, DBG_DIG, "init_dig_cr_success = %d\n",
+			bb_dig->init_dig_cr_success);
+	}
+	#endif
 #ifdef BB_8852A_2_SUPPORT
 	/* write igi or keep max gaincode */
 	if (bb->ic_type == BB_RTL8852A) {
@@ -1566,6 +1595,7 @@ void halbb_set_dig_pause_val(struct bb_info *bb, u32 *buf, u8 val_len)
 	if (buf[1] == PAUSE_OFDM)
 		target_pwr = 0;
 	halbb_set_pd_lower_bound_cck(bb, target_pwr, cbw, bb->bb_phy_idx);
+#endif
 }
 
 void* halbb_get_dig_fa_statistic(struct bb_info *bb)
@@ -1642,6 +1672,12 @@ void halbb_dig_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 			    bb_dig_u->force_gaincode.tia_idx,
 			    bb_dig_u->force_gaincode.rxb_idx);
 #endif
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "{16: SR coexist en = %d} {0:disable, 1:enable}\n",
+			    bb_dig->sr_coexist_en);
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+			    "{17: SR coexist IGI offset = (%d)} {val}\n",
+			    bb_dig->igi_ofst_sr_coexist);
 		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
 			    "{20: dbg level = %d} {0/1/2}\n",
 			    bb_dig->dbg_lv);
@@ -1852,6 +1888,18 @@ void halbb_dig_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 			 bb_dig_u->force_gaincode.tia_idx,
 			 bb_dig_u->force_gaincode.rxb_idx);
 #endif
+	} else if (var[0] == 16) {
+		HALBB_SCAN(input[2], DCMD_DECIMAL, &var[1]);
+		bb_dig->sr_coexist_en = (var[1] == 0)? false : true;
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+		    "SR coexist en set to (%d)\n",
+		    (bb_dig->sr_coexist_en)? 1:0);
+	} else if (var[0] == 17) {
+		HALBB_SCAN(input[2], DCMD_DECIMAL, &var[1]);
+		bb_dig->igi_ofst_sr_coexist = (u8)var[1];
+		BB_DBG_CNSL(*_out_len, *_used, output + *_used, *_out_len - *_used,
+		    "IGI offset for SR coexistence set to (%d)\n",
+		    bb_dig->igi_ofst_sr_coexist);
 	} else if (var[0] == 20) {
 		HALBB_SCAN(input[2], DCMD_DECIMAL, &var[1]);
 		if ((enum dig_dbg_level)var[1] <= DIG_DBG_LV2)
@@ -1868,7 +1916,7 @@ void halbb_dig_dbg(struct bb_info *bb, char input[][16], u32 *_used,
 void halbb_cr_cfg_dig_init(struct bb_info *bb)
 {
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
-	struct bb_dig_cr_info *cr = &bb_dig->bb_dig_cr_i;
+	struct bb_dig_cr_info *cr = &bb->bb_cmn_hooker->bb_dig_cr_i;
 
 	switch (bb->cr_type) {
 #ifdef HALBB_COMPILE_AP_SERIES
@@ -2264,35 +2312,69 @@ void halbb_cr_cfg_dig_init(struct bb_info *bb)
 	}
 }
 #endif
-#ifdef HALBB_DIG_MCC_SUPPORT
-void Halbb_init_mccdm(struct bb_info *bb)
+#ifdef HALBB_MCC_SUPPORT
+void halbb_init_mccdm(struct bb_info *bb)
 {
 	struct halbb_mcc_dm *mcc_dm = &bb->mcc_dm;
 	u8 i = 0;
 
 	BB_DBG(bb, DBG_DIG, "[%s]=========>\n", __func__);
 
-	mcc_dm->softap_macid = INVALID_INIT_VAL;
+	mcc_dm->softap_macid = 0;
 
-	for (i = 0; i < MCC_BAND_NUM; i++) {
+	for (i = 0; i < NUM_MAX_REG_CNT; i++) {
 		mcc_dm->mcc_reg_id[i] = INVALID_INIT_VAL;
 		mcc_dm->mcc_dm_reg[i] = 0;
-		mcc_dm->mcc_dm_val[i][0] = 0;
-		mcc_dm->mcc_dm_val[i][1] = 0;
+		mcc_dm->mcc_dm_val[i][MR_BAND_1] = 0;
+		mcc_dm->mcc_dm_val[i][MR_BAND_2] = 0;
+		mcc_dm->mcc_dm_val[i][MR_BAND_3] = 0;
+	}
+
+	for (i = 0; i < MR_BAND_NUM; i++) {
+		mcc_dm->sta_cnt[i] = 0;
+		mcc_dm->mcc_rf_ch[i].chan = INVALID_INIT_VAL;
+		mcc_dm->mcc_rf_ch[i].center_ch = INVALID_INIT_VAL;
+		mcc_dm->mcc_rf_ch[i].band= BAND_MAX;
 	}
 }
 
 u32 halbb_c2h_mccdm_check(struct bb_info *bb, u16 len, u8 *c2h)
 {
 	bool fw_mccdm_en = false;
+	struct halbb_c2h_mr_dm *mcc_c2h_i;
 
 	if (!c2h) {
 		BB_WARNING("Error fw mcc dig c2h failed!!\n");
 		return _FAIL;
 	}
 
-	fw_mccdm_en = (bool)c2h[0];
-	BB_DBG(bb, DBG_DIG, "FW MCC DIG : %s\n", fw_mccdm_en ? "true" : "false");
+	mcc_c2h_i = (struct halbb_c2h_mr_dm *)c2h;
+
+	switch (mcc_c2h_i->mrdm_err_hdl) {
+		case BB_MRDM_DISABLE:
+			BB_DBG(bb, DBG_DIG, "FW MCC Stop!mrdm_en = %d\n", mcc_c2h_i->cur_mr_dm_en);
+			break;
+		case BB_MRDM_REG_OVERFLOW:
+			BB_DBG(bb, DBG_DIG, "FW MCC Reg_cnt >= Max num\n");
+			break;
+		case BB_MRDM_CLR_CH:
+			BB_DBG(bb, DBG_DIG, "FW MCC Set CH[%d] = 0\n", mcc_c2h_i->central_ch);
+			break;
+		case BB_MRDM_SEARCH_CH_FAIL:
+			BB_DBG(bb, DBG_DIG, "FW MCC Channel[%d] Fail!\n", mcc_c2h_i->central_ch);
+			break;
+		case BB_MRDM_ONE_CH_ONLY:
+			BB_DBG(bb, DBG_DIG, "FW MCC only config 1 channel!\n");
+			break;
+		case BB_MRDM_SWITCH_CR:
+			BB_DBG(bb, DBG_DIG, "FW MCC BB_MRDM_SWITCH_CR not use!\n");
+			break;
+		case BB_MRDM_START:
+			BB_DBG(bb, DBG_DIG, "FW MCC Start!mrdm_en = %d\n", mcc_c2h_i->cur_mr_dm_en);
+			break;
+		default:
+			break;
+	}
 
 	return _SUCCESS;
 }
@@ -2300,6 +2382,7 @@ u32 halbb_c2h_mccdm_check(struct bb_info *bb, u16 len, u8 *c2h)
 void halbb_mccdm_h2ccmd_rst(struct bb_info *bb)
 {
 	struct mcc_h2c *mcc_cfg;
+	struct halbb_mcc_dm *mcc_dm = &bb->mcc_dm;
 	bool ret_val = false;
 	u8 cmdlen = sizeof(struct mcc_h2c);
 	u32 *bb_h2c;
@@ -2312,31 +2395,28 @@ void halbb_mccdm_h2ccmd_rst(struct bb_info *bb)
 	}
 	halbb_mem_set(bb, mcc_cfg, 0, cmdlen);
 	bb_h2c = (u32*) mcc_cfg;
-	//u8 h2c_mcc[H2C_MAX_LENGTH];
 
 	/* RST MCC */
-	mcc_cfg->mcc_dm_en = 0;
-	mcc_cfg->reg_cnt = 0;
-	mcc_cfg->mcc_set = 0;
-	ret_val = halbb_fill_h2c_cmd(bb, cmdlen, DM_H2C_FW_MCC,
-					   HALBB_H2C_DM, bb_h2c);
-	BB_DBG(bb, DBG_DIG, "MCC H2C RST\n");
+	if (mcc_dm->mcc_pre_status_en == BB_MCC_ENABLE) {
+		ret_val = halbb_fill_h2c_cmd(bb, cmdlen, DM_H2C_FW_MCC,
+					    HALBB_H2C_DM, bb_h2c);
+	}
+
+	if (ret_val == false)
+		BB_WARNING(" H2C cmd: MCC rst failed!!\n");
 
 	if (mcc_cfg)
 		hal_mem_free(bb->hal_com, mcc_cfg, cmdlen);
 }
 
-void Halbb_mccdm_h2c_handler(struct bb_info *bb)
+void halbb_mccdm_h2c_handler(struct bb_info *bb)
 {
 	struct halbb_mcc_dm *mcc_dm = &bb->mcc_dm;
 	struct mcc_h2c_reg_content *reg_cont;
 	struct mcc_h2c *mcc_cfg;
 	bool ret_val = false;
 	u8 cmdlen = sizeof(struct mcc_h2c);
-	u8 i;
-	u8 regid;
-	u8 ch_idx;
-	u8 reg_cnt;
+	u8 i = 0, regid = INVALID_INIT_VAL, j = 0, reg_cnt = 0;
 	u32 *bb_h2c;
 
 	mcc_cfg = hal_mem_alloc(bb->hal_com, cmdlen);
@@ -2347,8 +2427,8 @@ void Halbb_mccdm_h2c_handler(struct bb_info *bb)
 	}
 	bb_h2c = (u32*) mcc_cfg;
 
-	if (mcc_dm->mcc_rf_ch[0].center_ch == INVALID_INIT_VAL &&
-	    mcc_dm->mcc_rf_ch[1].center_ch == INVALID_INIT_VAL) {
+	if (mcc_dm->mcc_rf_ch[MR_BAND_1].center_ch == INVALID_INIT_VAL &&
+	    mcc_dm->mcc_rf_ch[MR_BAND_2].center_ch == INVALID_INIT_VAL) {
 		BB_DBG(bb, DBG_DIG, "MCC channel Error\n");
 		mcc_cfg->mcc_dm_en = 0;
 		mcc_cfg->reg_cnt = 0;
@@ -2361,27 +2441,27 @@ void Halbb_mccdm_h2c_handler(struct bb_info *bb)
 	}
 
 	/* Set Channel number, reg, and val*/
-	for (ch_idx = 0; ch_idx < MCC_BAND_NUM; ch_idx++) {
+	for (i = 0; i < mcc_dm->mr_num; i++) {
 		halbb_mem_set(bb, mcc_cfg, 0, cmdlen);
 		reg_cnt = 0;
 		mcc_cfg->mcc_dm_en = 1;
-		mcc_cfg->mcc_ch_idx = ch_idx;
+		mcc_cfg->mcc_idx = i;
 		mcc_cfg->mcc_set = 1;
 		mcc_cfg->phy0_en = 1;
 		mcc_cfg->phy1_en = 0;
-		mcc_cfg->ch_lsb = (u8)mcc_dm->mcc_rf_ch[ch_idx].center_ch;
-		mcc_cfg->ch_msb = (u8)mcc_dm->mcc_rf_ch[ch_idx].band;
-		for (i = 0; i < NUM_MAX_IGI_CNT; i++) {
-			regid = mcc_dm->mcc_reg_id[i];
+		mcc_cfg->center_ch= (u8)mcc_dm->mcc_rf_ch[i].center_ch;
+		mcc_cfg->band_type = (u8)mcc_dm->mcc_rf_ch[i].band;
+		for (j = 0; j < NUM_MAX_REG_CNT; j++) {
+			regid = mcc_dm->mcc_reg_id[j];
 			if (regid == INVALID_INIT_VAL)
 				break;
-			reg_cont = &mcc_cfg->mcc_reg_content[i];
-			reg_cont->addr_lsb = (u8)mcc_dm->mcc_dm_reg[i];
-			reg_cont->addr_msb = (u8)(mcc_dm->mcc_dm_reg[i] >> 8);
-			reg_cont->bmask_lsb = (u8)(mcc_dm->mcc_dm_mask[i]);
-			reg_cont->bmask_msb = (u8)(mcc_dm->mcc_dm_mask[i] >> 8);
-			reg_cont->val_lsb = (u8)(mcc_dm->mcc_dm_val[i][ch_idx]);
-			reg_cont->val_msb = (u8)(mcc_dm->mcc_dm_val[i][ch_idx] >> 8);
+			reg_cont = &mcc_cfg->mcc_reg_content[j];
+			reg_cont->addr_lsb = (u8)mcc_dm->mcc_dm_reg[j];
+			reg_cont->addr_msb = (u8)(mcc_dm->mcc_dm_reg[j] >> 8);
+			reg_cont->bmask_lsb = (u8)(mcc_dm->mcc_dm_mask[j]);
+			reg_cont->bmask_msb = (u8)(mcc_dm->mcc_dm_mask[j] >> 8);
+			reg_cont->val_lsb = (u8)(mcc_dm->mcc_dm_val[j][i]);
+			reg_cont->val_msb = (u8)(mcc_dm->mcc_dm_val[j][i] >> 8);
 			reg_cnt++;
 		}
 		mcc_cfg->reg_cnt = reg_cnt;
@@ -2389,6 +2469,8 @@ void Halbb_mccdm_h2c_handler(struct bb_info *bb)
 		       bb_h2c[0], bb_h2c[1], bb_h2c[2]);
 		ret_val = halbb_fill_h2c_cmd(bb, cmdlen, DM_H2C_FW_MCC,
 					     HALBB_H2C_DM, bb_h2c);
+		if (ret_val == false)
+			BB_WARNING(" H2C cmd: MCC failed!!\n");
 	}
 
 	if (mcc_cfg)
@@ -2405,24 +2487,36 @@ void halbb_mccdm_ctrl(struct bb_info *bb)
 	if (mcc_dm->mcc_status_en == mcc_dm->mcc_pre_status_en)
 		return;
 
-	/*Not in MCC stage*/
-	if (mcc_dm->mcc_status_en != 0) {
+	/*In MCC stage*/
+	if (mcc_dm->mcc_status_en != BB_MCC_DISABLE) {
 		/* Disable normal DIG */
 		halbb_pause_func(bb, F_DIG, HALBB_PAUSE_NO_SET, HALBB_PAUSE_LV_2,
 				 2, val, bb->bb_phy_idx);
+		if (bb->ic_sub_type == BB_IC_SUB_TYPE_8852C_8852C) {
+			/* Disable normal statistics */
+			halbb_pause_func(bb, F_FA_CNT, HALBB_PAUSE_NO_SET, HALBB_PAUSE_LV_2,
+					 1, val, bb->bb_phy_idx);
+		}
 	}
-	if (mcc_dm->mcc_status_en == 0 && mcc_dm->mcc_pre_status_en != 0) {
-		Halbb_init_mccdm(bb);
+
+	/*Not In MCC stage*/
+	if (mcc_dm->mcc_status_en != BB_MCC_ENABLE && mcc_dm->mcc_pre_status_en == BB_MCC_ENABLE) {
+		halbb_init_mccdm(bb);
 		halbb_mccdm_h2ccmd_rst(bb);
 		/* Enable normal DIG */
 		halbb_pause_func(bb, F_DIG, HALBB_RESUME, HALBB_PAUSE_LV_2, 2,
 				 val, bb->bb_phy_idx);
+		if (bb->ic_sub_type == BB_IC_SUB_TYPE_8852C_8852C) {
+			/* Enable normal statistics */
+			halbb_pause_func(bb, F_FA_CNT, HALBB_RESUME_NO_RECOVERY, HALBB_PAUSE_LV_2, 1,
+					 val, bb->bb_phy_idx);
+		}
 	}
 
 	mcc_dm->mcc_pre_status_en = mcc_dm->mcc_status_en;
 }
 
-void halbb_fill_mcccmd(struct bb_info *bb, u8 regid, u16 reg_add, u16 mask,
+void halbb_fill_mcc_cmd(struct bb_info *bb, u8 regid, u16 reg_add, u16 mask,
 		       u8 band, u16 val)
 {
 	struct halbb_mcc_dm *mcc_dm = &bb->mcc_dm;
@@ -2433,34 +2527,15 @@ void halbb_fill_mcccmd(struct bb_info *bb, u8 regid, u16 reg_add, u16 mask,
 	mcc_dm->mcc_dm_val[regid][band] = val;
 }
 
-void halbb_mccdm_igi_rst(struct bb_info *bb, u8 clr_port)
+void halbb_mccdm_reg_rst(struct bb_info *bb, u8 clr_port)
 {
 	struct halbb_mcc_dm *mcc_dm = &bb->mcc_dm;
 
-	mcc_dm->mcc_dm_val[0][clr_port] = PD_IDX_MIN; //-102dBm
+	mcc_dm->mcc_dm_val[SEG0R_PD_LOWER_BOUND][clr_port] = PD_IDX_MIN; //-102dBm
 	//mcc_dm->mcc_dm_val[1][clr_port] = 0xff;
 }
 
-#if 0
-void halbb_mcc_igi_chk(struct bb_info *bb)
-{
-	struct halbb_mcc_dm *mcc_dm = &bb->mcc_dm;
-
-	if (mcc_dm->mcc_dm_val[0][0] == 0xffff &&
-	    mcc_dm->mcc_dm_val[0][1] == 0xffff) {
-		mcc_dm->mcc_dm_reg[0] = 0xffff;
-		mcc_dm->mcc_reg_id[0] = 0xff;
-	}
-
-	if (mcc_dm->mcc_dm_val[1][0] == 0xffff &&
-	    mcc_dm->mcc_dm_val[1][1] == 0xffff) {
-		mcc_dm->mcc_dm_reg[1] = 0xffff;
-		mcc_dm->mcc_reg_id[1] = 0xff;
-	}
-}
-#endif
-
-u8 halbb_mccdm_pd_lower_bound_cal(struct bb_info *bb, u8 bound,
+u8 halbb_mccdm_pd_cal(struct bb_info *bb, u8 bound,
 				      enum channel_width bw)
 {
 	/*
@@ -2485,10 +2560,12 @@ u8 halbb_mccdm_pd_lower_bound_cal(struct bb_info *bb, u8 bound,
 		bw_attenuation = 3;
 	} else if (bw == CHANNEL_WIDTH_80) {
 		bw_attenuation = 6;
+	} else if (bw == CHANNEL_WIDTH_160) {
+		bw_attenuation = 9;
 	} else {
-		BB_DBG(bb, DBG_DIG,
-		       "[PD Bound] Only support BW20/40/80 !\n");
-		return 0;
+		BB_DBG(bb, DBG_PHY_CONFIG,
+		       "[PD Bound] Only support BW20/40/80/160 !\n");
+		return false;
 	}
 
 	bound += (bw_attenuation + subband_filter_atteniation);
@@ -2512,21 +2589,17 @@ u8 halbb_mccdm_pd_lower_bound_cal(struct bb_info *bb, u8 bound,
 	return bound_idx;
 }
 
-void halbb_mccdm_pd_cal(struct bb_info *bb)
+void halbb_mccdm_igi_cal(struct bb_info *bb)
 {
 	struct halbb_mcc_dm *mcc_dm = &bb->mcc_dm;
 	struct bb_dig_info *bb_dig = &bb->bb_dig_i;
 	struct bb_dig_op_unit *bb_dig_u = bb_dig->p_cur_dig_unit;
-	struct bb_dig_cr_info *cr = &bb_dig->bb_dig_cr_i;
-	u8 shift = 10;
-	u8 igi_val;
-	u8 pd_val;
-	u8 i;
-	u16 mask0;
-	u16 reg0;
+	struct bb_dig_cr_info *cr = &bb->bb_cmn_hooker->bb_dig_cr_i;
+	u8 shift = 10, igi_val = 0, pd_val = 0, i = 0;
+	u16 mask0 = 0, reg0 = 0;
 	enum channel_width cbw = CHANNEL_WIDTH_20;
 
-	for (i = 0; i < MCC_BAND_NUM; i++) {
+	for (i = 0; i < mcc_dm->mr_num; i++) {
 		igi_val = mcc_dm->rssi_min[i] >> 1;
 		igi_val = SUBTRACT_TO_0(igi_val, shift);
 		igi_val = MIN_2(igi_val, IGI_MAX_PERFORMANCE_MODE);
@@ -2535,44 +2608,45 @@ void halbb_mccdm_pd_cal(struct bb_info *bb)
 
 		cbw = mcc_dm->mcc_rf_ch[i].bw;
 
-		pd_val = halbb_mccdm_pd_lower_bound_cal(bb, RSSI_MAX - igi_val,
-							cbw);
+		pd_val = halbb_mccdm_pd_cal(bb, RSSI_MAX - igi_val, cbw);
 
-		reg0 = (u16)cr->seg0r_pd_lower_bound_a;
+		reg0 = (u16)halbb_get_phy0_phy1_reg(bb, cr->seg0r_pd_lower_bound_a, bb->bb_phy_idx);
 		mask0 = (u16)cr->seg0r_pd_lower_bound_a_m;
 
-		halbb_fill_mcccmd(bb, 0, reg0, mask0, i, (u16)pd_val);
+		halbb_fill_mcc_cmd(bb, SEG0R_PD_LOWER_BOUND, reg0, mask0, i, (u16)pd_val);
 
 		if (mcc_dm->sta_cnt[i] == 0)
-			halbb_mccdm_igi_rst(bb, i);
-	}
+			halbb_mccdm_reg_rst(bb, i);
 
-	BB_DBG(bb, DBG_DIG, "STA cnt %d %d, RSSI_min: %d %d, BW: %d %d, MCC_pd_idx: %d %d\n",
-	       mcc_dm->sta_cnt[0], mcc_dm->sta_cnt[1],
-	       mcc_dm->rssi_min[0] >> 1, mcc_dm->rssi_min[1] >> 1,
-	       mcc_dm->mcc_rf_ch[0].bw, mcc_dm->mcc_rf_ch[1].bw,
-	       mcc_dm->mcc_dm_val[0][0], mcc_dm->mcc_dm_val[0][1]);
+		BB_DBG(bb, DBG_DIG, "Band type[%d], CH %d, STA cnt %d, RSSI_min: %d, BW: %d, MCC_pd_idx: %d\n",
+		       mcc_dm->mcc_rf_ch[i].band, mcc_dm->mcc_rf_ch[i].center_ch,
+		       mcc_dm->sta_cnt[i], mcc_dm->rssi_min[i] >> 1,
+		       mcc_dm->mcc_rf_ch[i].bw, mcc_dm->mcc_dm_val[0][i]);
+	}
 }
 
 void halbb_mccdm_switch(struct bb_info *bb)
 {
 	struct halbb_mcc_dm *mcc_dm = &bb->mcc_dm;
 
-	if (!(bb->ic_type & HALBB_DIG_MCC_SUPPORT_IC)) {
+	BB_DBG(bb, DBG_DIG, "<====== %s ======>\n", __func__);
+	halbb_show_cr_cnt(bb, BB_WD_MCCDM);
+	if (bb->bb_cmn_hooker->bb_drv_type != BB_NIC_DRV) {
 		BB_DBG(bb, DBG_DIG, "IC type is not supported\n");
 		return;
 	}
 
 	halbb_mccdm_ctrl(bb);
 
-	if (mcc_dm->mcc_status_en == 0)
+	if (mcc_dm->mcc_status_en == BB_MCC_DISABLE)
 		return;
-	BB_DBG(bb, DBG_DIG, "<====== %s ======>\n", __func__);
 
-	/* Set IGI*/
-	halbb_mccdm_pd_cal(bb);
+	/* Calculate IGI*/
+	halbb_mccdm_igi_cal(bb);
 
-	/* Set H2C Cmd*/
-	Halbb_mccdm_h2c_handler(bb);
+	if (mcc_dm->mcc_status_en == BB_MCC_ENABLE) {
+		/* Set MCC H2C Cmd*/
+		halbb_mccdm_h2c_handler(bb);
+	}
 }
 #endif

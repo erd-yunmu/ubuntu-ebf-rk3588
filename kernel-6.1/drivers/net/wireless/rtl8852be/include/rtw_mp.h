@@ -28,6 +28,12 @@
 
 #define RTW_IWD_MAX_LEN	128
 
+struct rtw_mp_ax_tx_cnt {
+	u8 band;
+	u8 sel;
+	u16 txcnt[11];
+};
+
 struct mp_xmit_frame {
 	_list	list;
 
@@ -403,6 +409,7 @@ struct mp_priv {
 	u8 antenna_rx;
 	u8 antenna_trx;
 	u8 curr_rfpath;
+	u8 ant_sw;
 
 	u8 check_mp_pkt;
 
@@ -834,6 +841,7 @@ enum rtw_mp_config_cmdid {
 	RTW_MP_CONFIG_CMD_TRIGGER_FW_CONFLICT,
 	RTW_MP_CONFIG_CMD_GET_UUID,
 	RTW_MP_CONFIG_CMD_SET_REGULATION,
+	RTW_MP_CONFIG_CMD_GET_DRV_VER,
 	RTW_MP_CONFIG_CMD_SET_BT_UART,
 	RTW_MP_CONFIG_CMD_SWITCH_ANTENNA,
 	RTW_MP_CONFIG_CMD_SET_MAC_LOOPBK_ENTER,
@@ -841,6 +849,7 @@ enum rtw_mp_config_cmdid {
 	RTW_MP_CONFIG_CMD_GET_HCI_SPEED,
 	RTW_MP_CONFIG_CMD_SET_MAC_GENERNAL_IO_TEST,
 	RTW_MP_CONFIG_CMD_SET_MAC_L1SS_ENABLE,
+	RTW_MP_CONFIG_CMD_SET_MAC_ASPM_STATE,
 	RTW_MP_CONFIG_CMD_SET_GPIO,
 	RTW_MP_CONFIG_CMD_SET_MAC_LOOPBK_SPEED,
 	RTW_MP_CONFIG_CMD_MAX,
@@ -995,11 +1004,12 @@ struct rtw_gpio_config_arg {
 	u8 gpio_id;
 	u8 gpio_enable;
 };
-
+#ifdef CONFIG_POWER_SAVE
 struct rtw_pwr_config_arg {
 	u8 pwr_state;
 	u8 pwr_lvl;
 };
+#endif
 struct rtw_mp_cmd_arg {
 	u8 mp_class;
 	u8 cmd;
@@ -1056,7 +1066,10 @@ struct rtw_mp_config_arg {
 	u8 ant_sw;
 	u8 hci_speed;
 	struct rtw_gpio_config_arg gpio_cfg;
+#ifdef CONFIG_POWER_SAVE
 	struct rtw_pwr_config_arg pwr_cfg;
+#endif
+		u8 en_phy;
 };
 
 struct rtw_mp_tx_arg {
@@ -1351,6 +1364,7 @@ enum rtw_mp_resourceUnit
 /* SYNC to PHL MP define END */
 
 
+
 #define MP_IS_HT_HRATE(_rate)	((_rate) >= HRATE_MCS0 && (_rate) <= HRATE_MCS31)
 #define MP_IS_VHT_HRATE(_rate)	((_rate) >= HRATE_VHT_NSS1_MCS0 && (_rate) <= HRATE_VHT_NSS4_MCS9)
 #define MP_IS_CCK_HRATE(_rate)	((_rate) == HRATE_CCK1 || (_rate) == HRATE_CCK2 || \
@@ -1401,6 +1415,7 @@ u8 rtw_mp_phl_txpower(_adapter *padapter, struct rtw_mp_txpwr_arg	*ptxpwr_arg, u
 void rtw_mp_set_crystal_cap(_adapter *padapter, u32 xcapvalue);
 u8 rtw_mp_phl_calibration(_adapter *padapter, struct rtw_mp_cal_arg	*pcal_arg, u8 cmdid);
 u8 rtw_mp_phl_reg(_adapter *padapter, struct rtw_mp_reg_arg	*reg_arg, u8 cmdid);
+u8 rtw_mp_phl_rx_cal_cmd(_adapter *padapter);
 
 
 u8 rtw_update_giltf(_adapter *padapter);
@@ -1411,7 +1426,6 @@ u8 rtw_mp_update_ru_alloc(_adapter *padapter);
 bool rtw_mp_is_cck_rate(u16 rate);
 
 extern s32 init_mp_priv(_adapter *padapter);
-extern void free_mp_priv(struct mp_priv *pmp_priv);
 extern s32 MPT_InitializeAdapter(_adapter *padapter, u8 Channel);
 extern void MPT_DeInitAdapter(_adapter *padapter);
 extern s32 mp_start_test(_adapter *padapter);
@@ -1426,14 +1440,15 @@ u8 rtw_mp_set_antdiv(_adapter *padapter, BOOLEAN bMain);
 #endif
 void	SetChannel(_adapter *adapter);
 void	SetBandwidth(_adapter *adapter);
-int	rtw_mp_txpoweridx(_adapter *adapter);
-u16 rtw_mp_txpower_dbm(_adapter *adapter, u8 rf_path);
-u16 rtw_mp_get_pwrtab_dbm(_adapter *adapter, u8 rfpath);
 
-u8 rtw_mp_rfpath2txnss(_adapter *padapter, enum rf_path path);
+u16 rtw_mp_txpower_dbm(_adapter *adapter, u8 rf_path);
+
 void	SetAntenna(_adapter *adapter);
 void	SetDataRate(_adapter *adapter);
-s32	SetThermalMeter(_adapter *adapter, u8 target_ther);
+
+
+u8 rtw_mp_rfpath2txnss(_adapter *padapter, enum rf_path path);
+
 void	GetThermalMeter(_adapter *adapter, u8 rfpath ,u8 *value);
 void	GetUuid(_adapter *adapter, u32 *uuid);
 void SetGpio(_adapter *padapter);
@@ -1442,31 +1457,26 @@ void	rtw_mp_singlecarrier_tx(_adapter *adapter, u8 bstart);
 void	rtw_mp_singletone_tx(_adapter *adapter, u8 bstart);
 void	rtw_mp_carriersuppr_tx(_adapter *adapter, u8 bstart);
 void	rtw_mp_txpwr_level(_adapter *adapter);
-void	fill_txdesc_for_mp(_adapter *padapter, u8 *ptxdesc);
+
 void	rtw_set_phl_packet_tx(_adapter *padapter, u8 bStart);
 void rtw_pre_phl_packet_tx(_adapter *padapter, u8 bStart);
 
 u8	rtw_phl_mp_tx_cmd(_adapter *padapter, enum rtw_mp_tx_cmd cmdid,
 						enum rtw_mp_tx_method tx_method, boolean bstart);
-u8 rtw_mp_phl_rx_cal_cmd(_adapter *padapter);
 
 void	rtw_mp_set_packet_tx(_adapter *padapter);
 void	rtw_mp_reset_phy_count(_adapter *adapter);
 
-s32	SetPowerTracking(_adapter *padapter, u8 enable);
-void	GetPowerTracking(_adapter *padapter, u8 *enable);
 u32	mp_query_psd(_adapter *adapter, u8 *data);
 void	rtw_mp_trigger_iqk(_adapter *padapter);
 void	rtw_mp_trigger_lck(_adapter *padapter);
 void	rtw_mp_trigger_dpk(_adapter *padapter);
 u8 rtw_mp_mode_check(_adapter *padapter);
-bool rtw_is_mp_tssitrk_on(_adapter *adapter);
+
 
 void mpt_ProSetPMacTx(_adapter *adapter);
-void MP_PHY_SetRFPathSwitch(_adapter *adapter , BOOLEAN bMain);
-void mp_phy_switch_rf_path_set(_adapter *adapter , u8 *pstate);
-u8 MP_PHY_QueryRFPathSwitch(_adapter *adapter);
-u32 mpt_ProQueryCalTxPower(_adapter *adapter, u8 RfPath);
+void rtw_mp_set_rfpath_switch(_adapter *adapter);
+
 u8 mpt_to_mgnt_rate(u32	MptRateIdx);
 u16 rtw_mp_rate_parse(_adapter *adapter, u8 *target_str);
 u32 mp_join(_adapter *padapter, u8 mode);
@@ -1480,7 +1490,7 @@ bool rtw_mpt_get_power_limit_en(_adapter *padapter);
 u32 rtw_mp_get_tssi_de(_adapter *padapter, u8 rf_path);
 s32 rtw_mp_get_online_tssi_de(_adapter *padapter, s32 out_pwr, s32 tgdbm, u8 rf_path);
 u8 rtw_mp_set_tsside2verify(_adapter *padapter, u32 tssi_de, u8 rf_path);
-u8 rtw_mp_set_tssi_offset(_adapter *padapter, u32 tssi_offset, u8 rf_path);
+
 u8 rtw_mp_set_tssi_pwrtrk(_adapter *padapter, u8 tssi_state);
 u8 rtw_mp_get_tssi_pwrtrk(_adapter *padapter);
 u8 rtw_mp_set_tx_shape_idx(_adapter *padapter);
@@ -1489,13 +1499,10 @@ void rtw_mp_cal_trigger(_adapter *padapter, u8 cal_tye);
 void rtw_mp_cal_capab(_adapter *padapter, u8 cal_tye, u8 benable);
 
 void rtw_mp_rx_phl_cal_timer(_adapter *padapter);
-void rtw_mp_halt(_adapter *padapter);
 
 void rtw_mp_phl_set_mac_loopbk(_adapter *padapter);
 void rtw_mp_phl_set_mac_loopbk_speed(_adapter *padapter);
 void rtw_mp_phl_set_mac_io_test(_adapter *padapter);
-
-u8 rtw_mp_get_tx_req_recycle(_adapter *padapter);
 
 thread_return mp_xmit_phl_packet_thread(thread_context context);
 
@@ -1588,9 +1595,6 @@ int rtw_mp_ctx(struct net_device *dev,
 int rtw_mp_disable_bt_coexist(struct net_device *dev,
 		struct iw_request_info *info,
 		union iwreq_data *wrqu, char *extra);
-int rtw_mp_disable_bt_coexist(struct net_device *dev,
-		struct iw_request_info *info,
-		union iwreq_data *wrqu, char *extra);
 int rtw_mp_arx(struct net_device *dev,
 		struct iw_request_info *info,
 		struct iw_point *wrqu, char *extra);
@@ -1654,24 +1658,6 @@ int rtw_mp_mac_loopbk(struct net_device *dev,
 int rtw_mp_mac_iotest(struct net_device *dev,
 			 struct iw_request_info *info,
 			 union iwreq_data *wrqu, char *extra);
-#if 0
-int rtw_efuse_mask_file(struct net_device *dev,
-		struct iw_request_info *info,
-		union iwreq_data *wrqu, char *extra);
-int rtw_bt_efuse_mask_file(struct net_device *dev,
-		struct iw_request_info *info,
-		union iwreq_data *wrqu, char *extra);
-
-int rtw_efuse_file_map(struct net_device *dev,
-		struct iw_request_info *info,
-		union iwreq_data *wrqu, char *extra);
-int rtw_efuse_file_map_store(struct net_device *dev,
-		struct iw_request_info *info,
-		union iwreq_data *wrqu, char *extra);
-int rtw_bt_efuse_file_map(struct net_device *dev,
-		struct iw_request_info *info,
-		union iwreq_data *wrqu, char *extra);
-#endif
 
 int rtw_mp_SetBT(struct net_device *dev,
 		struct iw_request_info *info,

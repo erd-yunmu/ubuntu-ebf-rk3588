@@ -61,6 +61,19 @@
 
 #define TXTIME_MAX	0xA5
 
+#define TXEN_RETRY_WAIT_US 1
+#define TXEN_RETRY_WAIT_PKT_US 50
+#define TXEN_IO_LATENCY_THRESHOLD_US 1000
+#define TXEN_PATH_C2H_TBD 0
+#define TXEN_PATH_C2H_PKT 1
+#define TXEN_PATH_C2H_REG 2
+
+#define MACID_PAUSE_SH 5
+#define MACID_PAUSE_MSK 0x1F
+
+#define DFLT_DATA_RTY_LIMIT 32
+#define DFLT_RTS_RTY_LIMIT 15
+
 /*--------------------Define Enum------------------------------------*/
 
 /**
@@ -150,6 +163,9 @@ struct sch_tx_en_h2creg {
 
 /*--------------------Export global variable----------------------------*/
 /*--------------------Function declaration-----------------------------*/
+
+u32 set_hw_usr_frame_te_act_cfg(struct mac_ax_adapter *adapter,
+				struct mac_ax_usr_frame_to_act_cfg *cfg);
 
 /**
  * @addtogroup Basic_TRX
@@ -843,4 +859,135 @@ void u16_2_sch(struct mac_ax_adapter *adapter,
 void u32_2_sch(struct mac_ax_adapter *adapter,
 	       struct mac_ax_sch_tx_en *tx_en, u32 val32);
 
+/**
+ * @addtogroup Common
+ * @{
+ * @addtogroup HW_Related
+ * @{
+ */
+
+/**
+ * @brief set_cctl_rty_limit
+ *
+ * @param *adapter
+ * @param *cfg
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 set_cctl_rty_limit(struct mac_ax_adapter *adapter, struct mac_ax_cctl_rty_lmt_cfg *cfg);
+/**
+ * @}
+ * @}
+ */
+u32 set_data_rty_limit(struct mac_ax_adapter *adapter, struct mac_ax_rty_lmt *rty);
+
+u32 get_data_rty_limit(struct mac_ax_adapter *adapter, struct mac_ax_rty_lmt *rty);
+/**
+ * @brief scheduler_set_prebkf
+ *
+ * @param *adapter
+ * @param *para
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 scheduler_set_prebkf(struct mac_ax_adapter *adapter,
+			 struct mac_ax_prebkf_setting *para);
+/**
+ * @brief cfg_block_tx
+ *
+ * @param *adapter
+ * @param src
+ * @param band
+ * @param en
+ * @return Config related block tx register.
+ * @retval u32
+ */ 
+u32 cfg_block_tx(struct mac_ax_adapter *adapter,
+		    enum mac_ax_block_tx_sel src, u8 band, u8 en);
+
+/**
+ * @brief get_block_tx
+ *
+ * @param *adapter
+ * @param src
+ * @param band
+ * @param en
+ * @return get related block tx register.
+ * @retval u32
+ */ 
+u32 get_block_tx(struct mac_ax_adapter *adapter,
+		    enum mac_ax_block_tx_sel src, u8 band, u8 *en);
+
+/** * @brief set_macid_pause
+ *
+ * @param *adapter
+ * @param *cfg
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 set_macid_pause(struct mac_ax_adapter *adapter,
+		    struct mac_ax_macid_pause_cfg *cfg);
+
+/**
+ * @brief macid_pause
+ *
+ * @param *adapter
+ * @param *grp
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 macid_pause(struct mac_ax_adapter *adapter,
+		struct mac_ax_macid_pause_grp *grp);
+
+/**
+ * @brief macid_pause_sleep
+ *
+ * @param *adapter
+ * @param *grp
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 macid_pause_sleep(struct mac_ax_adapter *adapter,
+		      struct mac_ax_macid_pause_sleep_grp *grp);
+
+/**
+ * @brief enable_macid_pause_sleep
+ *
+ * @param *adapter
+ * @param macid
+ * @param enable
+ * @param *grp_reg
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 enable_macid_pause_sleep(struct mac_ax_adapter *adapter,
+			     u8 macid, u8 enable, u32 *grp_reg);
+
+/**
+ * @brief set_macid_pause_sleep
+ *
+ * @param *adapter
+ * @param *cfg
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 set_macid_pause_sleep(struct mac_ax_adapter *adapter,
+			  struct mac_ax_macid_pause_sleep_cfg *cfg);
+
+/**
+ * @brief get_macid_pause
+ *
+ * @param *adapter
+ * @param *cfg
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 get_macid_pause(struct mac_ax_adapter *adapter,
+		    struct mac_ax_macid_pause_cfg *cfg);
+
+u32 mac_get_tx_cnt(struct mac_ax_adapter *adapter,
+		   struct mac_ax_tx_cnt *cnt);
+
+u32 mac_clr_tx_cnt(struct mac_ax_adapter *adapter,
+		   struct mac_ax_tx_cnt *cnt);
 #endif
