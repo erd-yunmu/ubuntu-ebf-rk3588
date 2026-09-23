@@ -248,6 +248,19 @@ config CMD_DTIMG
 	  files should be merged in one dtb further, which needs to be passed to
 	  the kernel, as part of a boot process.
 
+config CMD_DTOVERLAY
+	bool "dtoverlay"
+	depends on OF_LIBFDT_OVERLAY
+	help
+	  Apply the device tree overlays listed in a configuration file, one
+	  entry per line:
+
+		dtoverlay=/dtb/overlay/<name>.dtbo
+
+	  Commented entries are skipped, so an overlay is enabled or disabled
+	  by (un)commenting its line. The overlays are read from the given
+	  device and applied to the working device tree (see 'fdt addr').
+
 config CMD_ELF
 	bool "bootelf, bootvx"
 	default y
