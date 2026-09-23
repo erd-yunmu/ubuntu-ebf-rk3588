@@ -30,17 +30,18 @@ enum _CMD_SER_EVENT_SOURCE {
 
 enum _CMD_SER_TIMER_STATE {
 	CMD_SER_NOT_OCCUR = 0,
-	CMD_SER_M1 = BIT0, //POLL_IO
-	CMD_SER_M2 = BIT1, //POLL_FW
-	CMD_SER_M3 = BIT2,
-	CMD_SER_M4 = BIT3,
-	CMD_SER_M5 = BIT4,
-	CMD_SER_M9 = BIT5,
-
-	CMD_SER_SKIP_CHK = BIT7,
+	CMD_SER_PRE_M0 = BIT0,
+	CMD_SER_POST_M0 = BIT1,
+	CMD_SER_M1 = BIT2, /* POLL_IO */
+	CMD_SER_M2 = BIT3, /* POLL_FW */
+	CMD_SER_M3 = BIT4,
+	CMD_SER_M4 = BIT5,
+	CMD_SER_M5 = BIT6,
+	CMD_SER_M9 = BIT7,
+	CMD_SER_SKIP_CHK = BIT8,
 };
 
-#define CMD_SER_FW_TIMEOUT 1000 /* ms */
+#define CMD_SER_FW_TIMEOUT 3000 /* ms */
 #define CMD_SER_POLLING_INTERVAL 10 /* ms */
 #define CMD_SER_USB_POLLING_INTERVAL_IDL 1000 /* ms */
 #define CMD_SER_USB_POLLING_INTERVAL_ACT 10 /* ms */
@@ -59,16 +60,16 @@ struct sts_l2 {
 struct cmd_ser {
 	struct phl_info_t *phl_info;
 	void* dispr;
-	u8 state;
+	u16 state;
 	_os_lock _lock;
 
 	u8 evtsrc;
 	int poll_cnt;
 	_os_timer poll_timer;
 
-	/* L2 log :
-	//    If L2 triggered, set ser_log = state-of-cmd_ser
-	*/
+	/** L2 log :
+	 *    If L2 triggered, set ser_log = state-of-cmd_ser
+	 */
 	struct phl_queue stslist;
 	struct sts_l2 stsl2[CMD_SER_LOG_SIZE];
 	u8 bserl2;
@@ -84,6 +85,21 @@ static void _ser_int_ntfy_ctrl(struct phl_info_t *phl_info,
 		rtw_hal_config_interrupt(phl_info->hal, int_type);
 }
 
+
+#ifdef CONFIG_PHL_DIAGNOSE
+static u8 _notify_to_diag_ser_type(u8 notify)
+{
+	switch (notify) {
+	case RTW_PHL_SER_DO_RECOVERY:
+		return PHL_DIAG_SER_L1;
+	case RTW_PHL_SER_L2_RESET:
+		return PHL_DIAG_SER_L2;
+	default:
+		return PHL_DIAG_SER_UNKNOWN;
+	}
+}
+#endif
+
 static enum rtw_phl_status
 _ser_event_notify(void *phl, u8 *p_ntfy)
 {
@@ -91,6 +107,9 @@ _ser_event_notify(void *phl, u8 *p_ntfy)
 	enum RTW_PHL_SER_NOTIFY_EVENT notify = RTW_PHL_SER_L2_RESET;
 	struct phl_msg msg = {0};
 	u32 err = 0;
+#ifdef CONFIG_PHL_DIAGNOSE
+	struct diag_ser_content_v1 content = {0};
+#endif
 
 	notify = rtw_hal_ser_get_error_status(phl_info->hal, &err);
 
@@ -100,6 +119,16 @@ _ser_event_notify(void *phl, u8 *p_ntfy)
 	phl_info->phl_com->phl_stats.ser_event[notify]++;
 
 	PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "_ser_event_notify, error 0x%x, notify 0x%x\n", err, notify);
+
+#ifdef CONFIG_PHL_DIAGNOSE
+	content.diag_ser_type = PHL_DIAG_SER_UNKNOWN;
+	if (notify == RTW_PHL_SER_DO_RECOVERY || notify == RTW_PHL_SER_L2_RESET) {
+		content.diag_ser_type = _notify_to_diag_ser_type(notify);
+		phl_send_diag_hub_msg(phl_info, PHL_DIAG_EVT_SER,
+		                      INVALID_SUBMODULE_DIAG_EVT, PHL_DIAG_LVL_FATAL,
+		                      1, (u8 *)&content, sizeof(struct diag_ser_content_v1));
+	}
+#endif
 
 	if (notify == RTW_PHL_SER_L0_RESET) {
 		PHL_TRACE(COMP_PHL_DBG, _PHL_WARNING_, "_ser_event_notify, hit L0 Reset\n");
@@ -154,7 +183,7 @@ void _ser_reset_status(struct cmd_ser *cser)
 	}
 }
 
-void _ser_set_status(struct cmd_ser *cser, u8 serstatus)
+void _ser_set_status(struct cmd_ser *cser, u16 serstatus)
 {
 	void *drv = phl_to_drvpriv(cser->phl_info);
 
@@ -163,7 +192,7 @@ void _ser_set_status(struct cmd_ser *cser, u8 serstatus)
 	_os_spinunlock(drv, &cser->_lock, _bh, NULL);
 }
 
-void _ser_clear_status(struct cmd_ser *cser, u8 serstatus)
+void _ser_clear_status(struct cmd_ser *cser, u16 serstatus)
 {
 	void *drv = phl_to_drvpriv(cser->phl_info);
 
@@ -174,8 +203,8 @@ void _ser_clear_status(struct cmd_ser *cser, u8 serstatus)
 
 u8 _ser_state(struct cmd_ser *cser)
 {
-	/* Filter out bit7(SKIP_CHK) */
-	return (cser->state & 0x7f);
+	/* Filter out bit8(SKIP_CHK) */
+	return (cser->state & 0xff);
 }
 
 static void _ser_l1_notify(struct cmd_ser *cser)
@@ -222,6 +251,22 @@ static void _ser_l2_notify(struct cmd_ser *cser)
 	phl_msg_hub_send(cser->phl_info, NULL, &nextmsg);
 }
 
+static void _ser_post_m0_notify(struct cmd_ser *cser)
+{
+	struct phl_info_t *phl_info = cser->phl_info;
+	enum rtw_hal_status status = RTW_HAL_STATUS_FAILURE;
+
+	if (CMD_SER_SRC_INT_NOTIFY == cser->evtsrc)
+		_ser_int_ntfy_ctrl(phl_info, RTW_PHL_SER_HANDSHAKE_MODE);
+
+	_ser_clear_status(cser, CMD_SER_PRE_M0);
+	_ser_set_status(cser, CMD_SER_POST_M0);
+
+	/* send post m0 event to fw */
+	status = rtw_hal_ser_set_error_status(phl_info->hal, RTW_PHL_SER_L1_RESET_START_DMAC);
+	PHL_TRACE(COMP_PHL_DBG, _PHL_ERR_, "_ser_post_m0_notify:: RTW_PHL_SER_L1_RESET_START_DMAC, status 0x%x\n", status);
+}
+
 static void _ser_m2_notify(struct cmd_ser *cser)
 {
 	struct phl_info_t *phl_info = cser->phl_info;
@@ -238,7 +283,7 @@ static void _ser_m2_notify(struct cmd_ser *cser)
 	PHL_TRACE(COMP_PHL_DBG, _PHL_ERR_, "_ser_m2_notify:: RTW_PHL_SER_L1_DISABLE_EN, status 0x%x\n", status);
 }
 
-static void _ser_m3_m5_waiting(struct cmd_ser *cser)
+static void _ser_m1_m3_m5_waiting(struct cmd_ser *cser)
 {
 	struct phl_info_t *phl_info = cser->phl_info;
 	void *drv = phl_to_drvpriv(phl_info);
@@ -251,7 +296,7 @@ static void _ser_m3_m5_waiting(struct cmd_ser *cser)
 	}
 
 	cser->poll_cnt = poll_cnt;
-	/* wait M3 or M5 */
+	/* wait M1 or M3 or M5 */
 	_os_set_timer(drv, &cser->poll_timer, intvl);
 }
 
@@ -280,14 +325,9 @@ static void _ser_poll_timer_cb(void *priv)
 
 	SET_MSG_MDL_ID_FIELD(nextmsg.msg_id, PHL_MDL_SER);
 
-	if (TEST_STATUS_FLAG(cser->state, CMD_SER_M1)) {
-		SET_MSG_EVT_ID_FIELD(nextmsg.msg_id, MSG_EVT_SER_IO_TIMER_EXPIRE);
-	} else if (TEST_STATUS_FLAG(cser->state, CMD_SER_M2)) {
-		if (cser->poll_cnt > 0) /* polling mode */
-			SET_MSG_EVT_ID_FIELD(nextmsg.msg_id, MSG_EVT_SER_POLLING_CHK);
-		else
-			SET_MSG_EVT_ID_FIELD(nextmsg.msg_id, MSG_EVT_SER_FW_TIMER_EXPIRE);
-	} else if (TEST_STATUS_FLAG(cser->state, CMD_SER_M4)) {
+	if (TEST_STATUS_FLAG(cser->state, CMD_SER_POST_M0) ||
+	    TEST_STATUS_FLAG(cser->state, CMD_SER_M2) ||
+	    TEST_STATUS_FLAG(cser->state, CMD_SER_M4)) {
 		if (cser->poll_cnt > 0) /* polling mode */
 			SET_MSG_EVT_ID_FIELD(nextmsg.msg_id, MSG_EVT_SER_POLLING_CHK);
 		else
@@ -305,6 +345,18 @@ static void _ser_poll_timer_cb(void *priv)
 		if (pstatus != RTW_PHL_STATUS_SUCCESS)
 			PHL_ERR("%s :: [SER_TIMER_CB] dispr_send_msg failed\n", __func__);
 	}
+}
+
+static void _ser_pre_m0_prepare(struct cmd_ser *cser)
+{
+	/**
+	 * currently do nothing
+	 */
+
+	_ser_post_m0_notify(cser);
+	_ser_m1_m3_m5_waiting(cser);
+
+	return;
 }
 
 static void _ser_m1_pause_trx(struct cmd_ser *cser)
@@ -358,7 +410,7 @@ static void _ser_m1_pause_trx(struct cmd_ser *cser)
 	}
 
 	_ser_m2_notify(cser);
-	_ser_m3_m5_waiting(cser);
+	_ser_m1_m3_m5_waiting(cser);
 
 	return;
 err:
@@ -426,7 +478,7 @@ static void _ser_m3_reset_hw_trx(struct cmd_ser *cser)
 	}
 
 	_ser_m4_notify(cser);
-	_ser_m3_m5_waiting(cser);
+	_ser_m1_m3_m5_waiting(cser);
 
 	return;
 err:
@@ -559,7 +611,7 @@ _ser_msg_hdl_evt_chk(struct cmd_ser *cser)
 	return psts;
 }
 
-static void _ser_msg_hdl_m1(struct cmd_ser *cser)
+static void _ser_msg_hdl_pre_m0(struct cmd_ser *cser)
 {
 	struct phl_info_t *phl_info = cser->phl_info;
 	void *drv = phl_to_drvpriv(phl_info);
@@ -569,19 +621,30 @@ static void _ser_msg_hdl_m1(struct cmd_ser *cser)
 	else if (CMD_SER_SRC_INT_NOTIFY == cser->evtsrc)
 		_ser_int_ntfy_ctrl(phl_info, RTW_PHL_DIS_HCI_INT);
 
-	_ser_set_status(cser, CMD_SER_M1);
+	_ser_set_status(cser, CMD_SER_PRE_M0);
+
 	_ser_l1_notify(cser);
+
+	_ser_pre_m0_prepare(cser);
+}
+
+static void _ser_msg_hdl_m1(struct cmd_ser *cser)
+{
+	struct phl_info_t *phl_info = cser->phl_info;
+	void *drv = phl_to_drvpriv(phl_info);
+
+	if (CMD_SER_SRC_INT_NOTIFY == cser->evtsrc)
+		_ser_int_ntfy_ctrl(phl_info, RTW_PHL_DIS_HCI_INT);
+
+	_os_cancel_timer(drv, &cser->poll_timer);
+	_ser_clear_status(cser, CMD_SER_POST_M0);
+	_ser_set_status(cser, CMD_SER_M1);
 
 	rtw_hal_ser_int_cfg(phl_info->hal, phl_info->phl_com, RTW_PHL_SER_M1_PRE_CFG);
 
 	_ser_m1_pause_trx(cser);
 
 	rtw_hal_ser_int_cfg(phl_info->hal, phl_info->phl_com, RTW_PHL_SER_M1_POST_CFG);
-}
-
-static void _ser_msg_hdl_fw_expire(struct cmd_ser *cser)
-{
-	/* do nothing, expect FW WDT will happened */
 }
 
 static void _ser_msg_hdl_m3(struct cmd_ser *cser)
@@ -656,6 +719,12 @@ static void _ser_msg_hdl_l2_reset_done(struct cmd_ser *cser)
 		PHL_WARN("Ser L2 state not set!\n");
 }
 
+static void _ser_msg_hdl_fw_expire(struct cmd_ser *cser)
+{
+	/* trigger ser l2 flow if ser l1 timeout */
+	_ser_msg_hdl_m9(cser);
+}
+
 enum phl_mdl_ret_code
 _ser_hdl_internal_evt(void *dispr, void *priv, struct phl_msg *msg)
 {
@@ -671,6 +740,11 @@ _ser_hdl_internal_evt(void *dispr, void *priv, struct phl_msg *msg)
 	case MSG_EVT_SER_EVENT_CHK:
 		PHL_INFO("MSG_EVT_SER_EVENT_CHK\n");
 		_ser_msg_hdl_evt_chk(cser);
+		break;
+
+	case MSG_EVT_SER_PRE_M0_PREPARE:
+		PHL_WARN("MSG_EVT_SER_PRE_M0_PREPARE\n");
+		_ser_msg_hdl_pre_m0(cser);
 		break;
 
 	case MSG_EVT_SER_M1_PAUSE_TRX:
@@ -930,6 +1004,9 @@ phl_ser_send_msg(void *phl, enum RTW_PHL_SER_NOTIFY_EVENT notify)
 	u16 event = 0;
 
 	switch (notify) {
+	case RTW_PHL_SER_PREPARE_DMAC:
+		event = MSG_EVT_SER_PRE_M0_PREPARE;
+		break;
 	case RTW_PHL_SER_PAUSE_TRX: /* M1 */
 		event = MSG_EVT_SER_M1_PAUSE_TRX;
 		break;

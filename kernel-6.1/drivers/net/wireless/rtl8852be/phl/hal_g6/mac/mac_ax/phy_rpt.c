@@ -14,36 +14,10 @@
  ******************************************************************************/
 #include "phy_rpt.h"
 #include "mac_priv.h"
+#include "../feature_cfg.h"
 
-#define MAC_AX_RX_CNT_SIZE 96
-#define MAC_AX_DISP_QID_HOST 0x2
-#define MAC_AX_DISP_QID_WLCPU 0xB
-#define MAC_AX_DFS_HDR_SIZE 8
-#define MAC_AX_DFS_RPT_SIZE 8
-#define MAC_AX_DFS_RPT_SIZE_SH 3
-#define MAC_AX_CH_INFO_BUF 0
-#define B_AX_CH_INFO_BUF_128 0
-#define B_AX_GET_CH_INFO_TO_DIS 0
-#define B_AX_GET_CH_INFO_TO_8 2
-#define B_AX_GET_CH_INFO_TO_28 7
-#define B_AX_CH_INFO_INTVL_DIS 0
-#define B_AX_CH_INFO_INTVL_1 1
-#define B_AX_CH_INFO_INTVL_2 2
-#define B_AX_CH_INFO_INTVL_4 4
-#define B_AX_CH_INFO_INTVL_7 7
-#define B_AX_CH_INFO_REQ_2 1
-#define B_AX_DFS_BUF_64 1
-
-#define MAC_AX_MAC_INFO_USE_SIZE 4
-struct mac_ax_mac_info_t {
-	u32 dword0;
-	u32 dword1;
-};
-
-struct mac_ax_dfs_hdr_t {
-	u32 dword0;
-	u32 dword1;
-};
+#if MAC_FEAT_PHY_RPT
+#if MAC_FEAT_PPDU_STS
 
 static u32 _patch_is_cfg_avl(struct mac_ax_adapter *adapter,
 			     struct mac_ax_phy_rpt_cfg *cfg,
@@ -157,8 +131,7 @@ static u32 cfg_ppdu_status(struct mac_ax_adapter *adapter,
 
 	ppdu->bmp_append_info = ppdu->bmp_append_info &
 				(MAC_AX_PPDU_MAC_INFO |
-				 MAC_AX_PPDU_PLCP |
-				 MAC_AX_PPDU_RX_CNT);
+				 MAC_AX_PPDU_PLCP);
 	ppdu->bmp_filter = ppdu->bmp_filter &
 			   (MAC_AX_PPDU_HAS_A1M |
 			    MAC_AX_PPDU_HAS_CRC_OK |
@@ -184,6 +157,114 @@ END:
 	return ret;
 }
 
+static u32 parse_mac_info(struct mac_ax_adapter *adapter,
+			  u8 *buf, u32 len,
+			  struct mac_ax_ppdu_rpt *rpt)
+{
+	struct mac_ax_ppdu_usr *usr;
+	struct mac_ax_mac_info_t *macinfo;
+	u8 i;
+	u32 ret = MACSUCCESS;
+	u32 accu_size = sizeof(struct mac_ax_mac_info_t);
+	u32 val;
+	u8 *ptr;
+
+	macinfo = (struct mac_ax_mac_info_t *)buf;
+
+	/* dword0 */
+	val = le32_to_cpu(macinfo->dword0);
+	rpt->usr_num = (u8)GET_FIELD(val, AX_MAC_INFO_USR_NUM);
+#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
+		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
+		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
+		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
+		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
+			if (rpt->usr_num > MAC_MAX_4_USR) {
+				PLTFM_MSG_ERR("The user num in mac info is invalid\n");
+				ret = MACPARSEERR;
+				goto END;
+			}
+		}
+#endif
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
+		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
+		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
+		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
+			if (rpt->usr_num > MAC_MAX_8_USR) {
+				PLTFM_MSG_ERR("The user num in mac info is invalid\n");
+				ret = MACPARSEERR;
+				goto END;
+			}
+		}
+#endif
+	rpt->fw_def = (u8)GET_FIELD(val, AX_MAC_INFO_FW_DEFINE);
+	rpt->lsig_len = (u16)GET_FIELD(val, AX_MAC_INFO_LSIG_LEN);
+	rpt->is_to_self = (val & AX_MAC_INFO_IS_TO_SELF) ? 1 : 0;
+	rpt->rx_cnt_size = val & AX_MAC_INFO_RX_CNT_VLD ?
+				MAC_AX_RX_CNT_SIZE : 0;
+
+	/* dowrd1 */
+	val = le32_to_cpu(macinfo->dword1);
+	rpt->service = (u16)GET_FIELD(val, AX_MAC_INFO_SERVICE);
+	rpt->plcp_size = (u8)GET_FIELD(val, AX_MAC_INFO_PLCP_LEN) * 8;
+
+	/* dword2 */
+	usr = rpt->usr;
+	ptr = (u8 *)(macinfo + 1);
+	for (i = 0; i < rpt->usr_num; i++, usr++) {
+		val = le32_to_cpu(*((u32 *)ptr));
+		usr->vld = (val & AX_MAC_INFO_MAC_ID_VALID) ? 1 : 0;
+		usr->has_data = (val & AX_MAC_INFO_HAS_DATA) ? 1 : 0;
+		usr->has_ctrl = (val & AX_MAC_INFO_HAS_CTRL) ? 1 : 0;
+		usr->has_mgnt = (val & AX_MAC_INFO_HAS_MGNT) ? 1 : 0;
+		usr->has_bcn = (val & AX_MAC_INFO_HAS_BCN) ? 1 : 0;
+		usr->macid = (u8)GET_FIELD(val, AX_MAC_INFO_MACID);
+		accu_size += MAC_AX_MAC_INFO_USE_SIZE;
+		ptr += MAC_AX_MAC_INFO_USE_SIZE;
+	}
+
+	/* 8-byte alignment */
+	accu_size += rpt->usr_num & BIT(0) ? MAC_AX_MAC_INFO_USE_SIZE : 0;
+	ptr += rpt->usr_num & BIT(0) ? MAC_AX_MAC_INFO_USE_SIZE : 0;
+	if (rpt->rx_cnt_size) {
+		rpt->rx_cnt_ptr = ptr;
+		accu_size += rpt->rx_cnt_size;
+		ptr += rpt->rx_cnt_size;
+	}
+
+	if (rpt->plcp_size) {
+		rpt->plcp_ptr = ptr;
+		accu_size += rpt->plcp_size;
+		ptr += rpt->plcp_size;
+	}
+
+	if (len > accu_size) {
+		rpt->phy_st_ptr = ptr;
+		rpt->phy_st_size = len - accu_size;
+	}
+END:
+	return ret;
+}
+
+u32 mac_parse_ppdu(struct mac_ax_adapter *adapter,
+		   u8 *buf, u32 ppdu_len, u8 mac_info,
+		   struct mac_ax_ppdu_rpt *rpt)
+{
+	u32 ret = MACSUCCESS;
+
+	PLTFM_MEMSET(rpt, 0, sizeof(struct mac_ax_ppdu_rpt));
+
+	if (mac_info) {
+		ret = parse_mac_info(adapter, buf, ppdu_len, rpt);
+	} else {
+		rpt->phy_st_ptr = buf;
+		rpt->phy_st_size = ppdu_len;
+	}
+
+	return ret;
+}
+#endif /* #if MAC_FEAT_PPDU_STS */
+
 static u32 en_bbrpt(struct mac_ax_adapter *adapter)
 {
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
@@ -204,44 +285,32 @@ static u32 en_bbrpt(struct mac_ax_adapter *adapter)
 	return MACSUCCESS;
 }
 
+#if MAC_FEAT_CH_INFO
 static u32 stop_ch_info(struct mac_ax_adapter *adapter, u32 ch_info_reg)
 {
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 	u8 val;
-	u32 count = 3000;
-#if MAC_AX_FW_REG_OFLD
-	u32 ret;
-#endif
+	u32 count = (u32)MAC_CHINFO_STOP_REQ_TIMEOUT;
 
-	val = MAC_REG_R8(R_AX_CH_INFO);
+	val = MAC_REG_R8(ch_info_reg) & ~B_AX_GET_CH_INFO_EN;
+	MAC_REG_W8(ch_info_reg, val);
 
-	if (!(val & B_AX_CH_INFO_EN))
-		return MACSUCCESS;
+	val = MAC_REG_R8(R_AX_CH_INFO) | B_AX_CH_INFO_STOP_REQ;
+	MAC_REG_W8(R_AX_CH_INFO, val);
 
-	MAC_REG_W8(R_AX_CH_INFO, val | B_AX_CH_INFO_STOP_REQ);
 	while (!(MAC_REG_R8(R_AX_CH_INFO) & B_AX_CH_INFO_STOP)) {
 		count--;
 		if (count == 0) {
 			PLTFM_MSG_ERR("Polling ch info idle timeout\n");
+			val = val & ~B_AX_CH_INFO_STOP_REQ;
+			MAC_REG_W8(R_AX_CH_INFO, val);
 			return MACPOLLTO;
 		}
+		PLTFM_DELAY_US(1);
 	}
 
-	val = MAC_REG_R8(R_AX_CH_INFO);
-	MAC_REG_W8(R_AX_CH_INFO, val | B_AX_CH_INFO_EN);
-
-#if MAC_AX_FW_REG_OFLD
-	if (adapter->sm.fwdl == MAC_AX_FWDL_INIT_RDY) {
-		ret = MAC_REG_W_OFLD((u16)ch_info_reg, B_AX_GET_CH_INFO_EN, 0, 1);
-		if (ret != MACSUCCESS)
-			PLTFM_MSG_ERR("%s: write offload fail %d",
-				      __func__, ret);
-		return ret;
-	}
-#endif
-
-	val = MAC_REG_R8(ch_info_reg);
-	MAC_REG_W8(ch_info_reg, val & ~B_AX_GET_CH_INFO_EN);
+	val = val & ~B_AX_CH_INFO_STOP_REQ & ~B_AX_CH_INFO_EN;
+	MAC_REG_W8(R_AX_CH_INFO, val);
 
 	return MACSUCCESS;
 }
@@ -425,10 +494,11 @@ static u32 cfg_ch_info(struct mac_ax_adapter *adapter,
 END:
 	return ret;
 }
+#endif /* #if MAC_FEAT_CH_INFO */
 
+#if MAC_FEAT_DFS
 static u32 stop_dfs(struct mac_ax_adapter *adapter)
 {
-#define MAC_AX_PHY_RPT_CNT 3000
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 	u8 val;
 	u32 count = MAC_AX_PHY_RPT_CNT;
@@ -539,162 +609,6 @@ END:
 	return ret;
 }
 
-u32 mac_cfg_phy_rpt(struct mac_ax_adapter *adapter,
-		    struct mac_ax_phy_rpt_cfg *rpt)
-{
-	u32 (*handle)(struct mac_ax_adapter *adapter,
-		      struct mac_ax_phy_rpt_cfg *rpt);
-
-	switch (rpt->type) {
-	case MAC_AX_PPDU_STATUS:
-		handle = cfg_ppdu_status;
-		break;
-	case MAC_AX_CH_INFO:
-		handle = cfg_ch_info;
-		break;
-	case MAC_AX_DFS:
-		handle = cfg_dfs;
-		break;
-	default:
-		PLTFM_MSG_ERR("Wrong PHY report type\n");
-		return MACFUNCINPUT;
-	}
-
-	return handle(adapter, rpt);
-}
-
-u32 mac_get_phy_rpt_cfg(struct mac_ax_adapter *adapter,
-			struct mac_ax_phy_rpt_cfg *rpt)
-{
-	u32 (*handle)(struct mac_ax_adapter *adapter,
-		      struct mac_ax_phy_rpt_cfg *rpt);
-
-	switch (rpt->type) {
-	case MAC_AX_PPDU_STATUS:
-		handle = get_ppdu_status_cfg;
-		break;
-	case MAC_AX_CH_INFO:
-		handle = get_ch_info_cfg;
-		break;
-	case MAC_AX_DFS:
-		handle = get_dfs_cfg;
-		break;
-	default:
-		PLTFM_MSG_ERR("Wrong PHY report type\n");
-		return MACFUNCINPUT;
-	}
-
-	return handle(adapter, rpt);
-}
-
-static u32 parse_mac_info(struct mac_ax_adapter *adapter,
-			  u8 *buf, u32 len,
-			  struct mac_ax_ppdu_rpt *rpt)
-{
-	struct mac_ax_ppdu_usr *usr;
-	struct mac_ax_mac_info_t *macinfo;
-	u8 i;
-	u32 ret = MACSUCCESS;
-	u32 accu_size = sizeof(struct mac_ax_mac_info_t);
-	u32 val;
-	u8 *ptr;
-
-	macinfo = (struct mac_ax_mac_info_t *)buf;
-
-	/* dword0 */
-	val = le32_to_cpu(macinfo->dword0);
-	rpt->usr_num = (u8)GET_FIELD(val, AX_MAC_INFO_USR_NUM);
-#if MAC_AX_8852A_SUPPORT || MAC_AX_8852B_SUPPORT || MAC_AX_8851B_SUPPORT || MAC_AX_8852BT_SUPPORT
-		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852A) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852BT)) {
-			if (rpt->usr_num > MAC_MAX_4_USR) {
-				PLTFM_MSG_ERR("The user num in mac info is invalid\n");
-				ret = MACPARSEERR;
-				goto END;
-			}
-		}
-#endif
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
-		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
-			if (rpt->usr_num > MAC_MAX_8_USR) {
-				PLTFM_MSG_ERR("The user num in mac info is invalid\n");
-				ret = MACPARSEERR;
-				goto END;
-			}
-		}
-#endif
-	rpt->fw_def = (u8)GET_FIELD(val, AX_MAC_INFO_FW_DEFINE);
-	rpt->lsig_len = (u16)GET_FIELD(val, AX_MAC_INFO_LSIG_LEN);
-	rpt->is_to_self = (val & AX_MAC_INFO_IS_TO_SELF) ? 1 : 0;
-	rpt->rx_cnt_size = val & AX_MAC_INFO_RX_CNT_VLD ?
-				MAC_AX_RX_CNT_SIZE : 0;
-
-	/* dowrd1 */
-	val = le32_to_cpu(macinfo->dword1);
-	rpt->service = (u16)GET_FIELD(val, AX_MAC_INFO_SERVICE);
-	rpt->plcp_size = (u8)GET_FIELD(val, AX_MAC_INFO_PLCP_LEN) * 8;
-
-	/* dword2 */
-	usr = rpt->usr;
-	ptr = (u8 *)(macinfo + 1);
-	for (i = 0; i < rpt->usr_num; i++, usr++) {
-		val = le32_to_cpu(*((u32 *)ptr));
-		usr->vld = (val & AX_MAC_INFO_MAC_ID_VALID) ? 1 : 0;
-		usr->has_data = (val & AX_MAC_INFO_HAS_DATA) ? 1 : 0;
-		usr->has_ctrl = (val & AX_MAC_INFO_HAS_CTRL) ? 1 : 0;
-		usr->has_mgnt = (val & AX_MAC_INFO_HAS_MGNT) ? 1 : 0;
-		usr->has_bcn = (val & AX_MAC_INFO_HAS_BCN) ? 1 : 0;
-		usr->macid = (u8)GET_FIELD(val, AX_MAC_INFO_MACID);
-		accu_size += MAC_AX_MAC_INFO_USE_SIZE;
-		ptr += MAC_AX_MAC_INFO_USE_SIZE;
-	}
-
-	/* 8-byte alignment */
-	accu_size += rpt->usr_num & BIT(0) ? MAC_AX_MAC_INFO_USE_SIZE : 0;
-	ptr += rpt->usr_num & BIT(0) ? MAC_AX_MAC_INFO_USE_SIZE : 0;
-	if (rpt->rx_cnt_size) {
-		rpt->rx_cnt_ptr = ptr;
-		accu_size += rpt->rx_cnt_size;
-		ptr += rpt->rx_cnt_size;
-	}
-
-	if (rpt->plcp_size) {
-		rpt->plcp_ptr = ptr;
-		accu_size += rpt->plcp_size;
-		ptr += rpt->plcp_size;
-	}
-
-	if (len > accu_size) {
-		rpt->phy_st_ptr = ptr;
-		rpt->phy_st_size = len - accu_size;
-	}
-END:
-	return ret;
-}
-
-u32 mac_parse_ppdu(struct mac_ax_adapter *adapter,
-		   u8 *buf, u32 ppdu_len, u8 mac_info,
-		   struct mac_ax_ppdu_rpt *rpt)
-{
-	u32 ret = MACSUCCESS;
-
-	PLTFM_MEMSET(rpt, 0, sizeof(struct mac_ax_ppdu_rpt));
-
-	if (mac_info) {
-		ret = parse_mac_info(adapter, buf, ppdu_len, rpt);
-	} else {
-		rpt->phy_st_ptr = buf;
-		rpt->phy_st_size = ppdu_len;
-	}
-
-	return ret;
-}
-
 u32 mac_parse_dfs(struct mac_ax_adapter *adapter,
 		  u8 *buf, u32 dfs_len, struct mac_ax_dfs_rpt *rpt)
 {
@@ -724,6 +638,86 @@ u32 mac_parse_dfs(struct mac_ax_adapter *adapter,
 
 	return ret;
 }
+#endif /* #if MAC_FEAT_DFS */
+
+u32 mac_cfg_phy_rpt(struct mac_ax_adapter *adapter,
+		    struct mac_ax_phy_rpt_cfg *rpt)
+{
+	u32 (*handle)(struct mac_ax_adapter *adapter,
+		      struct mac_ax_phy_rpt_cfg *rpt);
+
+	switch (rpt->type) {
+	case MAC_AX_PPDU_STATUS:
+#if MAC_FEAT_PPDU_STS
+		handle = cfg_ppdu_status;
+#else
+		PLTFM_MSG_ERR("PPDU status unsupported\n");
+		return MACFUNCINPUT;
+#endif
+
+		break;
+	case MAC_AX_CH_INFO:
+#if MAC_FEAT_CH_INFO
+		handle = cfg_ch_info;
+#else
+		PLTFM_MSG_ERR("Chinfo unsupported\n");
+		return MACFUNCINPUT;
+#endif
+		break;
+	case MAC_AX_DFS:
+#if MAC_FEAT_DFS
+		handle = cfg_dfs;
+#else
+		PLTFM_MSG_ERR("DFS unsupported\n");
+		return MACFUNCINPUT;
+#endif
+		break;
+	default:
+		PLTFM_MSG_ERR("Wrong PHY report type\n");
+		return MACFUNCINPUT;
+	}
+
+	return handle(adapter, rpt);
+}
+
+u32 mac_get_phy_rpt_cfg(struct mac_ax_adapter *adapter,
+			struct mac_ax_phy_rpt_cfg *rpt)
+{
+	u32 (*handle)(struct mac_ax_adapter *adapter,
+		      struct mac_ax_phy_rpt_cfg *rpt);
+
+	switch (rpt->type) {
+	case MAC_AX_PPDU_STATUS:
+#if MAC_FEAT_PPDU_STS
+		handle = get_ppdu_status_cfg;
+#else
+		PLTFM_MSG_ERR("PPDU status unsupported\n");
+		return MACFUNCINPUT;
+#endif
+		break;
+	case MAC_AX_CH_INFO:
+#if MAC_FEAT_CH_INFO
+		handle = get_ch_info_cfg;
+#else
+		PLTFM_MSG_ERR("Chinfo unsupported\n");
+		return MACFUNCINPUT;
+#endif
+		break;
+	case MAC_AX_DFS:
+#if MAC_FEAT_DFS
+		handle = get_dfs_cfg;
+#else
+		PLTFM_MSG_ERR("DFS unsupported\n");
+		return MACFUNCINPUT;
+#endif
+		break;
+	default:
+		PLTFM_MSG_ERR("Wrong PHY report type\n");
+		return MACFUNCINPUT;
+	}
+
+	return handle(adapter, rpt);
+}
 
 u32 mac_rst_drv_info(struct mac_ax_adapter *adapter)
 {
@@ -732,3 +726,5 @@ u32 mac_rst_drv_info(struct mac_ax_adapter *adapter)
 
 	return MACSUCCESS;
 }
+
+#endif /* #if MAC_FEAT_PHY_RPT */

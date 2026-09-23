@@ -179,7 +179,7 @@ int rtw_android_set_country(struct net_device *net, char *command, int total_len
 	char *country_code = command + strlen(android_wifi_cmd_str[ANDROID_WIFI_CMD_COUNTRY]) + 1;
 	int ret = _FAIL;
 
-	ret = rtw_set_country(adapter, country_code, RTW_REGD_SET_BY_USER);
+	ret = rtw_set_country(adapter, country_code, RTW_ENV_NUM, RTW_REGD_SET_BY_USER);
 
 	return (ret == _SUCCESS) ? 0 : -1;
 }
@@ -278,6 +278,25 @@ exit:
 	return (ret == _SUCCESS) ? 0 : -1;
 }
 #endif /* CONFIG_WFD */
+
+#ifdef CONFIG_APF
+int rtw_android_set_suspend_mode(struct net_device *net, char *command, int total_len)
+{
+	_adapter *adapter = (_adapter *)rtw_netdev_priv(net);
+	struct wow_priv *wowpriv = adapter_to_wowlan(adapter);
+	char *screen_mode = command + strlen(android_wifi_cmd_str[ANDROID_WIFI_CMD_SETSUSPENDMODE]) + 1;
+	enum phl_apf_cmd apf_cmd = PHL_APF_CMD_NONE;
+
+	wowpriv->screen_mode = (*screen_mode == '0') ? SCREEN_ON : SCREEN_OFF;
+#ifdef CONFIG_APF_DBG
+	RTW_INFO("%s() %s\n", __func__, command);
+	RTW_INFO("SCREEN_MODE(%s)\n", wowpriv->screen_mode == SCREEN_ON ? "ON" : "OFF");
+#endif
+	apf_cmd = (wowpriv->screen_mode == SCREEN_ON ? PHL_APF_CMD_STANDBY : PHL_APF_CMD_ENABLE);
+	rtw_apf_cmd_hdl(adapter, apf_cmd);
+	return 0;
+}
+#endif /* CONFIG_APF */
 
 int get_int_from_command(char *pcmd)
 {
@@ -426,7 +445,7 @@ int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		ret = -EFAULT;
 		goto exit;
 	}
-	
+
 	command = rtw_zmalloc(priv_cmd.total_len+1);
 	if (!command) {
 		RTW_INFO("%s: failed to allocate memory\n", __FUNCTION__);
@@ -545,6 +564,9 @@ int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		break;
 
 	case ANDROID_WIFI_CMD_SETSUSPENDMODE:
+#ifdef CONFIG_APF
+		bytes_written = rtw_android_set_suspend_mode(net, command, priv_cmd.total_len);
+#endif
 		break;
 
 	case ANDROID_WIFI_CMD_SETSUSPENDOPT:
@@ -678,7 +700,7 @@ int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		bytes_written = rtw_android_set_aek(net, command, priv_cmd.total_len);
 		break;
 #endif
-	
+
 	case ANDROID_WIFI_CMD_EXT_AUTH_STATUS: {
 		rtw_set_external_auth_status(padapter,
 			command + strlen("EXT_AUTH_STATUS "),

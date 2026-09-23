@@ -14,7 +14,8 @@
  *****************************************************************************/
 #define _PHL_PS_DBG_CMD_C_
 #include "../phl_headers.h"
-#ifdef CONFIG_POWER_SAVE
+
+#if defined(CONFIG_PHL_TEST_SUITE) && defined (CONFIG_POWER_SAVE)
 struct phl_ps_cmd_info {
 	char name[16];
 	u8 id;
@@ -207,7 +208,7 @@ void phl_ps_dbg_dump(struct phl_info_t *phl_info, u32 *used,
 
 	PS_CNSL(out_len, *used, output + *used, out_len - *used,
 		"init_rf_state: %s, init_rt_stop_rson: 0x%x, leave_fail_act: 0x%x\
-		\nlps: %s, lps_cap: %s, lps_pause_tx: %d\
+		\nlps: %s, lps_cap: %s, ps_pause_tx: %d\
 		\nawake_interval: %d, listen_bcn_mode: %d, smart_ps_mode: %d, bcnnohit: %d\
 		\nrssi_enter_threshold: %d, rssi_leave_threshold: %d, rssi_diff_threshold: %d\
 		\ndefer_rson: 0x%x, lps_ping_defer_time: %d(ms), lps_dhcp_defer_time: %d(ms)\
@@ -217,7 +218,7 @@ void phl_ps_dbg_dump(struct phl_info_t *phl_info, u32 *used,
 		\nwowlan lps awake_interval: %d, wowlan lps listen_bcn_mode: %d, wowlan lps smart_ps_mode: %d\
 		\nwowlan ips: %s, wowlan ips_cap: %s\n",
 		(ps_cap->init_rf_state ? "off" : "on"), ps_cap->init_rt_stop_rson, ps_cap->leave_fail_act,
-		phl_ps_op_mode_to_str(ps_cap->lps_en), phl_ps_pwr_lvl_to_str(phl_ps_judge_pwr_lvl(ps_cap->lps_cap, PS_MODE_LPS, true)), ps_cap->lps_pause_tx,
+		phl_ps_op_mode_to_str(ps_cap->lps_en), phl_ps_pwr_lvl_to_str(phl_ps_judge_pwr_lvl(ps_cap->lps_cap, PS_MODE_LPS, true)), ps_cap->ps_pause_tx,
 		ps_cap->lps_awake_interval, ps_cap->lps_listen_bcn_mode, ps_cap->lps_smart_ps_mode, ps_cap->lps_bcnnohit_en,
 		ps_cap->lps_rssi_enter_threshold, ps_cap->lps_rssi_leave_threshold, ps_cap->lps_rssi_diff_threshold,
 		ps_cap->defer_para.defer_rson, (int)ps_cap->defer_para.lps_ping_defer_time, (int)ps_cap->defer_para.lps_dhcp_defer_time,
@@ -318,7 +319,7 @@ void rtw_phl_dbg_ps_op_mode(void *phl, u8 band_idx, u8 ps_mode, u8 ps_op_mode)
 	return;
 
 cmd_fail:
-	_os_mem_free(phl_to_drvpriv(phl_info), dbg_info, sizeof(dbg_info));
+	_os_mem_free(phl_to_drvpriv(phl_info), dbg_info, sizeof(struct ps_mdl_dbg_info));
 }
 
 void phl_ps_dbg_ps_op_mode(struct phl_info_t *phl_info, u32 *used,
@@ -387,7 +388,7 @@ void rtw_phl_dbg_ps_cap(void *phl, u8 band_idx, u8 ps_mode, u8 ps_cap)
 	return;
 
 cmd_fail:
-	_os_mem_free(phl_to_drvpriv(phl_info), dbg_info, sizeof(dbg_info));
+	_os_mem_free(phl_to_drvpriv(phl_info), dbg_info, sizeof(struct ps_mdl_dbg_info));
 }
 
 void phl_ps_dbg_ps_cap(struct phl_info_t *phl_info, u32 *used,
@@ -495,4 +496,14 @@ void phl_ps_dbg_force_ps(struct phl_info_t *phl_info, u32 *used,
 	} while (0);
 }
 
-#endif /* CONFIG_POWER_SAVE */
+#else
+void rtw_phl_dbg_ps_op_mode(void *phl, u8 band_idx, u8 ps_mode, u8 ps_op_mode)
+{
+
+}
+
+void rtw_phl_dbg_ps_cap(void *phl, u8 band_idx, u8 ps_mode, u8 ps_cap)
+{
+
+}
+#endif /* CONFIG_PHL_TEST_SUITE && CONFIG_POWER_SAVE */

@@ -460,31 +460,85 @@ static void update_sta_he_mac_cap_apmode(_adapter *padapter, struct rtw_phl_stai
 		GET_HE_MAC_CAP_HT_VHT_TRIG_FRAME_RX(ele_start);
 }
 
-static void update_sta_he_phy_cap_apmode(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta, u8 *ele_start, u8 *supp_mcs_len)
+bool is_he_phy_cap_support_channel_width(u8 chan_width_set, u8 chan_width_mask)
 {
-	struct rtw_wifi_role_t *wrole = padapter->phl_role;
-	struct rtw_wifi_role_link_t *rlink = phl_sta->rlink;
-	struct protocol_cap_t *role_cap = &(rlink->protocol_cap);
-	struct role_link_cap_t *cap = &(rlink->cap);
+	return (chan_width_set & chan_width_mask) == chan_width_mask;
+}
 
-	if (phl_sta->chandef.band == BAND_ON_24G) {
-		if (GET_HE_PHY_CAP_SUPPORT_CHAN_WIDTH_SET(ele_start) & BIT(0))
-			phl_sta->chandef.bw = (rlink->chandef.bw < CHANNEL_WIDTH_40) ?
-			rlink->chandef.bw : CHANNEL_WIDTH_40;
-	} else if ((phl_sta->chandef.band == BAND_ON_5G) || (phl_sta->chandef.band == BAND_ON_6G)) {
-		if (GET_HE_PHY_CAP_SUPPORT_CHAN_WIDTH_SET(ele_start) & BIT(1))
-			phl_sta->chandef.bw = (rlink->chandef.bw < CHANNEL_WIDTH_80) ?
-			rlink->chandef.bw : CHANNEL_WIDTH_80;
-		if (GET_HE_PHY_CAP_SUPPORT_CHAN_WIDTH_SET(ele_start) & BIT(2)) {
-			phl_sta->chandef.bw = (rlink->chandef.bw < CHANNEL_WIDTH_160) ?
-			rlink->chandef.bw : CHANNEL_WIDTH_160;
-			*supp_mcs_len += 4;
-		}
-		if (GET_HE_PHY_CAP_SUPPORT_CHAN_WIDTH_SET(ele_start) & BIT(3))
-			*supp_mcs_len += 4;
+bool is_he_channel_width(enum channel_width chan_width)
+{
+	return (chan_width == CHANNEL_WIDTH_20) |
+		(chan_width == CHANNEL_WIDTH_40) |
+		(chan_width == CHANNEL_WIDTH_80) |
+		(chan_width == CHANNEL_WIDTH_160) |
+		(chan_width == CHANNEL_WIDTH_80_80) |
+		(chan_width == CHANNEL_WIDTH_MAX);
+}
+
+void parse_he_phy_cap_channel_width(struct rtw_phl_stainfo_t *phl_sta,
+	u8 *ele_start, u8 *supp_mcs_len, enum channel_width omn_chan_width)
+{
+	struct rtw_wifi_role_link_t *rlink;
+	enum channel_width bw_mode = CHANNEL_WIDTH_20;
+	u8 chan_width_set = GET_HE_PHY_CAP_SUPPORT_CHAN_WIDTH_SET(ele_start);
+	u8 chan_width_mask = 0;
+
+	if (!phl_sta) {
+		RTW_WARN("%s: phl_sta is null! phl_sta->chandef.bw may be wrong val!", __func__);
+		return;
 	}
 
-	phl_sta->asoc_cap.he_ldpc = (GET_HE_PHY_CAP_LDPC_IN_PAYLOAD(ele_start) & role_cap->he_ldpc);
+	rlink = phl_sta->rlink;
+	*supp_mcs_len = HE_PHY_CAP_RX_MCS_MAP_LEN + HE_PHY_CAP_TX_MCS_MAP_LEN;
+
+	if (phl_sta->chandef.band == BAND_ON_24G) {
+		chan_width_mask = HE_PHY_CAP_CHANNEL_WIDTH_40_IN_2G;
+		if (is_he_phy_cap_support_channel_width(chan_width_set, chan_width_mask))
+			bw_mode = CHANNEL_WIDTH_40;
+	} else if ((phl_sta->chandef.band == BAND_ON_5G) || (phl_sta->chandef.band == BAND_ON_6G)) {
+		chan_width_mask = HE_PHY_CAP_CHANNEL_WIDTH_40_80_IN_5G_6G;
+		if (is_he_phy_cap_support_channel_width(chan_width_set, chan_width_mask)) {
+			bw_mode = rtw_vht_is_omn_channel_width_support(omn_chan_width) ?
+				omn_chan_width : CHANNEL_WIDTH_80;
+		}
+
+		chan_width_mask = HE_PHY_CAP_CHANNEL_WIDTH_160_IN_5G_6G;
+		if (is_he_phy_cap_support_channel_width(chan_width_set, chan_width_mask)) {
+			bw_mode = CHANNEL_WIDTH_160;
+			*supp_mcs_len += HE_PHY_CAP_RX_MCS_MAP_LEN + HE_PHY_CAP_TX_MCS_MAP_LEN;
+		}
+
+		chan_width_mask = HE_PHY_CAP_CHANNEL_WIDTH_80_80_IN_5G_6G;
+		if (is_he_phy_cap_support_channel_width(chan_width_set, chan_width_mask)) {
+			bw_mode = CHANNEL_WIDTH_80_80;
+			*supp_mcs_len += HE_PHY_CAP_RX_MCS_MAP_LEN + HE_PHY_CAP_TX_MCS_MAP_LEN;
+		}
+	}
+
+	if (is_he_channel_width(rlink->chandef.bw)) {
+		phl_sta->chandef.bw = rtw_min(bw_mode, rlink->chandef.bw);
+	}
+	else
+	{
+		RTW_WARN("%s: rlink->chandef.bw is invalid HE channel width, \n", __func__);
+		RTW_WARN("rlink->chandef.bw = %d, phl_sta->chandef.bw may be wroung val!\n",
+			phl_sta->chandef.bw);
+		phl_sta->chandef.bw = rtw_min(bw_mode, CHANNEL_WIDTH_20);
+	}
+}
+
+static void update_sta_he_phy_cap_apmode(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta,
+	u8 *ele_start, u8 *supp_mcs_len, enum channel_width omn_chan_width)
+{
+	struct registry_priv *pregistrypriv = &padapter->registrypriv;
+	struct rtw_wifi_role_link_t *rlink = phl_sta->rlink;
+	struct protocol_cap_t *role_cap = &(rlink->protocol_cap);
+
+	parse_he_phy_cap_channel_width(phl_sta, ele_start, supp_mcs_len, omn_chan_width);
+
+	phl_sta->asoc_cap.he_ldpc = (GET_HE_PHY_CAP_LDPC_IN_PAYLOAD(ele_start) &&
+					role_cap->he_ldpc &&
+					TEST_FLAG(pregistrypriv->ldpc_cap, BIT2));
 
 	if (role_cap->ltf_gi) {
 		if (phl_sta->asoc_cap.er_su) {
@@ -590,13 +644,14 @@ static void update_sta_he_ppe_thre_apmode(_adapter *padapter, struct rtw_phl_sta
 	rtw_he_set_asoc_cap_ppe_thre(padapter, phl_sta, ele_start);
 }
 
-void	update_sta_he_info_apmode(_adapter *padapter, void *sta)
+void update_sta_he_info_apmode(_adapter *padapter, void *sta)
 {
-	struct sta_info	*psta = (struct sta_info *)sta;
+	struct sta_info *psta = (struct sta_info *)sta;
 	struct rtw_phl_stainfo_t *phl_sta = psta->phl_sta;
-	struct he_priv	*phepriv_sta = &psta->hepriv;
+	struct he_priv *phepriv_sta = &psta->hepriv;
 	u8 *ele_start = NULL;
-	u8 supp_mcs_len = 4;
+	u8 supp_mcs_len = 0;
+	enum channel_width omn_chan_width = CHANNEL_WIDTH_MAX;
 
 	if (phepriv_sta->he_option == _FALSE)
 		return;
@@ -604,8 +659,10 @@ void	update_sta_he_info_apmode(_adapter *padapter, void *sta)
 	ele_start = &(phepriv_sta->he_cap[1]);
 	update_sta_he_mac_cap_apmode(padapter, phl_sta, ele_start);
 
+	omn_chan_width = rtw_vht_get_omn_channel_width(psta);
+
 	ele_start += HE_CAP_ELE_MAC_CAP_LEN;
-	update_sta_he_phy_cap_apmode(padapter, phl_sta, ele_start, &supp_mcs_len);
+	update_sta_he_phy_cap_apmode(padapter, phl_sta, ele_start, &supp_mcs_len, omn_chan_width);
 
 	ele_start += HE_CAP_ELE_PHY_CAP_LEN;
 	update_sta_he_supp_mcs_apmode(padapter, phl_sta, ele_start, supp_mcs_len);
@@ -648,28 +705,13 @@ void HE_mac_caps_handler(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta, 
 		GET_HE_MAC_CAP_HT_VHT_TRIG_FRAME_RX(ele_start);
 }
 
-void HE_phy_caps_handler(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta, u8 *ele_start, u8 *supp_mcs_len)
+void HE_phy_caps_handler(_adapter *padapter, struct rtw_phl_stainfo_t *phl_sta,
+	u8 *ele_start, u8 *supp_mcs_len, enum channel_width omn_chan_width)
 {
-	struct rtw_wifi_role_t 	*wrole = padapter->phl_role;
-	struct rtw_wifi_role_link_t *rlink = phl_sta->rlink;
 	struct protocol_cap_t *role_cap = &(phl_sta->rlink->protocol_cap);
 
-	if (phl_sta->chandef.band == BAND_ON_24G) {
-		if (GET_HE_PHY_CAP_SUPPORT_CHAN_WIDTH_SET(ele_start) & BIT(0))
-			phl_sta->chandef.bw = (rlink->chandef.bw < CHANNEL_WIDTH_40) ?
-			rlink->chandef.bw : CHANNEL_WIDTH_40;
-	} else if ((phl_sta->chandef.band == BAND_ON_5G) || (phl_sta->chandef.band == BAND_ON_6G)) {
-		if (GET_HE_PHY_CAP_SUPPORT_CHAN_WIDTH_SET(ele_start) & BIT(1))
-			phl_sta->chandef.bw = (rlink->chandef.bw < CHANNEL_WIDTH_80) ?
-			rlink->chandef.bw : CHANNEL_WIDTH_80;
-		if (GET_HE_PHY_CAP_SUPPORT_CHAN_WIDTH_SET(ele_start) & BIT(2)) {
-			phl_sta->chandef.bw = (rlink->chandef.bw < CHANNEL_WIDTH_160) ?
-			rlink->chandef.bw : CHANNEL_WIDTH_160;
-			*supp_mcs_len += 4;
-		}
-		if (GET_HE_PHY_CAP_SUPPORT_CHAN_WIDTH_SET(ele_start) & BIT(3))
-			*supp_mcs_len += 4;
-	}
+	parse_he_phy_cap_channel_width(phl_sta, ele_start, supp_mcs_len, omn_chan_width);
+
 	phl_sta->asoc_cap.he_ldpc = (GET_HE_PHY_CAP_LDPC_IN_PAYLOAD(ele_start) & role_cap->he_ldpc);
 	if (role_cap->ltf_gi) {
 		if (phl_sta->asoc_cap.er_su) {
@@ -792,7 +834,8 @@ void HE_caps_handler(_adapter *padapter, struct _ADAPTER_LINK *padapter_link, PN
 	struct sta_info 		*psta = NULL;
 	struct rtw_phl_stainfo_t *phl_sta = NULL;
 	u8 *ele_start = (&(pIE->data[0]) + 1);
-	u8 supp_mcs_len = 4;
+	u8 supp_mcs_len = 0;
+	enum channel_width omn_chan_width = CHANNEL_WIDTH_MAX;
 
 	if (pIE == NULL)
 		return;
@@ -813,7 +856,8 @@ void HE_caps_handler(_adapter *padapter, struct _ADAPTER_LINK *padapter_link, PN
 	ele_start += HE_CAP_ELE_MAC_CAP_LEN;
 
 	/* HE PHY Caps */
-	HE_phy_caps_handler(padapter, phl_sta, ele_start, &supp_mcs_len);
+	omn_chan_width = rtw_vht_get_omn_channel_width(psta);
+	HE_phy_caps_handler(padapter, phl_sta, ele_start, &supp_mcs_len, omn_chan_width);
 	ele_start += HE_CAP_ELE_PHY_CAP_LEN;
 
 	/* HE Supp MCS Set */
@@ -871,7 +915,6 @@ void HE_operation_handler(_adapter *padapter,
 		/* rx thread & assoc timer callback, use cmd no_wait */
 		if (pre_bsscolor != phl_sta->asoc_cap.bsscolor) {
 			RTW_INFO("%s, Update BSS Color = %d\n", __func__, phl_sta->asoc_cap.bsscolor);
-#ifdef CONFIG_CMD_DISP
 			rtw_phl_cmd_wrole_change(phl,
 			                         padapter->phl_role,
 			                         padapter_link->wrlink,
@@ -880,9 +923,6 @@ void HE_operation_handler(_adapter *padapter,
 			                         sizeof(phl_sta->asoc_cap.bsscolor),
 			                         PHL_CMD_NO_WAIT,
 			                         0);
-#else
-			/* role change here, but no implementation for not CMD_DISP case */
-#endif
 		}
 	}
 
@@ -901,7 +941,6 @@ void HE_operation_handler(_adapter *padapter,
 		/* rx thread & assoc timer callback, use cmd no_wait */
 		if (pre_rts_th != phl_sta->asoc_cap.rts_th) {
 			RTW_INFO("%s, Update TXOP Duration RTS Threshold =%d\n", __func__, phl_sta->asoc_cap.rts_th);
-#ifdef CONFIG_CMD_DISP
 			rtw_phl_cmd_wrole_change(phl,
 			                         padapter->phl_role,
 			                         padapter_link->wrlink,
@@ -910,9 +949,6 @@ void HE_operation_handler(_adapter *padapter,
 			                         sizeof(struct rtw_rts_threshold),
 			                         PHL_CMD_NO_WAIT,
 			                         0);
-#else
-			/* role change here, but no implementation for not CMD_DISP case */
-#endif
 		}
 	}
 }
@@ -992,7 +1028,6 @@ void HE_mu_edca_handler(_adapter *padapter,
 		phl_sta->asoc_cap.mu_edca[3].timer =
 			GET_HE_MU_EDCA_VO_TIMER(ele_start);
 		for (i = 0; i < 4; i++) {
-#ifdef CONFIG_CMD_DISP
 			rtw_phl_cmd_wrole_change(phl,
 						 padapter->phl_role,
 						 padapter_link->wrlink,
@@ -1001,7 +1036,7 @@ void HE_mu_edca_handler(_adapter *padapter,
 						 sizeof(struct rtw_mu_edca_param),
 						 PHL_CMD_NO_WAIT,
 						 0);
-#endif
+
 			RTW_INFO("%s, Update HE MU EDCA AC(%d) aifsn(%d) cw(0x%x) timer(0x%x)\n",
 					__func__,
 					phl_sta->asoc_cap.mu_edca[i].ac,
@@ -1011,7 +1046,6 @@ void HE_mu_edca_handler(_adapter *padapter,
 		}
 
 		if (first) {
-#ifdef CONFIG_CMD_DISP
 			rtw_phl_cmd_wrole_change(phl,
 						 padapter->phl_role,
 						 padapter_link->wrlink,
@@ -1020,9 +1054,6 @@ void HE_mu_edca_handler(_adapter *padapter,
 						 sizeof(first),
 						 PHL_CMD_NO_WAIT,
 						 0);
-#else
-			/* role change here, but no implementation for not CMD_DISP case */
-#endif
 		}
 	}
 }
@@ -1154,7 +1185,7 @@ static int rtw_build_he_phy_caps(_adapter *padapter, struct protocol_cap_t *prot
 
 	SET_HE_PHY_CAP_DEVICE_CLASS(pbuf, HE_DEV_CLASS_A);
 
-	if (proto_cap->he_ldpc)
+	if (proto_cap->he_ldpc && TEST_FLAG(pregistrypriv->ldpc_cap, BIT2))
 		SET_HE_PHY_CAP_LDPC_IN_PAYLOAD(pbuf, 1);
 
 	if (padapter->registrypriv.wifi_spec == 1)
@@ -1866,14 +1897,7 @@ void rtw_he_om_ctrl_trx_ss(_adapter *adapter, struct _ADAPTER_LINK *alink,
 	issue_qos_nulldata(adapter, alink, NULL, 0, 0, 3, 10, _TRUE);
 
 	if (need_update_ra)
-		rtw_phl_cmd_change_stainfo(adapter_to_dvobj(adapter)->phl,
-					   sta->phl_sta,
-					   STA_CHG_RAMASK,
-					   NULL,
-					   0,
-					   PHL_CMD_DIRECTLY,
-					   0);
-
+		rtw_sta_hal_ra_mask_update_cmd(adapter, sta, RTW_CMDF_DIRECTLY);
 }
 
 int rtw_he_om_ctrl_ulmu_dis(_adapter *padapter, struct _ADAPTER_LINK *alink)

@@ -93,6 +93,7 @@ enum rtw_hal_status {
 #define FW_FILE_NIC_POSTFIX ""
 #define FW_FILE_NIC_CE_POSTFIX "_ce"
 #define FW_FILE_WOWLAN_POSTFIX "_wowlan"
+#define FW_FILE_WOWLAN_CE_POSTFIX "_wowlan_ce"
 #define FW_FILE_SPIC_POSTFIX "_spic"
 #define FW_FILE_AP_POSTFIX "_ap"
 
@@ -566,13 +567,6 @@ enum hal_rxcnt_sel {
 	HAL_RXCNT_MAX
 };
 
-enum hal_rate_mode {
-	HAL_LEGACY_MODE	= 0,
-	HAL_HT_MODE	= 1,
-	HAL_VHT_MODE	= 2,
-	HAL_HE_MODE	= 3
-};
-
 enum hal_rate_bw {
 	HAL_RATE_BW_20	= 0,
 	HAL_RATE_BW_40	= 1,
@@ -646,7 +640,7 @@ struct rtw_rssi_info {
 
 struct rtw_rate_info {
  	enum rtw_gi_ltf gi_ltf; /* 3bit GILTF */
-	enum hal_rate_mode mode; /* 2bit 0:legacy, 1:HT, 2:VHT, 3:HE*/
+	enum rtw_rate_mode mode; /* 2bit 0:legacy, 1:HT, 2:VHT, 3:HE*/
 	enum hal_rate_bw bw; /*2bit 0:5M/10M/20M, 1:40M, 2:80M, 3:160M or 80+80*/
 	u8 mcs_ss_idx; /*HE: 3bit SS + 4bit MCS; non-HE: 5bit MCS/rate idx */
 	u8 mcs_idx;
@@ -667,11 +661,12 @@ struct rtw_ra_sta_info {
 	/*u8 txrx_state:2;			///////////////need to check if needed, [PHYDM] 0: Tx, 1:Rx, 2:bi-direction*/
 	/*u8 is_noisy:1;			///////////////need to check if needed, [PHYDM]*/
 	u16 curr_tx_rate;			/*use struct bb_rate_info, [PHYDM] FW->Driver*/
-	enum channel_width ra_bw_mode;	/*remove to phl, [Driver] max bandwidth, for RA only*/
+	enum channel_width ra_bw_mode;	/* [Driver] max bandwidth, for RA only */
 	enum channel_width curr_tx_bw;	/*bb_rate_info, [PHYDM] FW->Driver*/
 	/* u8 drv_ractrl; */
 
 	/* Ctrl */
+	u8 ra_nss_limit; /* 0: no limitation, otherwise, limit to tx nss pkt*/
 	bool dis_ra; /*move from rtw_hal_stainfo_t*/
 	bool ra_registered;/*move from rtw_hal_stainfo_t*/
 	u64 ra_mask;/*move from rtw_hal_stainfo_t*/ /*drv decide by specific req*/
@@ -853,6 +848,11 @@ struct bus_hw_cap_t {
 	u8 l1dly_ctrl;
 	u8 ltr_sw_ctrl; /* whether ltr can be controlled by sw */
 	u8 ltr_hw_ctrl;
+
+#ifdef RTW_WKARD_DYNAMIC_PCIE_GEN
+	u8 pcie_gen_dm_en;
+#endif
+
 	u16 max_txbd_num;
 	u16 max_rxbd_num;
 	u16 max_rpbd_num;
@@ -897,6 +897,7 @@ struct phy_hw_cap_t {
 	u8 rx_num;
 	u8 tx_path_num;
 	u8 rx_path_num;
+	u8 proto_sup;
 	u16 hw_rts_time_th;
 	u16 hw_rts_len_th;
 	u32 txagg_num;
@@ -1033,6 +1034,7 @@ struct rtw_hal_com_t {
 	enum rtw_cv cv;
 	enum rtw_cv acv;
 	enum rtw_fv fv;
+	u32 aid;
 
 	struct ver_ctrl_t mac_vc;
 	struct ver_ctrl_t bb_vc;
@@ -1153,10 +1155,12 @@ struct pkt_ofld_info {
 	u8 id;
 };
 
+/* Up to 8 add_pkt_ofld are allowed for the same type */
+#define PKT_OFLD_MAX_VAL 8
 struct pkt_ofld_entry {
 	struct list_head list;
 	u16 macid;
-	struct pkt_ofld_info pkt_info[PKT_OFLD_TYPE_MAX];
+	struct pkt_ofld_info pkt_info[PKT_OFLD_TYPE_MAX][PKT_OFLD_MAX_VAL];
 };
 
 enum rtw_c2h_cat {
@@ -1242,6 +1246,10 @@ struct rtw_hal_wow_cfg {
 	struct rtw_pattern_match_info *pattern_match_info;
 	struct rtw_wow_gpio_info *wow_gpio;
 	struct rtw_periodic_wake_info *periodic_wake_cfg;
+#ifdef CONFIG_PHL_MDNS_OFFLOAD
+	struct rtw_mdns_ofld_info *mdns_ofld_info;
+#endif
+	struct rtw_hal_mac_sta_csa *wow_csa_cfg;
 };
 #endif /* CONFIG_WOWLAN */
 

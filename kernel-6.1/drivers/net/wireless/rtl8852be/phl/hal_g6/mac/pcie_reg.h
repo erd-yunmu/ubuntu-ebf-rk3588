@@ -23,10 +23,18 @@
 
 /* PCIE PHY register */
 #define RAC_CTRL_PPR			0x00
+#define RAC_ANA03			0x03
+#define OOBS_SEN_SH		        1
+#define OOBS_SEN_MSK		        0x1F
+#define RAC_ANA09			0x09
+#define BAC_OOBS_SEL			BIT(4)
 #define RAC_ANA0C			0x0C
 #define RAC_ANA0A			0x0A
+#define RAC_ANA0D			0x0D
+#define BAC_RX_TEST_EN			BIT(6)
 #define BAC_EQ_SEL			BIT(5)
 #define RAC_ANA10			0x10
+#define ADDR_SEL_PINOUT_DIS_VAL		0x3C4
 #define PCIE_BIT_PINOUT_DIS		BIT(3)
 #define RAC_ANA19			0x19
 #define PCIE_BIT_RD_SEL			BIT(2)
@@ -40,6 +48,8 @@
 #define BAC_AUTOK_N_MSK			0x3
 
 #define RAC_ANA1F			0x1F
+#define OOBS_LEVEL_SH		        8
+#define OOBS_LEVEL_MSK		        0x1F
 #define RAC_SET_PPR			0x20
 #define RAC_TRG_PPR			0x21
 #define RAC_ANA20			0x20
@@ -63,11 +73,30 @@
 #define BAC_AUTOK_TAR_SH		0
 #define BAC_AUTOK_TAR_MSK		0xFFF
 
+#define RAC_ANA2E			0x2E
+#define RAC_ANA2E_VAL			0xFFFE
+#define RAC_ANA1E			0x1E
+#define RAC_ANA1E_G1_VAL		0x66EA
+#define RAC_ANA1E_G2_VAL		0x6EEA
+
 /* PCIE CFG register */
+#define PCIE_CMD_OFFSET                 0x4
+#define PCIE_BAR_OFFSET                 0x18
+#define PCIE_D_STATE_OFFSET             0x44
 #define PCIE_L1_STS			0x80
 #define BCFG_LINK_SPEED_SH		16
 #define BCFG_LINK_SPEED_MSK		0xF
 #define PCIE_PHY_RATE			0x82
+#define PCIE_UNCORR_ERR_STS_OFFSET      0x104
+#define PCIE_UNCORR_ERR_MASK_OFFSET     0x108
+#define PCIE_UNCORR_ERR_SEV_OFFSET      0x10C
+#define PCIE_CORR_ERR_STS_OFFSET        0x110
+#define PCIE_CORR_ERR_MASK_OFFSET       0x114
+#define PCIE_ADV_ERR_CAP_CTRL_OFFSET    0x118
+#define PCIE_HDR_LOG_1_OFFSET           0x11C
+#define PCIE_HDR_LOG_2_OFFSET           0x120
+#define PCIE_HDR_LOG_3_OFFSET           0x124
+#define PCIE_HDR_LOG_4_OFFSET           0x128
 #define PCIE_L1SS_CTRL			0x718
 #define PCIE_L1_CTRL			0x719
 #define PCIE_ACK_NFTS			0x70D
@@ -83,15 +112,31 @@
 #define FILTER_OUT_EQ_MSK		0x1F
 #define REG_FILTER_OUT_SH		2
 #define REG_FILTER_OUT_MSK		0x1F
-#define PCIE_LINK_SPEED_32BIT   0x80
+#define PCIE_LINK_CAP                   0x7C
+#define PCIE_LINK_SPEED_32BIT           0x80
+#define PCIE_LINK_CTRL_STS_OFFSET       0x80
 
-/*PCIE SPEED*/
+/* PCIE Bus Master */
+#define PCIE_BUS_MASTER_SH              0
+#define PCIE_BUS_MASTER_BITS_MSK        0x7
+
+/* PCIE D-state */
+#define PCIE_D_STATE_SH              0
+#define PCIE_D_STATE_BITS_MSK        0x3
+
+/* PCIE SPEED */
 #define PCIE_LINK_SPEED_SH      16
-#define PCIE_LINK_SPEED_BITS_MSK 0XF
+#define PCIE_LINK_SPEED_BITS_MSK 0xF
 #define PCIE_CAPABILITY_SPEED    0x7C
 #define PCIE_SUPPORT_GEN_SH      0
 #define PCIE_LINK_CHANGE_SPEED   0xA0
 #define PCIE_POLLING_BIT         BIT(17)
+
+/* PCIE Link Width */
+#define PCIE_LINK_WIDTH_SH      20
+#define PCIE_LINK_WIDTH_MSK     0x3F
+#define PCIE_LANE_RESIZING_OFFSET      0x8C0
+#define PCIE_LANE_RESIZING_VAL      0xC0
 
 /* 8852C PCIE bit */
 #define PCIE_L1_STS_V1			0x2080
@@ -103,6 +148,9 @@
 /* PCIE CFG bit */
 #define PCIE_BIT_STS_L0S		BIT(0)
 #define PCIE_BIT_STS_L1			BIT(1)
+#define PCIE_BIT_STS_COMM_CLK_CFG	BIT(6)
+#define PCIE_BIT_STS_CLK_PM	        BIT(8)
+
 #define PCIE_BIT_WAKE			BIT(2)
 #define PCIE_BIT_L1			BIT(3)
 #define PCIE_BIT_CLK			BIT(4)
@@ -138,5 +186,32 @@
 
 #define PCIE_GEN1_SPEED			0x01
 #define PCIE_GEN2_SPEED			0x02
+
+/* 8852C PCIE SER Dump */
+#define PCIE_DUMP_BYTE0_SH	0
+#define PCIE_DUMP_BYTE1_SH	8
+#define PCIE_DUMP_BYTE2_SH	16
+#define PCIE_DUMP_BYTE3_SH	24
+#define PCIE_DUMP_1_BYTE_MSK	0xFF
+#define PCIE_DUMP_2_BYTE_MSK	0xFFFF
+#define PCIE_DUMP_LTSSM_SH	    0
+#define PCIE_DUMP_LTSSM_MSK	0x3F
+#define PCIE_DUMP_PCLKREQ_SH	6
+#define PCIE_DUMP_1_BIT_MSK	    0x1
+#define PCIE_DUMP_PCLKACK_SH	7
+#define PCIE_DUMP_L1SUB_SH	    8
+#define PCIE_DUMP_L1SUB_MSK	    0x7
+#define PCIE_DUMP_PSTATE_SH	    16
+#define PCIE_DUMP_PSTATE_MSK	0x3
+#define PCIE_DUMP_RX_STS_SH	    4
+#define PCIE_DUMP_RX_STS_MSK	0x7
+#define PCIE_DUMP_PIPE_SH	24
+#define PCIE_DUMP_PCIEX_SH	25
+#define PCIE_DUMP_CMUEN_SH	27
+#define PCIE_DUMP_RX_EN_SH	29
+#define PCIE_DUMP_NSQ_SH	30
+#define PCIE_DUMP_RXVALID_SH    7
+#define PCIE_DUMP_RXEIEC_SH	8
+#define PCIE_DUMP_CDR_SH	14
 
 #endif/* __HALMAC_PCIE_REG_H__ */

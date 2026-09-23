@@ -1887,7 +1887,7 @@ u32 mac_gpio_init_8852b(struct mac_ax_adapter *adapter)
 	bool is_fpga = false;
 
 #if MAC_AX_FEATURE_HV
-	if (adapter->env == HV_AX_FPGA)
+	if (adapter->env_info.env == HV_AX_FPGA)
 		is_fpga = true;
 	else
 		is_fpga = false;
@@ -1901,6 +1901,7 @@ u32 mac_gpio_init_8852b(struct mac_ax_adapter *adapter)
 		adapter->gpio_info.uart_tx_gpio = 12;
 		adapter->gpio_info.uart_rx_gpio = 11;
 	}
+	adapter->gpio_info.gpio_max = MAC_AX_GPIO_MAX_8852B;
 	return MACSUCCESS;
 }
 

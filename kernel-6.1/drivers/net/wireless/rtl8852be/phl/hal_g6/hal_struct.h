@@ -207,6 +207,9 @@ struct hal_regu_ops {
 
 	void (*hal_get_chdef_6g)(
 		u8 ch_idx, struct chdef_6ghz *chdef);
+
+	void (*hal_get_regu_func_cert_info)(char *country,
+		struct rtw_regu_func_cert_info *rg_cert);
 };
 
 struct hal_ops_t {
@@ -240,6 +243,10 @@ struct hal_ops_t {
 					  enum rtw_fw_type fw_type);
 	enum rf_path (*get_path_from_ant_num)(u8 antnum);
 
+	enum rtw_hal_status (*hal_fast_start)(struct rtw_phl_com_t *phl_com,
+					     struct hal_info_t *hal);
+	enum rtw_hal_status (*hal_fast_stop)(struct rtw_phl_com_t *phl_com,
+					       struct hal_info_t *hal);
 #ifdef CONFIG_WOWLAN
 	enum rtw_hal_status (*hal_wow_init)(struct rtw_phl_com_t *phl_com,
 					struct hal_info_t *hal, struct rtw_phl_stainfo_t *sta);
@@ -338,7 +345,9 @@ struct c2h_evt_msg {
 		#ifdef CONFIG_PHL_TWT
 		struct rtw_phl_twt_wait_anno_rpt twt_anno_rpt;
 		#endif
+		#ifdef CONFIG_PHL_BCN_ERLY_RPT
 		struct rtw_bcn_early_rpt bcn_erly_rpt;
+		#endif
 	} u;
 };
 

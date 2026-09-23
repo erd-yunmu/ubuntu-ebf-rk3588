@@ -24,7 +24,7 @@ static struct mac_ax_dle_dfi_info dle_dfi_wde_bufmgn_freepg = {
 
 static struct mac_ax_dle_dfi_info dle_dfi_wde_bufmgn_quota = {
 	0,
-	4,
+	(DLE_WDE_QTA_NUM_8852B - 1),
 	1
 };
 
@@ -54,13 +54,13 @@ static struct mac_ax_dle_dfi_info dle_dfi_wde_quemgn_nxtpkt = {
 
 static struct mac_ax_dle_dfi_info dle_dfi_wde_quemgn_qlnktbl = {
 	0,
-	0x453,
+	(WDE_QLINK_TBL_NUM(8852B) - 1),
 	1
 };
 
 static struct mac_ax_dle_dfi_info dle_dfi_wde_quemgn_qempty = {
 	0,
-	0x11,
+	(WDE_QEMPTY_NUM(8852B) - 1),
 	1
 };
 
@@ -72,7 +72,7 @@ static struct mac_ax_dle_dfi_info dle_dfi_ple_bufmgn_freepg = {
 
 static struct mac_ax_dle_dfi_info dle_dfi_ple_bufmgn_quota = {
 	0,
-	0xB,
+	(DLE_PLE_QTA_NUM_8852B - 1),
 	1
 };
 
@@ -102,13 +102,13 @@ static struct mac_ax_dle_dfi_info dle_dfi_ple_quemgn_nxtpkt = {
 
 static struct mac_ax_dle_dfi_info dle_dfi_ple_quemgn_qlnktbl = {
 	0,
-	0x41,
+	(PLE_QLINK_TBL_NUM(8852B) - 1),
 	1
 };
 
 static struct mac_ax_dle_dfi_info dle_dfi_ple_quemgn_qempty = {
 	0,
-	1,
+	(PLE_QEMPTY_NUM(8852B) - 1),
 	1
 };
 
@@ -352,7 +352,7 @@ u32 mac_is_txq_empty_8852b(struct mac_ax_adapter *adapter,
 	PLTFM_MEMSET(val, 0xFF, sizeof(struct mac_ax_tx_queue_empty));
 
 	qempty.dle_type = DLE_CTRL_TYPE_WDE;
-	qnum = WDE_QEMPTY_ACQ_NUM_8852B;
+	qnum = WDE_QEMPTY_ACQ_NUM(8852B);
 	for (i = 0; i < qnum; i++) {
 		qempty.grpsel = i;
 		ret = dle_dfi_qempty(adapter, &qempty);

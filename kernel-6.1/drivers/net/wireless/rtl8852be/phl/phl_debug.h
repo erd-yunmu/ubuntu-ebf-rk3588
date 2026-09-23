@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2019 - 2021 Realtek Corporation.
+ * Copyright(c) 2019 - 2024 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -16,15 +16,17 @@
 #define _PHL_DEBUG_H_
 
 /* phl log level */
-enum {
-	_PHL_NONE_ = 0,
-	_PHL_ALWAYS_ = 1,
-	_PHL_ERR_ = 2,
-	_PHL_WARNING_ = 3,
-	_PHL_INFO_ = 4,
-	_PHL_DEBUG_ = 5,
-	_PHL_MAX_ = 6
-};
+#define _PHL_NONE_	0
+#define _PHL_ALWAYS_	1
+#define _PHL_ERR_	2
+#define _PHL_WARNING_	3
+#define _PHL_INFO_	4
+#define _PHL_DEBUG_	5
+#define _PHL_MAX_	6
+
+#ifndef PHL_LOG_LEVEL
+#define PHL_LOG_LEVEL	_PHL_DEBUG_
+#endif
 
 #define PHL_PREFIX "PHL: "
 #define HALPS_PREFIX "HALPS:"
@@ -64,6 +66,7 @@ enum {
 #define COMP_PHL_MR_COEX BIT22
 #define COMP_PHL_CHINFO BIT23
 #define COMP_PHL_SNIFF BIT24
+#define COMP_PHL_QOSMG BIT25
 
 
 enum PHL_DBG_LEVEL {
@@ -108,7 +111,7 @@ struct dbg_mem_ctx {
 	u32 alloc_buf_cnt;
 };
 
-
+#if PHL_LOG_LEVEL > _PHL_NONE_
 #undef PHL_TRACE
 #define PHL_TRACE(comp, level, fmt, ...)     \
 	do {\
@@ -147,8 +150,15 @@ struct dbg_mem_ctx {
 			PHL_TRACE(COMP_PHL_DBG, _PHL_ERR_, "ERROR " fmt, ##__VA_ARGS__);\
 			_os_assert(true); \
 	} while (0)
+#else /* PHL_LOG_LEVEL <= _PHL_NONE_ */
+#define PHL_TRACE(comp, level, fmt, ...)
+#define PHL_TRACE_LMT(comp, level, fmt, ...)
+#define PHL_DATA(comp, level, fmt, ...)
+#define PHL_DATA_LMT(comp, level, fmt, ...)
+#define PHL_ASSERT(fmt, ...)
+#endif /* PHL_LOG_LEVEL <= _PHL_NONE_ */
 
-
+#if PHL_LOG_LEVEL >= _PHL_ALWAYS_
 #undef PHL_PRINT
 #define PHL_PRINT(fmt, ...)     \
 	do {\
@@ -160,7 +170,12 @@ struct dbg_mem_ctx {
 	do {\
 			PHL_TRACE_LMT(COMP_PHL_DBG, _PHL_ALWAYS_, fmt, ##__VA_ARGS__);\
 	} while (0)
+#else /* PHL_LOG_LEVEL < _PHL_ALWAYS_ */
+#define PHL_PRINT(fmt, ...)
+#define PHL_PRINT_LMT(fmt, ...)
+#endif /* PHL_LOG_LEVEL < _PHL_ALWAYS_ */
 
+#if PHL_LOG_LEVEL >= _PHL_ERR_
 #undef PHL_ERR
 #define PHL_ERR(fmt, ...)     \
 	do {\
@@ -172,7 +187,12 @@ struct dbg_mem_ctx {
 	do {\
 			PHL_TRACE_LMT(COMP_PHL_DBG, _PHL_ERR_, "ERROR " fmt, ##__VA_ARGS__);\
 	} while (0)
+#else /* PHL_LOG_LEVEL < _PHL_ERR_ */
+#define PHL_ERR(fmt, ...)
+#define PHL_ERR_LMT(fmt, ...)
+#endif /* PHL_LOG_LEVEL < _PHL_ERR_ */
 
+#if PHL_LOG_LEVEL >= _PHL_WARNING_
 #undef PHL_WARN
 #define PHL_WARN(fmt, ...)     \
 	do {\
@@ -184,7 +204,12 @@ struct dbg_mem_ctx {
 	do {\
 			PHL_TRACE_LMT(COMP_PHL_DBG, _PHL_WARNING_, "WARN " fmt, ##__VA_ARGS__);\
 	} while (0)
+#else /* PHL_LOG_LEVEL < _PHL_WARNING_ */
+#define PHL_WARN(fmt, ...)
+#define PHL_WARN_LMT(fmt, ...)
+#endif /* PHL_LOG_LEVEL < _PHL_WARNING_ */
 
+#if PHL_LOG_LEVEL >= _PHL_INFO_
 #undef PHL_INFO
 #define PHL_INFO(fmt, ...)     \
 	do {\
@@ -196,7 +221,12 @@ struct dbg_mem_ctx {
 	do {\
 			PHL_TRACE_LMT(COMP_PHL_DBG, _PHL_INFO_, fmt, ##__VA_ARGS__);\
 	} while (0)
+#else /* PHL_LOG_LEVEL < _PHL_INFO_ */
+#define PHL_INFO(fmt, ...)
+#define PHL_INFO_LMT(fmt, ...)
+#endif /* PHL_LOG_LEVEL < _PHL_INFO_ */
 
+#if PHL_LOG_LEVEL >= _PHL_DEBUG_
 #undef PHL_DBG
 #define PHL_DBG(fmt, ...)     \
 	do {\
@@ -213,6 +243,14 @@ struct dbg_mem_ctx {
 #define FUNCOUT() PHL_TRACE(COMP_PHL_DBG, _PHL_DEBUG_, "Leave %s\n", __FUNCTION__)
 #define FUNCIN_WSTS(_sts) PHL_TRACE(COMP_PHL_DBG, _PHL_DEBUG_, "Enter with 0x%08X %s\n", _sts, __FUNCTION__)
 #define FUNCOUT_WSTS(_sts) PHL_TRACE(COMP_PHL_DBG, _PHL_DEBUG_, "Leave with 0x%08X %s\n", _sts, __FUNCTION__)
+#else /* PHL_LOG_LEVEL < _PHL_DEBUG_ */
+#define PHL_DBG(fmt, ...)
+#define PHL_DBG_LMT(fmt, ...)
+#define FUNCIN()
+#define FUNCOUT()
+#define FUNCIN_WSTS(_sts)
+#define FUNCOUT_WSTS(_sts)
+#endif /* PHL_LOG_LEVEL < _PHL_DEBUG_ */
 
 void debug_dump_buf(u8 *buf, u16 buf_len, const char *prefix);
 void debug_dump_data(u8 *buf, u32 buf_len, const char *prefix);
@@ -291,4 +329,18 @@ void phl_mirror_dump_c2h(void *phl, struct rtw_pkt_buf_list *pkt);
 void phl_mirror_dump_wd(void *phl, u8 txch, u8 *wd, u32 wd_len);
 void phl_mirror_dump_rxd(void *phl, u8 *rxd, u32 rxd_len);
 #endif
+
+void rtw_phl_update_io_dump_allow(void *phl, bool io_dump_allow);
+void rtw_phl_update_fw_log_dump_allow(void *phl, bool fw_log_dump_allow);
+
+#ifdef DBG_MONITOR_TIME
+void phl_fun_monitor_start(u32 *start_t, bool show_caller, const char *caller);
+void phl_fun_monitor_end(struct rtw_phl_com_t *phl_com, u32 *start_t, enum phl_time_flags flag, const char *caller);
+
+#define PHL_FUN_MON_START(start_t) phl_fun_monitor_start(start_t, false, __FUNCTION__)
+#define PHL_FUNC_MON_END(phl_com, start_t, flag) phl_fun_monitor_end(phl_com, start_t, flag, __FUNCTION__)
+
+void phl_dump_func_latency(struct rtw_phl_com_t *phl_com);
+#endif /* DBG_MONITOR_TIME */
+
 #endif	/* _PHL_DEBUG_H_ */

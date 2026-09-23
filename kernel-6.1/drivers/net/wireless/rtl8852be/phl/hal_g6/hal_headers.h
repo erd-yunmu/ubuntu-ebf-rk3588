@@ -36,7 +36,7 @@
 #include "../phl_ext_tx_pwr_lmt_def.h"
 #include "../custom/phl_custom_def.h"
 #include "../custom/phl_custom_api.h"
-
+#include "../phl_version.h"
 #ifdef CONFIG_PCI_HCI
 #include "../hci/phl_trx_def_pcie.h"
 #endif

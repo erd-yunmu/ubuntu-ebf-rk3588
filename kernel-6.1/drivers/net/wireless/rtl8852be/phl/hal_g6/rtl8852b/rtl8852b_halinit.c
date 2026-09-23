@@ -44,16 +44,22 @@ void init_hal_spec_8852b(struct rtw_phl_com_t *phl_com,
 	hal_com->phy_hw_cap[1].hw_rts_time_th = 0;
 	hal_com->phy_hw_cap[0].hw_rts_len_th = 0;
 	hal_com->phy_hw_cap[1].hw_rts_len_th = 0;
+	hal_com->phy_hw_cap[0].proto_sup = WLAN_MD_11B | WLAN_MD_11A |
+					   WLAN_MD_11G | WLAN_MD_11N |
+					   WLAN_MD_11AC | WLAN_MD_11AX;
+	hal_com->phy_hw_cap[1].proto_sup = WLAN_MD_11B | WLAN_MD_11A |
+					   WLAN_MD_11G | WLAN_MD_11N |
+					   WLAN_MD_11AC | WLAN_MD_11AX;
 	hal_spec->max_tx_cnt = 2;
 	dev_hw_cap->band_sup = BAND_CAP_2G | BAND_CAP_5G;
 	if (hal_com->chip_id == CHIP_WIFI6_8852BP)
 		dev_hw_cap->band_sup |= BAND_CAP_6G;
-	dev_hw_cap->bw_sup = BW_CAP_20M | BW_CAP_40M | BW_CAP_80M;
+	if (hal_com->chip_id == CHIP_WIFI6_8852BPT)
+		dev_hw_cap->band_sup |= BAND_CAP_6G;
+	dev_hw_cap->bw_sup = BW_CAP_5M | BW_CAP_10M | BW_CAP_20M | BW_CAP_40M |
+			     BW_CAP_80M;
 	hal_spec->port_num = 5;
 	hal_spec->wmm_num = 2;
-
-	hal_spec->proto_cap = PROTO_CAP_11B | PROTO_CAP_11G | PROTO_CAP_11N |
-				PROTO_CAP_11AC | PROTO_CAP_11AX;
 
 	hal_spec->wl_func = 0
 				| WL_FUNC_P2P
@@ -152,7 +158,11 @@ void init_hal_spec_8852b(struct rtw_phl_com_t *phl_com,
 
 	hal_com->dev_hw_cap.sec_cap.hw_form_hdr = false;
 	hal_com->dev_hw_cap.sec_cap.hw_tx_search_key = false;
+#ifdef CONFIG_PHL_APF
+	hal_com->dev_hw_cap.sec_cap.hw_sec_iv = true;
+#else
 	hal_com->dev_hw_cap.sec_cap.hw_sec_iv = false;
+#endif
 
 #ifdef CONFIG_MCC_SUPPORT
 	hal_com->dev_hw_cap.mcc_sup = true;
@@ -177,6 +187,7 @@ void init_hal_spec_8852b(struct rtw_phl_com_t *phl_com,
 
 	hal_com->dev_hw_cap.sgi_160_sup = false;
 	hal_com->dev_hw_cap.rpq_agg_num = 0;
+	hal_com->dev_hw_cap.rpq_tmr = 0;
 
 	hal_com->dev_hw_cap.max_link_num = RTW_ONE_LINK;
 	hal_com->dev_hw_cap.max_mld_num = 0;
@@ -185,6 +196,11 @@ void init_hal_spec_8852b(struct rtw_phl_com_t *phl_com,
 	hal_com->dev_hw_cap.bfee_rx_ndp_sts = 7;
 
 	hal_com->dev_hw_cap.antdiv_sup = false;
+
+#ifdef CONFIG_PHL_RFK_FCS_SUPPPORT
+	hal_com->dev_hw_cap.rfk_fcs_sup = true;
+	hal_com->dev_hw_cap.rfk_fcs_num = rtw_hal_rf_fcs_support_num(hal);
+#endif
 }
 
 
@@ -207,6 +223,9 @@ u32 _hal_cfg_rom_fw_8852b(enum rtw_fw_type fw_type, struct rtw_fw_info_t *fw_inf
 		break;
 	case RTW_FW_WOWLAN:
 		filename_postfix = FW_FILE_WOWLAN_POSTFIX;
+		break;
+	case RTW_FW_WOWLAN_CE:
+		filename_postfix = FW_FILE_WOWLAN_CE_POSTFIX;
 		break;
 	case RTW_FW_SPIC:
 		filename_postfix = FW_FILE_SPIC_POSTFIX;
@@ -258,6 +277,9 @@ static u32 _hal_read_fw_8852b(enum rtw_fw_type fw_type,
 	case RTW_FW_WOWLAN:
 		filename_postfix = FW_FILE_WOWLAN_POSTFIX;
 		break;
+	case RTW_FW_WOWLAN_CE:
+		filename_postfix = FW_FILE_WOWLAN_CE_POSTFIX;
+		break;
 	case RTW_FW_SPIC:
 		filename_postfix = FW_FILE_SPIC_POSTFIX;
 		break;
@@ -289,13 +311,21 @@ static u32 _hal_cfg_extnal_fw_8852b(struct rtw_phl_com_t *phl_com,
 	void *d = phlcom_to_drvpriv(phl_com);
 	u8 *tgt_buf = NULL;
 	u32 tgt_buf_size = 0;
+	u8 wow_fw_type = RTW_FW_MAX;
+
+#ifdef MAC_FW_CATEGORY_WOWLAN
+	wow_fw_type = RTW_FW_WOWLAN;
+#endif
+#ifdef MAC_FW_CATEGORY_WOWLANCE
+	wow_fw_type = RTW_FW_WOWLAN_CE;
+#endif
 
 	switch (fw_type) {
 	case RTW_FW_NIC:
 		_hal_read_fw_8852b(RTW_FW_NIC, fw_info->buf,
 			&fw_info->buf_size, ic_name);
 		/* preload wowlan fw */
-		_hal_read_fw_8852b(RTW_FW_WOWLAN, fw_info->wow_buf,
+		_hal_read_fw_8852b(wow_fw_type, fw_info->wow_buf,
 			&fw_info->wow_buf_size, ic_name);
 		/* target is still NIC */
 		tgt_buf = fw_info->buf;
@@ -305,7 +335,7 @@ static u32 _hal_cfg_extnal_fw_8852b(struct rtw_phl_com_t *phl_com,
 		_hal_read_fw_8852b(RTW_FW_NIC_CE, fw_info->buf,
 			&fw_info->buf_size, ic_name);
 		/* preload wowlan fw */
-		_hal_read_fw_8852b(RTW_FW_WOWLAN, fw_info->wow_buf,
+		_hal_read_fw_8852b(wow_fw_type, fw_info->wow_buf,
 			&fw_info->wow_buf_size, ic_name);
 		/* target is still NIC */
 		tgt_buf = fw_info->buf;
@@ -313,6 +343,12 @@ static u32 _hal_cfg_extnal_fw_8852b(struct rtw_phl_com_t *phl_com,
 		break;
 	case RTW_FW_WOWLAN:
 		_hal_read_fw_8852b(RTW_FW_WOWLAN, fw_info->wow_buf,
+			&fw_info->wow_buf_size, ic_name);
+		tgt_buf = fw_info->wow_buf;
+		tgt_buf_size = fw_info->wow_buf_size;
+		break;
+	case RTW_FW_WOWLAN_CE:
+		_hal_read_fw_8852b(RTW_FW_WOWLAN_CE, fw_info->wow_buf,
 			&fw_info->wow_buf_size, ic_name);
 		tgt_buf = fw_info->wow_buf;
 		tgt_buf_size = fw_info->wow_buf_size;
@@ -449,28 +485,26 @@ enum rtw_hal_status hal_get_efuse_8852b(struct rtw_phl_com_t *phl_com,
 					struct hal_info_t *hal,
 					struct hal_init_info_t *init_info)
 {
-	enum rtw_hal_status hal_status = RTW_HAL_STATUS_FAILURE;
-
 	FUNCIN();
 
-	hal_status = rtw_hal_mac_hal_fast_init(phl_com, hal, init_info);
-	if (hal_status != RTW_HAL_STATUS_SUCCESS)
-		goto hal_fast_init_fail;
-
 	rtw_hal_efuse_process(phl_com, hal, init_info->ic_name);
-
-	hal_status = rtw_hal_mac_power_switch(phl_com, hal, 0);
-	if (hal_status != RTW_HAL_STATUS_SUCCESS)
-		goto hal_power_off_fail;
 
 	FUNCOUT();
 
 	return RTW_HAL_STATUS_SUCCESS;
+}
 
-hal_power_off_fail:
-hal_fast_init_fail:
-	PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "==> %s : hal get efuse fail\n", __func__);
-	return hal_status;
+enum rtw_hal_status hal_fast_start_8852b(struct rtw_phl_com_t *phl_com,
+					struct hal_info_t *hal,
+					struct hal_init_info_t *init_info)
+{
+	return rtw_hal_mac_hal_fast_init(phl_com, hal, init_info);
+}
+
+enum rtw_hal_status hal_fast_stop_8852b(struct rtw_phl_com_t *phl_com,
+					struct hal_info_t *hal)
+{
+	return rtw_hal_mac_hal_fast_deinit(phl_com, hal);
 }
 
 enum rtw_hal_status hal_start_8852b(struct rtw_phl_com_t *phl_com,
@@ -485,12 +519,17 @@ enum rtw_hal_status hal_start_8852b(struct rtw_phl_com_t *phl_com,
 	u8 val = 0;
 	struct hal_ppdu_sts_cfg psts_cfg = {0};
 
+	/* Reset power table, if needed */
+	rtw_hal_reset_txpwr_table(hal);
+
 	/* Read phy parameter files */
 	rtw_hal_dl_all_para_file(phl_com, init_info->ic_name, hal);
 
 	hal_status = rtw_hal_mac_hal_init(phl_com, hal, init_info);
 	if (hal_status != RTW_HAL_STATUS_SUCCESS)
 		goto hal_init_fail;
+
+	rtw_hal_rf_ic_cfg_init(hal);
 
 	rtw_hal_set_rxfltr_opt_by_mode(hal, HW_BAND_0, RX_FLTR_OPT_MODE_STA_NORMAL);
 	rtw_hal_set_rxfltr_type_by_mode(hal, HW_BAND_0, RX_FLTR_TYPE_MODE_HAL_INIT);
@@ -526,7 +565,6 @@ enum rtw_hal_status hal_start_8852b(struct rtw_phl_com_t *phl_com,
 	rtw_hal_mac_enable_bb_rf(hal, 0);
 	rtw_hal_mac_enable_bb_rf(hal, 1);
 
-	/* load parameters or config mac, phy, btc, ... */
 #ifdef USE_TRUE_PHY
 	rtw_hal_init_bb_early_init(hal);
 	rtw_hal_init_bb_reg(hal);
@@ -538,7 +576,9 @@ enum rtw_hal_status hal_start_8852b(struct rtw_phl_com_t *phl_com,
 	rtw_hal_btc_init_coex_cfg_ntfy(hal);
 #endif
 	/* start watchdog/dm */
-	rtw_hal_bb_dm_init(hal);
+	if (rtw_hal_bb_dm_init(hal) != RTW_HAL_STATUS_SUCCESS)
+		goto hal_init_fail;
+
 	rtw_hal_rf_dm_init(hal);
 
 	hal_status = rtw_hal_mac_get_append_fcs(hal, &val);
@@ -574,7 +614,7 @@ enum rtw_hal_status hal_start_8852b(struct rtw_phl_com_t *phl_com,
 		goto hal_init_fail;
 
 	/* Enable FW basic logs */
-	hal_fw_en_basic_log(hal->hal_com, &phl_com->dev_cap.fw_log_info);
+	hal_fw_en_basic_log(hal->hal_com, &phl_com->dbg_cfg.fw_log_info);
 
 	return RTW_HAL_STATUS_SUCCESS;
 
@@ -605,9 +645,17 @@ hal_wow_init_8852b(struct rtw_phl_com_t *phl_com, struct hal_info_t *hal_info,
 	struct hal_ops_t *hal_ops = hal_get_ops(hal_info);
 	enum rtw_hal_status hal_status = RTW_HAL_STATUS_SUCCESS;
 	bool linked = sta->rlink->mstate == MLME_LINKED ? true : false;
+	u8 wow_fw_type = RTW_FW_MAX;
+
+#ifdef MAC_FW_CATEGORY_WOWLAN
+	wow_fw_type = RTW_FW_WOWLAN;
+#endif
+#ifdef MAC_FW_CATEGORY_WOWLANCE
+	wow_fw_type = RTW_FW_WOWLAN_CE;
+#endif
 
 	hal_status = hal_ops->hal_cfg_fw(phl_com, hal_info, init_info->ic_name,
-	                                 RTW_FW_WOWLAN);
+	                                 wow_fw_type);
 	if (hal_status != RTW_HAL_STATUS_SUCCESS) {
 		PHL_ERR("%s: cfg fw fail(%d)!!\n", __func__, hal_status);
 		goto exit;
@@ -641,17 +689,11 @@ hal_wow_deinit_8852b(struct rtw_phl_com_t *phl_com, struct hal_info_t *hal_info,
 	struct hal_ops_t *hal_ops = hal_get_ops(hal_info);
 	enum rtw_hal_status hal_status = RTW_HAL_STATUS_SUCCESS;
 	bool linked = sta->rlink->mstate == MLME_LINKED ? true : false;
-	enum rtw_fw_type fw_type = RTW_FW_NIC;
+	enum rtw_fw_type wcpu_fw_type = rtw_hal_mac_get_fw_type(phl_com);
 	/* AOAC Report */
 
-	#if defined(MAC_FW_CATEGORY_NIC) || defined(MAC_FW_CATEGORY_NIC_BPLUS)
-	fw_type = RTW_FW_NIC;
-	#else
-	fw_type = RTW_FW_NIC_CE;
-	#endif /*MAC_FW_CATEGORY_NIC || MAC_FW_CATEGORY_NIC_BPLUS*/
-
 	hal_status = hal_ops->hal_cfg_fw(phl_com, hal_info, init_info->ic_name,
-	                                 fw_type);
+	                                 wcpu_fw_type);
 	if (hal_status != RTW_HAL_STATUS_SUCCESS) {
 		PHL_ERR("%s: cfg fw fail(%d)!!\n", __func__, hal_status);
 		goto exit;
@@ -707,6 +749,10 @@ hal_mp_init_8852b(struct rtw_phl_com_t *phl_com,
 	struct hal_ops_t *hal_ops = hal_get_ops(hal_info);
 	enum rtw_hal_status hal_status = RTW_HAL_STATUS_SUCCESS;
 	enum rtw_fw_type fw_type = RTW_FW_MAX;
+	struct rtw_wifi_role_t *role = &phl_com->wifi_roles[0];
+	struct rtw_wifi_role_link_t *rlink = rtw_phl_get_rlink(role, RTW_RLINK_PRIMARY);
+	struct rtw_phl_stainfo_t *sta = rtw_phl_get_stainfo_self(
+	                                              phl_com->phl_priv, rlink);
 
 #ifdef PHL_FEATURE_NIC
 	#if defined(MAC_FW_CATEGORY_NIC) || defined(MAC_FW_CATEGORY_NIC_BPLUS)
@@ -729,6 +775,12 @@ hal_mp_init_8852b(struct rtw_phl_com_t *phl_com,
 	hal_status = rtw_hal_redownload_fw(phl_com, hal_info);
 	if (hal_status != RTW_HAL_STATUS_SUCCESS) {
 		PHL_ERR("%s: redownload fw fail(%d)!!\n", __func__, hal_status);
+		goto exit;
+	}
+
+	hal_status = rtw_hal_restore_sta_entry(phl_com, hal_info, sta, false);
+	if (hal_status != RTW_HAL_STATUS_SUCCESS) {
+		PHL_ERR("%s: update sta entry fail(%d)!!\n", __func__, hal_status);
 		goto exit;
 	}
 exit:
@@ -743,6 +795,10 @@ hal_mp_deinit_8852b(struct rtw_phl_com_t *phl_com,
 	struct hal_ops_t *hal_ops = hal_get_ops(hal_info);
 	enum rtw_hal_status hal_status = RTW_HAL_STATUS_SUCCESS;
 	enum rtw_fw_type fw_type = RTW_FW_MAX;
+	struct rtw_wifi_role_t *role = &phl_com->wifi_roles[0];
+	struct rtw_wifi_role_link_t *rlink = rtw_phl_get_rlink(role, RTW_RLINK_PRIMARY);
+	struct rtw_phl_stainfo_t *sta = rtw_phl_get_stainfo_self(
+	                                              phl_com->phl_priv, rlink);
 
 #ifdef PHL_FEATURE_NIC
 	#if defined(MAC_FW_CATEGORY_NIC) || defined(MAC_FW_CATEGORY_NIC_BPLUS)
@@ -765,6 +821,12 @@ hal_mp_deinit_8852b(struct rtw_phl_com_t *phl_com,
 	hal_status = rtw_hal_redownload_fw(phl_com, hal_info);
 	if (hal_status != RTW_HAL_STATUS_SUCCESS) {
 		PHL_ERR("%s: redownload fw fail(%d)!!\n", __func__, hal_status);
+		goto exit;
+	}
+
+	hal_status = rtw_hal_restore_sta_entry(phl_com, hal_info, sta, false);
+	if (hal_status != RTW_HAL_STATUS_SUCCESS) {
+		PHL_ERR("%s: update sta entry fail(%d)!!\n", __func__, hal_status);
 		goto exit;
 	}
 

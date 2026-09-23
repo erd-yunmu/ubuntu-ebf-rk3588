@@ -33,7 +33,9 @@ rtw_hal_ser_get_error_status(void *hal, u32 *err)
 
 	rtw_hal_mac_ser_get_error_status(hal_info, err);
 
-	if ((*err == MAC_AX_ERR_L1_ERR_DMAC) || (*err == MAC_AX_ERR_L0_PROMOTE_TO_L1)) {
+	if (*err == MAC_AX_ERR_L1_PREERR_DMAC) {
+		notify = RTW_PHL_SER_PREPARE_DMAC;
+	} else if ((*err == MAC_AX_ERR_L1_ERR_DMAC) || (*err == MAC_AX_ERR_L0_PROMOTE_TO_L1)) {
 		notify = RTW_PHL_SER_PAUSE_TRX;
 	} else if (*err == MAC_AX_ERR_L1_RESET_DISABLE_DMAC_DONE) {
 		notify = RTW_PHL_SER_DO_RECOVERY;
@@ -113,9 +115,6 @@ void rtw_hal_ser_int_cfg(void *hal, struct rtw_phl_com_t *phl_com,
 						 enum RTW_PHL_SER_CFG_STEP step)
 {
 	struct hal_info_t *hal_info = (struct hal_info_t *)hal;
-#ifdef CONFIG_SYNC_INTERRUPT
-	struct rtw_phl_evt_ops *evt_ops = &phl_com->evt_ops;
-#endif /* CONFIG_SYNC_INTERRUPT */
 	struct hal_ops_t *hal_ops = hal_get_ops(hal_info);
 	struct hal_spec_t *hal_spec = phl_get_ic_spec(phl_com);
 
@@ -129,13 +128,7 @@ void rtw_hal_ser_int_cfg(void *hal, struct rtw_phl_com_t *phl_com,
 		 * 1. disable imr
 		 * 2. set imr used during ser
 		 */
-		#ifdef CONFIG_SYNC_INTERRUPT
-		evt_ops->set_interrupt_caps(phlcom_to_drvpriv(phl_com), false);
-		#else
-		if (hal_ops->disable_interrupt)
-			hal_ops->disable_interrupt(hal);
-		#endif /* CONFIG_SYNC_INTERRUPT */
-
+		rtw_phl_disable_interrupt_sync(phl_com);
 		if (hal_ops->init_int_default_value)
 			hal_ops->init_int_default_value(hal, INT_SET_OPT_SER_START);
 		break;
@@ -143,12 +136,7 @@ void rtw_hal_ser_int_cfg(void *hal, struct rtw_phl_com_t *phl_com,
 		/**
 		 * 1. enable interrupt
 		 */
-		#ifdef CONFIG_SYNC_INTERRUPT
-		evt_ops->set_interrupt_caps(phlcom_to_drvpriv(phl_com), true);
-		#else
-		if (hal_ops->enable_interrupt)
-			hal_ops->enable_interrupt(hal);
-		#endif /* CONFIG_SYNC_INTERRUPT */
+		rtw_phl_enable_interrupt_sync(phl_com);
 		break;
 	case RTW_PHL_SER_M5_CFG:
 		/**
@@ -156,22 +144,11 @@ void rtw_hal_ser_int_cfg(void *hal, struct rtw_phl_com_t *phl_com,
 		 * 2. set imr used after ser
 		 * 3. enable interrupt
 		 */
-		#ifdef CONFIG_SYNC_INTERRUPT
-		evt_ops->set_interrupt_caps(phlcom_to_drvpriv(phl_com), false);
-		#else
-		if (hal_ops->disable_interrupt)
-			hal_ops->disable_interrupt(hal);
-		#endif /* CONFIG_SYNC_INTERRUPT */
-
+		rtw_phl_disable_interrupt_sync(phl_com);
 		if (hal_ops->init_int_default_value)
 			hal_ops->init_int_default_value(hal, INT_SET_OPT_SER_DONE);
 
-		#ifdef CONFIG_SYNC_INTERRUPT
-		evt_ops->set_interrupt_caps(phlcom_to_drvpriv(phl_com), true);
-		#else
-		if (hal_ops->enable_interrupt)
-			hal_ops->enable_interrupt(hal);
-		#endif /* CONFIG_SYNC_INTERRUPT */
+		rtw_phl_enable_interrupt_sync(phl_com);
 		break;
 	default:
 		PHL_ERR("%s(): unknown step!\n", __func__);

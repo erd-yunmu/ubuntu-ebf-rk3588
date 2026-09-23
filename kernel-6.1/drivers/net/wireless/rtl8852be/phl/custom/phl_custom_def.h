@@ -16,7 +16,7 @@
 #define _PHL_CUSTOM_DEF_H_
 
 #define PRIVATE_EVT_START (BIT15)
-#define MAX_DATA_SIZE	(512)
+#define MAX_DATA_SIZE	(1024)
 
 enum rtw_customer_feature_id {
 	CUS_ID_NONE = 0,
@@ -25,6 +25,7 @@ enum rtw_customer_feature_id {
 	CUS_ID_VR = 3,
 
 	CUS_ID_ANT_TOOL = 4,
+	CUS_ID_HOSTAPD = 5,
 	CUS_ID_MAX
 };
 
@@ -87,7 +88,7 @@ enum rtw_msg_custom_evt_id {
 	MSG_EVT_LPS_DIG_NOTIFY = PRIVATE_EVT_START + 50,
 	MSG_EVT_CSA_BCN_FILL_TIM = PRIVATE_EVT_START + 51,
 	MSG_EVT_GET_DRIVER_VERSION = PRIVATE_EVT_START + 52,
-	MSG_EVT_GET_CH_UT_STATS = PRIVATE_EVT_START + 53,
+	MSG_EVT_GET_PERF_METRICS = PRIVATE_EVT_START + 53,
 	MSG_EVT_SET_AP_HID_SSID = PRIVATE_EVT_START + 54,
 	MSG_EVT_GET_AP_HID_SSID = PRIVATE_EVT_START + 55,
 	MSG_EVT_CFG_START_AP_CAP = PRIVATE_EVT_START + 56,
@@ -98,13 +99,28 @@ enum rtw_msg_custom_evt_id {
 	MSD_EVT_SET_ECSA_START = PRIVATE_EVT_START + 61,
 	MSG_EVT_ANT_TOOL_OP_HDLR = PRIVATE_EVT_START + 62,
 	MSG_EVT_SET_SPATIAL_REUSE = PRIVATE_EVT_START + 63,
-	MSG_EVT_GET_SPATIAL_REUSE = PRIVATE_EVT_START + 64
+	MSG_EVT_GET_SPATIAL_REUSE = PRIVATE_EVT_START + 64,
+	MSG_EVT_RF_SCRAMBLE = PRIVATE_EVT_START + 65,
+	MSG_EVT_SET_ANT_SWITCH = PRIVATE_EVT_START + 66,
+	MSG_EVT_SET_CSI = PRIVATE_EVT_START + 67,
+	MSG_EVT_GET_CSI = PRIVATE_EVT_START + 68,
+	MSG_EVT_SET_BSS_COLOR = PRIVATE_EVT_START + 69,
+	MSG_EVT_GET_BSS_COLOR = PRIVATE_EVT_START + 70,
+	MSG_EVT_PROC_USR_TX_RPT = PRIVATE_EVT_START + 71,
 };
 
 enum custom_type {
 	CUSTOM_CORE = 0,
 	CUSTOM_PHL = 1,
 	CUSTOM_MAX
+};
+
+enum rtw_custom_flags {
+	CUSTOM_FLAG_NONE = 0,
+	CUSTOM_FLAG_SET = BIT0,
+	CUSTOM_FLAG_GET = BIT1,
+	CUSTOM_FLAG_UNSOLICITED = BIT2,
+	CUSTOM_FLAG_FWD = BIT3
 };
 
 /*
@@ -115,8 +131,17 @@ struct rtw_custom_decrpt {
 	u32 evt_id;
 	u32 customer_id;
 	enum custom_type type;
+	u32 flags;
 	u32 len;
 	u8 data[MAX_DATA_SIZE];
+};
+
+struct rtw_custom_rpt {
+	u32 status;
+	union {
+		u32 value;
+		u8 addr[MAC_ALEN];
+	} u;
 };
 #pragma pack()
 
@@ -128,9 +153,78 @@ enum rtw_phl_vr_test_mode
 	VR_TEST_MODE_MAX = BIT16
 };
 
+#ifdef CONFIG_PHL_CUSTOM_FRAME_STAT
+/*
+ * enum _usr_tx_stats_rpt_mode specify different mode for statistics rpt.
+ * @VR_STATS_RPT_DIS: disable
+ * @VR_STATS_RPT_PERIOD: Periodical statistics (use rpt_period_us to specify
+ *  the period)
+ * @VR_STATS_RPT_LAST_PKT: Frame interval statistics (use rpt_start to specify
+ *  first and last pkt)
+ */
+enum _usr_tx_stats_rpt_mode {
+	USR_TX_STATS_RPT_DIS = 0,
+	USR_TX_STATS_RPT_PERIOD,
+	USR_TX_STATS_RPT_LAST_PKT,
+	USR_TX_STATS_RPT_MAX,
+};
+
+/*
+ * struct rtw_phl_ch_stat_cnt is defined for querying chnl busy cnt info.
+ * see MAC_AX_HW_GET_CH_STAT_CNT for more info.
+ */
+struct rtw_phl_ch_stat_cnt {
+	u8 band;
+	u32 busy_cnt;
+	u32 idle_cnt;
+};
+
+struct rtw_phl_vr_frame_stats_rpt {
+	u32 rpt_mode;
+	u32 latency_first_pkt;
+	u32 latency_last_pkt;
+	u32 latency_first_2_last;
+	u32 tsf;
+	u32 rssi_dbm;
+	u32 snr_dbm;
+	u32 tx_rate_mode;
+	u32 tx_nss;
+	u32 tx_mcs;
+	u32 tx_per;
+	u32 tx_ok_cnt[4];
+	u32 tx_fail_cnt[4];
+	u32 tx_rty_fail_cnt[4];
+	u32 tx_ampdu_cnt_wo_last_pkt;
+	u32 tx_ampdu_len_wo_last_pkt;
+	u32 tx_rts_cnt;
+	u32 tx_rts_retry_cnt;
+	u32 rx_err_cnt;
+	u32 rx_clear_cycle;
+	u32 total_cycle;
+};
+
+/*
+ * struct rtw_phl_usr_tx_rpt_cfg is defined for statistic rpt configuration.
+ * FW will indicate stats rpt with C2H USR_TX_RPT_INFO.
+ * @mode: enum _usr_tx_stats_rpt_mode
+ * @rpt_start: set to 1 to notify the follwing pkt is the first pkt
+ *             set to 0 to notify the follwing pkt is the last pkt
+ * @macid: macid of the correspinding sta
+ * @rpt_period_us: specify the period in us for PHL_USR_TX_RPT_PERIOD mode only.
+ */
+struct rtw_phl_usr_tx_rpt_cfg {
+	enum _usr_tx_stats_rpt_mode mode;
+	u8 rpt_start;
+	u16 macid;
+	u8 band;
+	u8 port;
+	u32 rpt_period_us;
+};
+
+#endif /*CONFIG_PHL_CUSTOM_FRAME_STAT*/
+
 struct rtw_phl_custom_ampdu_cfg {
 	u32 max_agg_time_32us;
 	u32 max_agg_num;
 };
-
 #endif /*_PHL_CUSTOM_DEF_H_*/

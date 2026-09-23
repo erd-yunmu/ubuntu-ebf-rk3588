@@ -61,6 +61,8 @@ bool rtw_phl_btc_send_cmd(struct rtw_phl_com_t *phl_com,
 void rtw_phl_cmd_scan_send_msg(void *phl, u16 evt_id, u8 band_idx, u8 *buf,
 			       u32 len);
 #ifdef CONFIG_PHL_CHANNEL_INFO
+void phl_chaninfo_pkt_init(void* drv_priv, struct chan_info_t *chan_info_pkt);
+#ifndef CONFIG_PHL_CHANNEL_INFO_DIRECT_INDICATE
 /* Channel info queue operation*/
 u32 rtw_phl_get_chaninfo_idle_number(void *drvpriv, struct rtw_phl_com_t *phl_com);
 u32 rtw_phl_get_chaninfo_busy_number(void *drvpriv, struct rtw_phl_com_t *phl_com);
@@ -75,6 +77,7 @@ void rtw_phl_enqueue_idle_chaninfo(void *drvpriv, struct rtw_phl_com_t *phl_com,
 
 struct chan_info_t * rtw_phl_recycle_busy_chaninfo(void *drvpriv, struct rtw_phl_com_t *phl_com,
 				struct chan_info_t *chan_info_pkt);
+#endif
 #endif /* CONFIG_PHL_CHANNEL_INFO */
 
 enum rtw_phl_status rtw_phl_ser_l2_notify(struct rtw_phl_com_t *phl_com);
@@ -96,6 +99,7 @@ void rtw_phl_init_chdef(struct rtw_phl_com_t *phl_com, struct rtw_chan_def *chde
 void rtw_phl_enable_interrupt_sync(struct rtw_phl_com_t* phl_com);
 void rtw_phl_disable_interrupt_sync(struct rtw_phl_com_t* phl_com);
 
+#ifdef CONFIG_PHL_PKTOFLD
 /* packet offload */
 void rtw_phl_pkt_ofld_del_all_entry_req(struct rtw_phl_com_t *phl_com);
 
@@ -104,6 +108,7 @@ rtw_phl_pkt_ofld_null_request(struct rtw_phl_com_t* phl_com,
 							  struct rtw_phl_stainfo_t *sta, u32 *token);
 
 enum rtw_phl_status rtw_phl_pkt_ofld_reset_entry(struct rtw_phl_com_t* phl_com, u16 macid);
+#endif
 
 #ifdef CONFIG_PHL_FW_DUMP_EFUSE
 void rtw_phl_fw_dump_efuse_precfg(struct rtw_phl_com_t* phl_com);
@@ -120,7 +125,29 @@ bool rtw_phl_is_under_cac(struct rtw_phl_com_t *phl_com, u8 band_idx);
 #ifdef CONFIG_PHL_DIAGNOSE
 bool rtw_phl_send_diag_hub_msg(struct rtw_phl_com_t *phl_com,
 		u16 phl_evt, u8 sub_evt, u8 level, u8 ver, u8 *buf, u32 len);
+bool rtw_phl_query_rf_diag_err_code(void *phl, u32 *err_code);
+bool rtw_phl_query_rf_diag_info_len(u32 *len);
+bool rtw_phl_query_rf_diag_info(void *phl,
+	struct rtw_phl_diag_rf_info *info);
 #endif
 
-#endif /* _PHL_API_DRV_H_ */
+#ifdef CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
+struct phl_h2c_pkt_alloc_cnt *
+rtw_phl_dump_h2c_pool_alloc_stats(void *phl);
+#endif
 
+#ifdef CONFIG_PHL_CUSTOM_FEATURE
+enum rtw_phl_status
+rtw_phl_custom_prepare_set_info_evt(u32 evt_id,
+                                    u32 customer_id,
+                                    struct rtw_custom_decrpt *inbuf,
+                                    struct phl_module_op_info *op_info,
+                                    u32 data_len);
+#endif
+
+enum rtw_phl_status rtw_phl_set_bk_module_info(void *phl, u8 band_idx,
+		enum phl_module_id id,	struct phl_module_op_info* op_info);
+
+void rtw_phl_init_free_para_buf(struct rtw_phl_com_t *phl_com);
+
+#endif /* _PHL_API_DRV_H_ */

@@ -318,8 +318,6 @@ u32 write_usb2phy_para_8852b(struct mac_ax_adapter *adapter, u16 offset, u8 val)
 
 u32 static polling_usb_sie_ready(struct mac_ax_adapter *adapter)
 {
-#define MAC_AX_POLL_SIE_CNT 1000
-#define MAC_AX_POLL_SIE_WAIT_US 50
 	u32 cnt = MAC_AX_POLL_SIE_CNT;
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 
@@ -398,24 +396,6 @@ u32 u2u3_switch_8852b(struct mac_ax_adapter *adapter)
 	return MACSUCCESS;
 }
 
-u32 get_usb_support_ability_8852b(struct mac_ax_adapter *adapter)
-{
-	u32 u2force = 0;
-	u32 u3force = 0;
-
-	u2force = PLTFM_REG_R32(R_AX_USB_HOST_REQUEST_2) &
-		  B_AX_R_FORCE_U3MAC_HS_MODE;
-	u3force = PLTFM_REG_R32(R_AX_PAD_CTRL2) &
-		  B_AX_USB3_USB2_TRANSITION;
-
-	if (u2force == B_AX_R_FORCE_U3MAC_HS_MODE)
-		return FORCEUSB2MODE;
-	else if (u3force == B_AX_USB3_USB2_TRANSITION)
-		return SWITCHMODE;
-	else
-		return FORCEUSB3MODE;
-}
-
 u32 usb_tx_agg_cfg_8852b(struct mac_ax_adapter *adapter,
 			 struct mac_ax_usb_tx_agg_cfg *agg)
 {
@@ -437,8 +417,6 @@ u32 usb_rx_agg_cfg_8852b(struct mac_ax_adapter *adapter,
 	u32 val32;
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 
-	/* size unit was 4k in 8852A|B|51B */
-#define COMPAT_RX_AGG_UNIT 4
 	if (cfg->mode == MAC_AX_RX_AGG_MODE_DMA) {
 		agg_en = ENABLE;
 		agg_mode = ENABLE;
@@ -468,7 +446,6 @@ u32 usb_rx_agg_cfg_8852b(struct mac_ax_adapter *adapter,
 		    SET_WORD(pkt_num, B_AX_RXAGG_PKTNUM_TH) |
 		    SET_WORD(timeout, B_AX_RXAGG_TIMEOUT_TH) |
 		    SET_WORD(size, B_AX_RXAGG_LEN_TH));
-#undef COMPAT_RX_AGG_UNIT
 
 	return MACSUCCESS;
 }
@@ -483,9 +460,13 @@ u32 set_usb_wowlan_8852b(struct mac_ax_adapter *adapter,
 {
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 
-	if (w_c == MAC_AX_WOW_ENTER) {
-		PLTFM_REG_W32(R_AX_USB2_LPM_0, PLTFM_REG_R32(R_AX_USB2_LPM_0) |
-			      B_AX_USB_SUS_WAKEUP_EN);
+	if (w_c == MAC_AX_WOW_ENTER || w_c == MAC_AX_WOW_ENTER_OUTBAND_WAKEUP) {
+		if (w_c == MAC_AX_WOW_ENTER)
+			MAC_REG_W32(R_AX_USB2_LPM_0, MAC_REG_R32(R_AX_USB2_LPM_0) |
+				    B_AX_USB_SUS_WAKEUP_EN);
+		else
+			MAC_REG_W32(R_AX_USB2_LPM_0, MAC_REG_R32(R_AX_USB2_LPM_0) &
+				    ~B_AX_USB_SUS_WAKEUP_EN);
 		MAC_REG_W32(R_AX_RSV_CTRL, MAC_REG_R32(R_AX_RSV_CTRL) |
 			    B_AX_WLOCK_1C_BIT6);
 		MAC_REG_W32(R_AX_RSV_CTRL, MAC_REG_R32(R_AX_RSV_CTRL) |
@@ -509,7 +490,10 @@ u32 set_usb_wowlan_8852b(struct mac_ax_adapter *adapter,
 
 u32 usb_get_txagg_num_8852b(struct mac_ax_adapter *adapter, u8 band)
 {
-	u32 quotanum = band ? adapter->dle_info.c1_tx_max : adapter->dle_info.c0_tx_max;
+	u32 quotanum;
+
+	(void)band;
+	quotanum = adapter->dle_info.c1_tx_max + adapter->dle_info.c0_tx_max;
 
 	return quotanum * PLE_PAGE_SIZE / (PINGPONG * (SINGLE_MSDU_SIZE + SEC_FCS_SIZE));
 }
@@ -616,5 +600,81 @@ u32 usb_ep_cfg_8852b(struct mac_ax_adapter *adapter, struct mac_ax_usb_ep *cfg)
 
 	return MACSUCCESS;
 }
+
+enum usb_support_ability get_usb_support_ability_8852b(struct mac_ax_adapter *adapter)
+{
+	struct mac_ax_ops *mac_ops = adapter_to_mac_ops(adapter);
+	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
+	u32 u2force = 0;
+	u32 switch_mode = 0;
+	u8 shift_byte = 0;
+	u16 val16 = 0;
+	u32 ret;
+
+	u2force = MAC_REG_R32(R_AX_USB_HOST_REQUEST_2) &
+		  B_AX_R_FORCE_U3MAC_HS_MODE;
+
+	if (u2force)
+		return FORCEUSB2MODE;
+
+	shift_byte = (B_AX_USB3_USB2_TRANSITION >> 16) ? 2 : 0;
+	ret = mac_ops->read_log_efuse(adapter, R_AX_PAD_CTRL2 + shift_byte,
+				      sizeof(val16), (u8 *)&val16);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("[ERR] %s: read efuse fail %d\n", __func__, ret);
+		return INVALID_USB_ABILITY;
+	}
+
+	/*
+	 * If Efuse is burned, this AON reg means the speed
+	 * If Efuse is not burned, this AON reg means ability
+	 */
+	if (val16 == 0xFFFF) {
+		PLTFM_MSG_TRACE("[TRACE] %s: %x not burned, use reg val\n", __func__,
+				R_AX_PAD_CTRL2 + shift_byte);
+		val16 = MAC_REG_R16(R_AX_PAD_CTRL2 + shift_byte);
+	}
+
+	switch_mode = val16 & (B_AX_USB3_USB2_TRANSITION >> (shift_byte * 8));
+	if (switch_mode)
+		return SWITCHMODE;
+	else
+		return FORCEUSB3MODE;
+}
+
+u32 get_u3_perf_mode_8852b(struct mac_ax_adapter *adapter, enum mac_u3_perf_mode *perf_mode)
+{
+	struct mac_ax_ops *mac_ops = adapter_to_mac_ops(adapter);
+	u16 val16 = 0;
+	u8 rate = 0;
+	u32 ret;
+
+	ret = mac_ops->read_log_efuse(adapter, R_AX_EFUSE_LOG_PAGE1_REG06_V1,
+				      sizeof(val16), (u8 *)&val16);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("[ERR] %s: read efuse (%x) fail. ret(%d)\n", __func__,
+				R_AX_EFUSE_LOG_PAGE1_REG06_V1, ret);
+		return ret;
+	}
+	if (val16 == 0xFFFF) {
+		PLTFM_MSG_TRACE("[TRACE] %s: %x not burned\n", __func__,
+				R_AX_EFUSE_LOG_PAGE1_REG06_V1);
+		*perf_mode = U3_PERF_HIGH;
+		return MACSUCCESS;
+	}
+
+	rate = GET_FIELD(val16, B_AX_REG_CDR_RATE_SEL_V1);
+	if (rate == DCDR_RATE_HIGH) {
+		*perf_mode = U3_PERF_HIGH;
+	} else if (rate == DCDR_RATE_MID) {
+		*perf_mode =  U3_PERF_MIDDLE;
+	} else {
+		PLTFM_MSG_ERR("[ERR] %s: invalid rate(%d)\n", __func__, rate);
+		return MACNOITEM;
+	}
+
+	return MACSUCCESS;
+}
+
 #endif /* #if MAC_AX_USB_SUPPORT */
 #endif /* #if MAC_AX_8852B_SUPPORT */

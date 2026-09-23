@@ -26,6 +26,20 @@ enum rtw_pwr_limit_type {
 	RTW_PWBYRATE_AND_PWLMT = 2
 };
 
+#if defined(CONFIG_RTW_LPS) || defined(CONFIG_RTW_LPS_WOW)
+enum rtw_ps_proto_type {
+	RTW_PS_PROTO_LISTEN_BEACON_MODE = 0,
+	RTW_PS_PROTO_MAX
+};
+void rtw_update_lps_proto_cap_setting(enum rtw_ps_proto_type proto, u8 mode,
+				      u8 para, struct rtw_ps_cap_t *ps_cap,
+				      bool is_wowlan);
+void rtw_update_lps_proto_registry_setting(enum rtw_ps_proto_type proto,
+					   u8 mode, u8 para,
+					   struct registry_priv *registry,
+					   bool is_wowlan);
+#endif /* defined(CONFIG_RTW_LPS) || defined(CONFIG_RTW_LPS_WOW) */
+
 u8 rtw_load_dvobj_registry(struct dvobj_priv *dvobj);
 uint rtw_load_registry(_adapter *adapter);
 
@@ -39,6 +53,5 @@ void rtw_core_update_default_setting (struct dvobj_priv *dvobj);
 #define RTW_ADAPTIVITY_MODE_CARRIER_SENSE 1
 
 void rtw_cfg_adaptivity_config_msg(void *sel, _adapter *adapter);
-bool rtw_cfg_adaptivity_needed(_adapter *adapter);
 
 #endif /*_RTW_CFG_H_*/

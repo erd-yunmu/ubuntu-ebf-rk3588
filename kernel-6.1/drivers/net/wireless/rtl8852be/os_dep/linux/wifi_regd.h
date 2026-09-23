@@ -32,6 +32,7 @@ void rtw_regd_change_complete_sync(struct wiphy *wiphy, struct get_chplan_resp *
 int rtw_regd_change_complete_async(struct wiphy *wiphy, struct get_chplan_resp *chplan);
 #ifdef CONFIG_REGD_SRC_FROM_OS
 void rtw_chset_apply_from_os(struct rtw_chset *chset, u8 d_flags);
+enum country_ie_slave_en_mode rtw_os_get_cis_en_mode(_adapter *adapter);
 s16 rtw_os_get_total_txpwr_regd_lmt_mbm(_adapter *adapter, enum band_type band, u8 cch, enum channel_width bw);
 #endif
 
@@ -50,6 +51,7 @@ void rtw_cfg80211_nop_finished_event(struct rf_ctl_t *rfctl, u8 band_idx
 	, u8 band, u8 cch, enum channel_width bw);
 void rtw_cfg80211_nop_started_event(struct rf_ctl_t *rfctl, u8 band_idx
 	, u8 band, u8 cch, enum channel_width bw, bool called_on_cmd_thd);
+bool rtw_is_du_ndev(struct wiphy *wiphy, struct net_device *ndev);
 void rtw_regd_free_du_wdev(struct wiphy *wiphy);
 #else
 #define rtw_cfg80211_radar_detected_event(rfctl, band_idx, cch, bw) do {} while (0)
@@ -59,6 +61,7 @@ void rtw_regd_free_du_wdev(struct wiphy *wiphy);
 #define rtw_cfg80211_cac_force_finished(rfctl, band_idx, ifbmp, cch, bw) do {} while (0)
 #define rtw_cfg80211_nop_finished_event(rfctl, band_idx, band, cch, bw) do {} while (0)
 #define rtw_cfg80211_nop_started_event(rfctl, band_idx, band, cch, bw, called_on_cmd_thd) do {} while (0)
+#define rtw_is_du_ndev(wiphy, ndev) false
 #define rtw_regd_free_du_wdev(wiphy) do {} while (0)
 #endif /* CONFIG_RTW_CFG80211_CAC_EVENT */
 

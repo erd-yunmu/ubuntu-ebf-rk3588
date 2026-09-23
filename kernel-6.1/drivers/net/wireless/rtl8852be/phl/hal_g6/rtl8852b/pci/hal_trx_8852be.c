@@ -584,6 +584,7 @@ void _hal_fill_wp_addr_info_8852be(struct rtw_hal_com_t *hal_com,
 	SET_ADDR_INFO_MSDU_LS(addr_info, msdu_ls);
 	SET_ADDR_INFO_ADDR_LOW(addr_info, pkt->phy_addr_l);
 	SET_ADDR_INFO_ADDR_HIGH(addr_info, pkt->phy_addr_h);
+	SET_ADDR_INFO_LS(addr_info, msdu_ls);
 }
 
 u8 _hal_get_tid_indic_8852be(u8 tid)
@@ -1154,7 +1155,7 @@ static u8 hal_handle_rxbd_info_8852be(struct hal_info_t *hal,
 {
 	u8 res = false;
 	u16 pld_size = 0;
-	u8 fs = 0, ls = 0;
+	u8 ls = 0;
 	u8 pkt_rdy = false;
 
 	do {
@@ -1163,22 +1164,11 @@ static u8 hal_handle_rxbd_info_8852be(struct hal_info_t *hal,
 		if (NULL == size)
 			break;
 
-	fs = (u8)GET_RX_BD_INFO_FS(rxbd_info);
 	ls = (u8)GET_RX_BD_INFO_LS(rxbd_info);
 	pld_size = (u16)GET_RX_BD_INFO_HW_W_SIZE(rxbd_info);
 
-	if (fs == 1) {
-		if (ls == 1)
-			pkt_rdy = true;
-		else
-			pkt_rdy = false;
-
-	} else if (fs == 0) {
-		if (ls == 1)
-			pkt_rdy = false;
-		else
-			pkt_rdy = false;
-	}
+	if (ls == 1)
+		pkt_rdy = true;
 
 	if (pkt_rdy) {
 		*size = pld_size;
@@ -1208,11 +1198,20 @@ hal_update_rxbd_8852be(struct hal_info_t *hal, struct rx_base_desc *rxbd,
 	u8 *target_rxbd = NULL;
 	u16 rxbd_num = hal_get_rxbd_num_8852be(hal_com, ch_idx);
 
+	if (rxbd_num == 0) {
+		PHL_ERR("%s: rxbd_num is zero\n", __func__);
+		return RTW_HAL_STATUS_FAILURE;
+	}
+
 	do {
-		if (NULL == rxbd)
+		if (NULL == rxbd) {
+			hstatus = RTW_HAL_STATUS_FAILURE;
 			break;
-		if (NULL == rx_buf)
+		}
+		if (NULL == rx_buf) {
+			hstatus = RTW_HAL_STATUS_FAILURE;
 			break;
+		}
 
 		ring_head = rxbd->vir_addr;
 		target_rxbd = ring_head + (rxbd->host_idx *

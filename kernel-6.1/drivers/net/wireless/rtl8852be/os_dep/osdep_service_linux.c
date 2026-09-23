@@ -831,7 +831,7 @@ struct net_device *rtw_alloc_etherdev_with_old_priv(int sizeof_priv, void *old_p
 	struct rtw_netdev_priv_indicator *pnpi;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35))
-	pnetdev = alloc_etherdev_mq(sizeof(struct rtw_netdev_priv_indicator), 4);
+	pnetdev = alloc_etherdev_mq(sizeof(struct rtw_netdev_priv_indicator), 5);
 #else
 	pnetdev = alloc_etherdev(sizeof(struct rtw_netdev_priv_indicator));
 #endif
@@ -852,7 +852,7 @@ struct net_device *rtw_alloc_etherdev(int sizeof_priv)
 	struct rtw_netdev_priv_indicator *pnpi;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35))
-	pnetdev = alloc_etherdev_mq(sizeof(struct rtw_netdev_priv_indicator), 4);
+	pnetdev = alloc_etherdev_mq(sizeof(struct rtw_netdev_priv_indicator), 5);
 #else
 	pnetdev = alloc_etherdev(sizeof(struct rtw_netdev_priv_indicator));
 #endif
@@ -900,13 +900,24 @@ RETURN:
 
 u64 rtw_modular64(u64 x, u64 y)
 {
-	return do_div(x, y);
+	u64 r = 0;
+
+	if (0 == y)
+		return 0;
+
+	div64_u64_rem(x, y, &r);
+
+	return r;
 }
 
 u64 rtw_division64(u64 x, u64 y)
 {
-	do_div(x, y);
-	return x;
+	return (0 != y) ? div64_u64(x, y) : 0;
+}
+
+s64 rtw_division64_s64(s64 x, s64 y)
+{
+	return (0 != y) ? div64_s64(x, y) : 0;
 }
 
 inline u32 rtw_random32(void)
@@ -928,5 +939,5 @@ void rtw_wiphy_rfkill_set_hw_state(struct wiphy *wiphy, bool blocked)
 	wiphy_rfkill_set_hw_state(wiphy, blocked);
 }
 
-u16 rtw_warn_on_cnt;
+ATOMIC_T rtw_warn_on_cnt;
 

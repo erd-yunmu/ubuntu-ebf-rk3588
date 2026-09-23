@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2019 - 2023 Realtek Corporation.
+ * Copyright(c) 2019 - 2024 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -33,6 +33,14 @@
 		#define CONFIG_USB_TX_PADDING_CHK
 	#endif
 	#define CONFIG_LOAD_PHY_PARA_FROM_FILE
+
+	#ifndef CONFIG_POWER_SAVE
+		#define CONFIG_POWER_SAVE
+	#endif
+
+	#ifndef CONFIG_PHL_TEST_SUITE
+		#define CONFIG_PHL_TEST_SUITE
+	#endif
 
 	#define CONFIG_WOW
 	#define CONFIG_WPA3_SUITEB_SUPPORT
@@ -103,10 +111,16 @@
 	#define CONFIG_PHL_FW_DUMP_EFUSE
 	#define CONFIG_PHL_CHANNEL_INFO
 	#ifdef CONFIG_PHL_CHANNEL_INFO
+		#define CONFIG_PHL_CSI_FW_TX_OFLD
 		#define CONFIG_PHL_WKARD_CHANNEL_INFO_ACK
+		#define CONFIG_PHL_CHANNEL_INFO_DBG
 	#endif
 	#define CONFIG_PHL_NAN
+	#define CONFIG_PHL_MDNS_OFFLOAD
+	#define CONFIG_PHL_APF
 	#define CONFIG_PHL_DIAGNOSE
+	#define DBG_MONITOR_TIME
+	#define CONFIG_PHL_BEAMFORM
 #endif /* PHL_FEATURE_NONE */
 
 #ifdef PHL_PLATFORM_WINDOWS
@@ -118,12 +132,22 @@
 	#ifndef RTW_WD_PAGE_USE_SHMEM_POOL
 		#define RTW_WD_PAGE_USE_SHMEM_POOL
 	#endif
+	#ifndef RTW_TEST_TX_PKT_USE_SHMEM_POOL
+		#define RTW_TEST_TX_PKT_USE_SHMEM_POOL
+	#endif
 
 	#ifdef CONFIG_POWER_SAVE
 	#define CONFIG_HW_RADIO_ONOFF_DETECT
 	#endif
 	#define DBG_DUMP_CMAC_CFG_INFO
 	#define CONFIG_BTCOEX
+	#define DBG_MONITOR_TIME
+
+	#define CONFIG_POWER_SAVE
+	#define CONFIG_PHL_CUSTOM_FEATURE
+	#define CONFIG_PHL_CUSTOM_FEATURE_VR
+	#define CONFIG_PHL_CUSTOM_FEATURE_FB
+	#define CONFIG_PHL_CUSTOM_FEATURE_ANTENNA
 #endif
 
 #ifdef PHL_PLATFORM_LINUX
@@ -151,7 +175,11 @@
 	*/
 	#define CONFIG_BTCOEX
 	#define DEBUG_PHL_RX
+
+#ifndef CONFIG_BEAMFORMING
+#define CONFIG_RTW_BEAMFORM_DISABLE
 #endif
+#endif /* PHL_PLATFORM_LINUX */
 
 #ifdef PHL_PLATFORM_UEFI
 	#ifndef CONFIG_CMD_DISP
@@ -174,9 +202,11 @@
 #define CONFIG_SYNC_INTERRUPT
 #endif
 
-/* #define CONFIG_PHL_IO_OFLD */
+#define CONFIG_PHL_PKTOFLD
+#define CONFIG_PHL_IO_OFLD
 #define CONFIG_PHL_SCANOFLD
 #define CONFIG_PHL_CHSWOFLD
+#define CONFIG_PHL_BCN_ERLY_RPT
 
 #ifdef CONFIG_WOW
 #define CONFIG_WOWLAN
@@ -184,9 +214,15 @@
 /* #define RTW_WKARD_WOW_SKIP_WOW_CAM_CONFIG */
 #define RTW_WKARD_WOW_L2_PWR
 #define DBG_RST_BDRAM_TIME
+
+#ifndef CONFIG_PHL_PKTOFLD
+#define CONFIG_PHL_PKTOFLD
+#endif
+
 #ifndef CONFIG_PHL_SCANOFLD
 #define CONFIG_PHL_SCANOFLD
 #endif
+
 #endif
 
 #define DBG_PHY_ON_TIME
@@ -240,7 +276,11 @@
 
 
 #define DBG_PHL_STAINFO
+#ifdef STA_NUM_SW_LIMIT
+#define PHL_MAX_STA_NUM STA_NUM_SW_LIMIT
+#else
 #define PHL_MAX_STA_NUM 128
+#endif
 #define PHL_MAX_MLD_NUM (PHL_MAX_STA_NUM)
 
 /**** CONFIG_CMD_DISP ***/
@@ -343,6 +383,20 @@
 #define CONFIG_PHL_NAN
 #endif
 
+#ifdef CONFIG_MDNS_OFFLOAD
+#define CONFIG_PHL_MDNS_OFFLOAD
+#endif
+
+#ifdef CONFIG_APF
+#define CONFIG_PHL_APF
+#ifdef CONFIG_APF_DBG
+#define CONFIG_PHL_APF_DBG
+#endif
+#ifdef CONFIG_APF_DBG_DUMP
+#define CONFIG_PHL_APF_DBG_DUMP
+#endif
+#endif /* CONFIG_APF */
+
 #ifdef CONFIG_RA_TXSTS_DBG
 #define CONFIG_PHL_RA_TXSTS_DBG
 #endif
@@ -436,10 +490,14 @@
 #ifdef CONFIG_RTW_CSI_CHANNEL_INFO
 #define CONFIG_PHL_CHANNEL_INFO /*WiFi Sensing*/
 #ifdef CONFIG_PHL_CHANNEL_INFO
+	#define CONFIG_PHL_CSI_FW_TX_OFLD
+	#ifdef CONFIG_RTW_CSI_CHANNEL_INFO_DIRECT_INDICATE
+	#define CONFIG_PHL_CHANNEL_INFO_DIRECT_INDICATE
+	#endif
 	#define CONFIG_PHL_WKARD_CHANNEL_INFO_ACK
-	#define CONFIG_PHL_WKARD_CHANNEL_INFO_SAP
 #endif
 #define CONFIG_PHL_CHANNEL_INFO_DBG
+#define CONFIG_PHL_CHANNEL_INFO_VR
 #endif
 
 #ifdef CONFIG_FW_DUMP_EFUSE
@@ -456,6 +514,12 @@
 #ifdef CONFIG_NARROWBAND_SUPPORTING
 #define CONFIG_PHL_NARROW_BW
 #endif /*CONFIG_NARROWBAND_SUPPORTING*/
+
+#ifndef CONFIG_RTW_BEAMFORM_DISABLE
+#define CONFIG_PHL_BEAMFORM
+#endif
+
+#define CONFIG_PHL_H2C_PKT_POOL_STATS_CHECK
 
 /**** FPGA mode ****/
 /* #define FPGA_TEST */
@@ -479,6 +543,11 @@
 #define RTW_WKARD_MP_MODE_CHANGE
 #define RTW_WKARD_WIN_TRX_BALANCE
 #define RTW_WKARD_DYNAMIC_LTR
+#define RTW_WKARD_TXPAUSE_BF_ISSUE_NULL
+#ifdef CONFIG_PCI_HCI
+#define RTW_WKARD_DYNAMIC_PCIE_GEN
+#endif
+
 #endif
 
 #ifdef PHL_PLATFORM_AP
@@ -554,6 +623,14 @@
 #ifdef PHL_PLATFORM_WINDOWS
 #define CONFIG_PHL_PATH_DIV
 #endif
+
+#ifdef PHL_PLATFORM_WINDOWS
+#if (TAS_SUPPORT == 1)
+/* temp disabled, wait for submodule */
+/* #define CONFIG_TAS_SUPPORT */
+#endif
+#endif
+
 /*
  * Workaround for phl_mr_offch_hdl sleep after issue null data,
  * - This workaround will be removed once tx report is ready
@@ -604,4 +681,13 @@
 /* DCM might have some IOT issue, please see PCIE-9556 */
 #define RTW_WKARD_DISABLE_DCM
 
+#ifdef CONFIG_RFK_FCS_SUPPPORT
+#define CONFIG_PHL_RFK_FCS_SUPPPORT
+#endif
+
+#ifdef CONFIG_PHL_CUSTOM_FEATURE
+	#ifdef CONFIG_FRAME_STAT
+	#define CONFIG_PHL_CUSTOM_FRAME_STAT
+	#endif
+#endif
 #endif /*_PHL_CONFIG_H_*/

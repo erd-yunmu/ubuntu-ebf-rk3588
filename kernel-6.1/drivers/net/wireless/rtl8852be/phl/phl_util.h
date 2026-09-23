@@ -95,7 +95,7 @@ static inline bool _chk_bitmap_bit(u8 *bitmap, u8 max_map_len, u8 _id)
 
 static inline void _and_bitmaps( u8* ref_bitmap, u8* _bitmap, u32 len)
 {
-	u8 k = 0;
+	u32 k = 0;
 
 	for(k = 0; k < len; k++)
 		_bitmap[k] &= ref_bitmap[k];
@@ -145,12 +145,7 @@ u8 pq_insert(void *d, struct phl_queue *q, enum lock_type type, void *priv, _os_
 		  u8 (*pq_predicate)(void *d, void *priv,_os_list *input, _os_list *obj));
 u32 phl_get_passing_time_us(u32 start);
 u32 phl_get_passing_time_ms(u32 start);
-
-#ifdef DBG_MONITOR_TIME
-void phl_fun_monitor_start(u32 *start_t, bool show_caller, const char *caller);
-
-void phl_fun_monitor_end(u32 *start_t, const char *caller);
-#endif /* DBG_MONITOR_TIME */
+u32 phl_get_diff_time_us(u32 start, u32 end);
 
 enum rtw_ac phl_tid_to_ac(u8 tid);
 #endif /*_PHL_UTIL_H_*/

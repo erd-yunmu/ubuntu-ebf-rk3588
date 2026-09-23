@@ -35,6 +35,25 @@
 	 0, 0, 0, 0, \
 	 0, 0, 0, 0}
 
+/* LED mode related */
+#define LED_MODE_SW_CTRL 0
+#define LED_MODE_AON 1
+#define LED_MODE_TRX_ON 2
+#define LED_MODE_TRX_OFF 3
+#define LED_MODE_TX_ON 4
+#define LED_MODE_TX_OFF 5
+#define LED_MODE_RX_ON 6
+#define LED_MODE_RX_OFF 7
+/* WL DIS related */
+#define MAC_AX_HCI_SEL_SDIO_UART 0
+#define MAC_AX_HCI_SEL_USB_MULT 1
+#define MAC_AX_HCI_SEL_PCIE_UART 2
+#define MAC_AX_HCI_SEL_PCIE_USB 3
+#define MAC_AX_HCI_SEL_SDIO_MULT 4
+#define MAC_AX_HCI_SEL_RSVD 5
+#define MAC_AX_HCI_SEL_PCIE_GEN1_UART 6
+#define MAC_AX_HCI_SEL_PCIE_GEN1_USB 7
+
 /**
  * @addtogroup Common
  * @{
@@ -337,4 +356,8 @@ u32 mac_get_uart_fw_dbg_gpio(struct mac_ax_adapter *adapter, u8 *uart_tx_gpio, u
  * @}
  */
 
+u32 mac_bcn_cnt_gpio(struct mac_ax_adapter *adapter,
+		     struct rtw_hal_mac_bcn_cnt_gpio_info *bcn_cnt_gpio);
+u32 mac_bcn_sync_rpt(struct mac_ax_adapter *adapter,
+		     struct rtw_hal_mac_bcn_sync_rpt *ret_rpt, void *timestamp);
 #endif

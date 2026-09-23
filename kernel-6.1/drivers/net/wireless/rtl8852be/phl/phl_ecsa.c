@@ -83,13 +83,10 @@ _phl_ecsa_tx_resume(
 	if (hw_pause) {
 		/* Enable hw tx all  */
 		if (rtw_hal_dfs_pause_tx(phl_info->hal, rlink->hw_band, false, PAUSE_RSON_DFS) ==
-		    RTW_HAL_STATUS_SUCCESS) {
-			status = RTW_PHL_STATUS_SUCCESS;
+		    RTW_HAL_STATUS_SUCCESS)
 			PHL_TRACE(COMP_PHL_ECSA, _PHL_INFO_, "[ECSA] hw tx unpause OK\n");
-		} else {
-			status = RTW_PHL_STATUS_FAILURE;
+		else
 			PHL_TRACE(COMP_PHL_ECSA, _PHL_WARNING_, "[ECSA] hw tx unpause fail\n");
-		}
 	}
 
 	/* sw tx resume */
@@ -391,14 +388,14 @@ _phl_ecsa_cmd_abort_hdlr(
 	void *d = phlcom_to_drvpriv(phl_com);
 
 	_os_cancel_timer(d, &ecsa_ctrl->timer);
-
+	ecsa_ctrl->state = ECSA_STATE_NONE;
+	ecsa_ctrl->req_hdl = 0;
 	/* ECSA AP abort handle */
 	if (IS_ECSA_TYPE_AP(ecsa_ctrl)) {
 		if (ecsa_ctrl->ecsa_param.mode == CHANNEL_SWITCH_MODE_STOP_TX)
 			_phl_ecsa_tx_resume(ecsa_ctrl, false);
 
 		if (ecsa_ctrl->ecsa_param.flag != 0) {
-			ecsa_ctrl->state = ECSA_STATE_NONE;
 			CLEAR_STATUS_FLAG(ecsa_ctrl->ecsa_param.flag,
 					  ECSA_PARAM_FLAG_APPEND_BCN);
 			CLEAR_STATUS_FLAG(ecsa_ctrl->ecsa_param.flag,
@@ -654,7 +651,11 @@ _phl_ecsa_cmd_msg_hdlr(
 			}
 
 			/* Switch channel */
-			phl_set_ch_bw(phl_info, hw_band, &chdef_to_switch, RFK_TYPE_ECSA);
+			if (IS_ECSA_TYPE_STA(ecsa_ctrl) &&
+				ecsa_ctrl->ecsa_param.mode == true)
+				phl_set_ch_bw(phl_info, hw_band, &chdef_to_switch, RFK_TYPE_ECSA);
+			else
+				phl_set_ch_bw(phl_info, hw_band, &chdef_to_switch, RFK_TYPE_FORCE_DO);
 
 			SET_MSG_EVT_ID_FIELD(nextmsg.msg_id, MSG_EVT_ECSA_SWITCH_DONE);
 			nextmsg.rsvd[0].ptr =  (u8*)ecsa_ctrl->role;
@@ -729,12 +730,9 @@ _phl_ecsa_cmd_msg_hdlr(
 		case MSG_EVT_ECSA_DONE:
 			PHL_TRACE(COMP_PHL_ECSA, _PHL_INFO_,
 				  "%s: MSG_EVT_ECSA_DONE\n", __FUNCTION__);
-			ecsa_ctrl->state = ECSA_STATE_NONE;
-
 			if(ops->ecsa_complete){
 				ops->ecsa_complete(ops->priv, wifi_role);
-			}
-			else{
+			} else {
 				PHL_TRACE(COMP_PHL_ECSA, _PHL_WARNING_,
 			  "%s: ecsa_complete is NULL!\n", __FUNCTION__);
 			}
@@ -742,8 +740,12 @@ _phl_ecsa_cmd_msg_hdlr(
 			status = phl_disp_eng_free_token(phl_info,
 			                                 hw_band,
 			                                 &ecsa_ctrl->req_hdl);
-			if(status != RTW_PHL_STATUS_SUCCESS)
+			if (status != RTW_PHL_STATUS_SUCCESS) {
 				PHL_WARN("%s: Free token fail!\n", __FUNCTION__);
+			} else {
+				ecsa_ctrl->state = ECSA_STATE_NONE;
+				ecsa_ctrl->req_hdl = 0;
+			}
 			break;
 		default:
 			break;

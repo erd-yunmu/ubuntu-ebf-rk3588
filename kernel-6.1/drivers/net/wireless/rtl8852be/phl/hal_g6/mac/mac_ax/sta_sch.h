@@ -20,12 +20,12 @@
 #include "../type.h"
 
 /*--------------------Define -------------------------------------------*/
+#define STA_SCH_LEFT_SHIFT_ONE_SET_MSB(x) (((x - 1) << 1) | 0x01)
 #define STA_SCH_WMM_NUM_8852A 4
 #define STA_SCH_WMM_NUM_8852B 2
 #define STA_SCH_WMM_NUM_8852C 4
 #define STA_SCH_WMM_NUM_8192XB  4
 #define STA_SCH_WMM_NUM_8851B 2
-#define STA_SCH_WMM_NUM_8851E 4
 #define STA_SCH_WMM_NUM_8852D 4
 #define STA_SCH_WMM_NUM_8852BT 2
 
@@ -34,7 +34,6 @@
 #define STA_SCH_UL_SUPPORT_8852C 1
 #define STA_SCH_UL_SUPPORT_8192XB 1
 #define STA_SCH_UL_SUPPORT_8851B 0
-#define STA_SCH_UL_SUPPORT_8851E 1
 #define STA_SCH_UL_SUPPORT_8852D 1
 #define STA_SCH_UL_SUPPORT_8852BT 0
 
@@ -64,6 +63,13 @@ enum mac_ax_ss_link_cfg {
 	MAC_AX_SS_LINK_CFG_CLEAN,
 };
 
+enum mac_ax_delay_tx_en {
+	MAC_AX_DELAY_TX_DIS = 0,
+	MAC_AX_DELAY_TX_B0 = 1,
+	MAC_AX_DELAY_TX_B1 = 2,
+	MAC_AX_DELAY_TX_BOTH = 3,
+};
+
 /**
  * @enum mac_ax_ss_wmm_tbl_cfg
  *
@@ -76,23 +82,16 @@ enum mac_ax_ss_wmm_tbl_cfg {
 	MAC_AX_SS_WMM_TBL_SET,
 };
 
-/*--------------------Define Struct-------------------------------------*/
-
-/**
- * @struct mac_ax_sta_bmp_ctrl
- * @brief mac_ax_sta_bmp_ctrl
- *
- * @var mac_ax_sta_bmp_ctrl::macid
- * Please Place Description here.
- * @var mac_ax_sta_bmp_ctrl::bmp
- * Please Place Description here.
- * @var mac_ax_sta_bmp_ctrl::mask
- * Please Place Description here.
- */
-struct mac_ax_sta_bmp_ctrl {
-	u8 macid;
-	u32 bmp;
-	u32 mask;
+struct mac_ax_delay_tx_cfg {
+	enum mac_ax_delay_tx_en en;
+	u8 vovi_to_b0;
+	u8 bebk_to_b0;
+	u8 vovi_to_b1;
+	u8 bebk_to_b1;
+	u8 vovi_len_b0;
+	u8 bebk_len_b0;
+	u8 vovi_len_b1;
+	u8 bebk_len_b1;
 };
 
 /*--------------------Function Prototype--------------------------------*/
@@ -136,4 +135,20 @@ u32 mac_ss_wmm_map_upd(struct mac_ax_adapter *adapter,
 void mac_ss_dl_rpt_cfg(struct mac_ax_adapter *adapter,
 		       struct mac_ax_ss_dl_rpt_info *info,
 		       enum mac_ax_ss_rpt_cfg cfg);
+
+u32 set_ss_quota_mode(struct mac_ax_adapter *adapter,
+		      struct mac_ax_ss_quota_mode_ctrl *ctrl);
+
+u32 ss_set_quotasetting(struct mac_ax_adapter *adapter,
+			struct mac_ax_ss_quota_setting *para);
+
+u32 get_ss_wmm_tbl(struct mac_ax_adapter *adapter,
+		   struct mac_ax_ss_wmm_tbl_ctrl *ctrl);
+
+void get_delay_tx_cfg(struct mac_ax_adapter *adapter,
+		      struct mac_ax_delay_tx_cfg *cfg);
+
+void set_delay_tx_cfg(struct mac_ax_adapter *adapter,
+		      struct mac_ax_delay_tx_cfg *cfg);
+u32 mac_ss_stat_chk(struct mac_ax_adapter *adapter);
 #endif

@@ -21,6 +21,14 @@
 #include "../_usb.h"
 #if MAC_AX_8852B_SUPPORT
 
+// SIE
+#define MAC_AX_POLL_SIE_CNT 1000
+#define MAC_AX_POLL_SIE_WAIT_US 50
+
+/* RX AGG related */
+/* size unit was 4k in 8852A|B|51B */
+#define COMPAT_RX_AGG_UNIT 4
+
 /**
  * @struct wd_body_usb
  * @brief wd_body_usb
@@ -379,34 +387,6 @@ u32 u2u3_switch_8852b(struct mac_ax_adapter *adapter);
   * @{
   */
 
-/**
- * @brief get_usb_support_ability_8852b
- *
- * @param *adapter
- * @return Please Place Description here.
- * @retval u32
- */
-u32 get_usb_support_ability_8852b(struct mac_ax_adapter *adapter);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup HCI
- * @{
- * @addtogroup USB
- * @{
- */
-
-/**
- * @brief usb_tx_agg_cfg_8852b
- *
- * @param *adapter
- * @param *agg
- * @return Please Place Description here.
- * @retval u32
- */
 u32 usb_tx_agg_cfg_8852b(struct mac_ax_adapter *adapter,
 			 struct mac_ax_usb_tx_agg_cfg *agg);
 /**
@@ -534,5 +514,46 @@ u32 usb_ep_cfg_8852b(struct mac_ax_adapter *adapter, struct mac_ax_usb_ep *cfg);
  * @}
  * @}
  */
+
+/**
+ * @addtogroup HCI
+ * @{
+ * @addtogroup USB
+ * @{
+ */
+
+/**
+ * @brief get_usb_support_ability_8852b
+ *
+ * @param *adapter
+ * @return Please Place Description here.
+ * @retval u32
+ */
+enum usb_support_ability get_usb_support_ability_8852b(struct mac_ax_adapter *adapter);
+/**
+ * @}
+ * @}
+ */
+
+/**
+ * @addtogroup HCI
+ * @{
+ * @addtogroup USB
+ * @{
+ */
+
+/**
+ * @brief get_u3_perf_mode_8852b
+ *
+ * @param *adapter
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 get_u3_perf_mode_8852b(struct mac_ax_adapter *adapter, enum mac_u3_perf_mode *perf_mode);
+/**
+ * @}
+ * @}
+ */
+
 #endif /* #if MAC_AX_8852B_SUPPORT */
 #endif

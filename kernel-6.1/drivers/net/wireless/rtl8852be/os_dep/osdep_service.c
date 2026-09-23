@@ -1002,6 +1002,7 @@ void dump_blacklist(void *sel, _queue *blist, const char *title)
 {
 	struct blacklist_ent *ent = NULL;
 	_list *list, *head;
+	char mac_addr_str[MAC_FMT_LEN];
 
 	_rtw_spinlock_bh(&blist->lock);
 	head = &blist->queue;
@@ -1014,11 +1015,10 @@ void dump_blacklist(void *sel, _queue *blist, const char *title)
 		while (rtw_end_of_queue_search(head, list) == _FALSE) {
 			ent = LIST_CONTAINOR(list, struct blacklist_ent, list);
 			list = get_next(list);
-
 			if (rtw_time_after(rtw_get_current_time(), ent->exp_time))
-				RTW_PRINT_SEL(sel, MAC_FMT" expired\n", MAC_ARG(ent->addr));
+				RTW_PRINT_SEL(sel, "%s expired\n", get_macaddr_str(mac_addr_str, sel, ent->addr));
 			else
-				RTW_PRINT_SEL(sel, MAC_FMT" %u\n", MAC_ARG(ent->addr)
+				RTW_PRINT_SEL(sel, "%s %u\n", get_macaddr_str(mac_addr_str, sel, ent->addr)
 					, rtw_get_remaining_time_ms(ent->exp_time));
 		}
 

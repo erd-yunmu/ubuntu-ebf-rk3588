@@ -32,6 +32,17 @@
 #define RADIO_TO_FW_PAGE_SIZE 6
 #define RADIO_TO_FW_DATA_SIZE 500
 
+#define HALRF_TPE_TORRANCE_ANTGAIN 13	/* 6.5 dBm, unit: 0.5 dBm (multiply by 2). 1.5dB torrace for each sample, antenna gain 5dBi */
+#define HALRF_TPE_2TX_COMBINE 6	/* 2TX combine 3dB, unit: 0.5 dBm (multiply by 2).*/
+#define HALRF_TPE_TSSI_LOW_PWR_TORRACE 4	/* TSSI low power 0dBm torrace, 2 dBm, unit: 0.5 dBm (multiply by 2). */
+
+#ifndef PW_LMT_MAX_REGULATION_EXT_NUM
+#define PW_LMT_MAX_REGULATION_EXT_NUM 5
+#endif
+
+#ifndef PW_LMT_MAX_6G_REGULATION_EXT_NUM
+#define PW_LMT_MAX_6G_REGULATION_EXT_NUM 10
+#endif
 
 /*@-----------------------End Define Parameters-----------------------*/
 /*power by rate*/
@@ -54,12 +65,6 @@ enum halrf_pw_by_rate_rate_type {
 	PW_BYRATE_RATE_AllRate5_1 = 9,  /* OFDM, HT, VHT, HE_HEDCM */
 	PW_BYRATE_RATE_AllRate6_1 = 10,  /* OFDM, HT, VHT, HE_HEDCM */
 	PW_BYRATE_RATE_NULL = 0xF
-};
-
-struct _halrf_file_regd_ext {
-	u16 domain;
-	char country[2];
-	char reg_name[10];
 };
 
 /*power limit*/
@@ -117,7 +122,7 @@ enum halrf_pw_lmt_regulation_type {
 	PW_LMT_REGU_THAILAND = 19,
 	/* place predefined ones above */
 	PW_LMT_REGU_PREDEF_NUM,
-	PW_LMT_MAX_REGULATION_NUM = 32
+	PW_LMT_MAX_REGULATION_NUM = PW_LMT_REGU_PREDEF_NUM + PW_LMT_MAX_REGULATION_EXT_NUM
 };
 
 
@@ -175,8 +180,8 @@ enum halrf_pw_lmt_regulation_type_6g {
 	PW_LMT_REGU_6G_THAILAND_VLP = 49,
 
 	/* place predefined ones above */
-	PW_LMT_REGU_6G_PREDEF_NUM = 50,
-	PW_LMT_MAX_6G_REGULATION_NUM = 51
+	PW_LMT_REGU_6G_PREDEF_NUM,
+	PW_LMT_MAX_6G_REGULATION_NUM = PW_LMT_REGU_6G_PREDEF_NUM + PW_LMT_MAX_6G_REGULATION_EXT_NUM
 };
 
 #define PW_LMT_MAX_PER_BAND_REGU_NUM ((u8)PW_LMT_MAX_REGULATION_NUM > (u8)PW_LMT_MAX_6G_REGULATION_NUM ? PW_LMT_MAX_REGULATION_NUM : PW_LMT_MAX_6G_REGULATION_NUM)
@@ -465,23 +470,29 @@ struct halrf_pwr_info {
 	s8 ext_pwr[MAX_HALRF_PATH];
 	s8 ext_pwr_diff[MAX_HALRF_PATH];
 	s8 ext_pwr_org[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_2_4g[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_5g_band1[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_5g_band2[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_5g_band3[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_5g_band4[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_lmt_6g_unii_5_1[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_lmt_6g_unii_5_2[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_lmt_6g_unii_6[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_lmt_6g_unii_7_1[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_lmt_6g_unii_7_2[MAX_HALRF_PATH];
-	s8 ext_pwr_diff_lmt_6g_unii_8[MAX_HALRF_PATH];
 	u8 power_limit_6g_type;
-	u8 ant_gain_reg[PW_LMT_MAX_REGULATION_NUM];
-	s8 ant_gain_2g_oft[PW_LMT_MAX_REGULATION_NUM];
-	s8 ant_gain_5g_oft[PW_LMT_MAX_REGULATION_NUM];
-	s8 ant_gain_6g_oft[PW_LMT_MAX_6G_REGULATION_NUM];
+	s8 ext_pwr_diff_2g[MAX_HALRF_PATH];	/*PathA, PathB compare power and take the smaller difference*/
+	s8 ext_pwr_diff_5g[MAX_HALRF_PATH][RTK_DAG_5G_SUB_BAND_CNT];
+	s8 ext_pwr_diff_6g[MAX_HALRF_PATH][RTK_DAG_6G_SUB_BAND_CNT];
+	bool ant_gain_en;
+	u8 ant_gain_reload_table_reg;
+	u8 ant_gain_reg_2g[PW_LMT_MAX_REGULATION_NUM];
+	u8 ant_gain_reg_5g[PW_LMT_MAX_REGULATION_NUM];
+	u8 ant_gain_reg_6g[PW_LMT_MAX_6G_REGULATION_NUM];
+	s8 ant_gain_2g_oft[PW_LMT_MAX_REGULATION_NUM][MAX_HALRF_PATH];	/*Antenna gain compensation. EX: Ant gain 5dBi in lab, but customer use 2dBi ant*/
+	s8 ant_gain_5g_oft[PW_LMT_MAX_REGULATION_NUM][MAX_HALRF_PATH][RTK_DAG_5G_SUB_BAND_CNT];
+	s8 ant_gain_6g_oft[PW_LMT_MAX_6G_REGULATION_NUM][MAX_HALRF_PATH][RTK_DAG_6G_SUB_BAND_CNT];
+	s8 toal_pwr_diff_2g[PW_LMT_MAX_REGULATION_NUM][MAX_HALRF_PATH];	/*PathA, PathB compare power and take the smaller difference + Antenna gain compensation. Offset to power limit*/
+	s8 toal_pwr_diff_5g[PW_LMT_MAX_REGULATION_NUM][MAX_HALRF_PATH][RTK_DAG_5G_SUB_BAND_CNT];
+	s8 toal_pwr_diff_6g[PW_LMT_MAX_6G_REGULATION_NUM][MAX_HALRF_PATH][RTK_DAG_6G_SUB_BAND_CNT];
 	u8 ant_type;
+	s32 tpe_max_tx_pwr[HW_PHY_MAX][MAX_TPE_ELE_CNT][MAX_TPE_TX_PWR_CNT];
+	bool pwr_by_rate_form_folder;
+	bool pwr_lmt_form_folder;
+	bool pwr_lmt_6g_form_folder;
+	bool pwr_lmt_ru_form_folder;
+	bool pwr_lmt_ru_6g_form_folder;
+	bool pwr_trk_tbl_form_folder;
 };
 
 #define TX_NUM 2		/*1TX, 2TX*/
@@ -508,10 +519,12 @@ void halrf_power_by_rate_store_to_array(struct rf_info *rf,
 void halrf_power_limit_store_to_array(struct rf_info *rf,
 			u8 regulation, u8 band, u8 bandwidth, u8 rate,
 			u8 tx_num, u8 beamforming, u8 chnl, s8 val);
+void halrf_power_limit_ntx_cpy(struct rf_info *rf, u8 tx_num_dst, u8 tx_num_src);
 void halrf_power_limit_set_worldwide(struct rf_info *rf);
 void halrf_power_limit_ru_store_to_array(struct rf_info *rf,
 			u8 band, u8 bandwidth, u8 tx_num, u8 rate,
 			u8 regulation, u8 chnl, s8 val);
+void halrf_power_limit_ru_ntx_cpy(struct rf_info *rf, u8 tx_num_dst, u8 tx_num_src);
 void halrf_power_limit_ru_set_worldwide(struct rf_info *rf);
 
 #ifndef RF_8730A_SUPPORT
@@ -531,5 +544,10 @@ bool halrf_pwr_is_minus(struct rf_info *rf, u32 reg_tmp);
 s32 halrf_show_pwr_table(struct rf_info *rf, u32 reg_tmp);
 
 void halrf_set_scan_power_table_to_fw_no_6g(struct rf_info *rf);
+
+void halrf_get_path_power_diff(struct rf_info *rf, enum phl_phy_idx phy);
+
+void halrf_get_ant_gain_ofst_and_calc_total_ofst(struct rf_info *rf,
+	enum phl_phy_idx phy, struct rtw_phl_regu_dyn_ant_gain *regu);
 
 #endif

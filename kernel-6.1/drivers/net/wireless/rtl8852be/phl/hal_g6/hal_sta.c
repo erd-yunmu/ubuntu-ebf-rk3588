@@ -21,7 +21,7 @@ _hal_sta_rssi_init(struct rtw_phl_stainfo_t *sta)
 	sta->hal_sta->rssi_stat.assoc_rssi = 0;
 	sta->hal_sta->rssi_stat.ma_rssi = 0;
 }
-
+#ifdef CONFIG_PHL_BEAMFORM
 static enum rtw_hal_status
 _hal_bfee_init(struct hal_info_t *hal_info,
 	       struct rtw_phl_stainfo_t *sta)
@@ -85,12 +85,20 @@ _hal_bfee_init(struct hal_info_t *hal_info,
 				  "%s : Enable HW BFee Function Success\n",
 				  __func__);
 		}
+		rtw_hal_bb_nvar_src_sel(hal_info, enable_bfee);
 		hstatus = RTW_HAL_STATUS_SUCCESS;
 	} while (0);
 
 	return hstatus;
 }
-
+#else
+static enum rtw_hal_status
+_hal_bfee_init(struct hal_info_t *hal_info,
+	       struct rtw_phl_stainfo_t *sta)
+{
+	return RTW_HAL_STATUS_SUCCESS;
+}
+#endif
 static enum rtw_hal_status
 _hal_set_default_cctrl_tbl(struct hal_info_t *hal_info,
 				 struct rtw_phl_stainfo_t *sta)
@@ -123,9 +131,9 @@ static enum rtw_hal_status
 _hal_update_cctrl_tbl(struct hal_info_t *hal_info,
 			    struct rtw_phl_stainfo_t *sta)
 {
-	struct rtw_wifi_role_t *wrole = sta->wrole;
-	struct rtw_wifi_role_link_t *rlink = sta->rlink;
-	struct role_link_cap_t *cap = &rlink->cap;
+	struct rtw_wifi_role_t *wrole = NULL;
+	struct rtw_wifi_role_link_t *rlink = NULL;
+	struct role_link_cap_t *cap = NULL;
 	enum rtw_hal_status sts = RTW_HAL_STATUS_FAILURE;
 	struct rtw_hal_mac_ax_cctl_info cctrl, cctl_info_mask;
 #ifdef DBG_DBCC_MONITOR_TIME
@@ -138,6 +146,9 @@ _hal_update_cctrl_tbl(struct hal_info_t *hal_info,
 
 	if (NULL == sta)
 		goto out;
+	wrole = sta->wrole;
+	rlink = sta->rlink;
+	cap = &rlink->cap;
 
 	sts = rtw_hal_bb_cfg_config_cmac_tbl(hal_info, sta, &cctrl,
 						&cctl_info_mask);
@@ -322,7 +333,7 @@ _hal_update_cctrl_tbl(struct hal_info_t *hal_info,
 
 out:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	phl_fun_monitor_end(hal_info->phl_com, &start_t, __FUNCTION__);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return sts;
 }
@@ -390,9 +401,6 @@ rtw_hal_cfg_rsc(void *hal, struct rtw_phl_stainfo_t *sta, u8 rsc_cfg)
 
 	hsts = rtw_hal_mac_set_rsc_cfg(hal_info->hal_com, rsc_cfg, rlink->hw_band);
 
-	if (RTW_HAL_STATUS_SUCCESS != hsts)
-		goto out;
-out:
 	return hsts;
 }
 
@@ -406,9 +414,6 @@ rtw_hal_cfg_rrsr_ref_rate_sel(void *hal, struct rtw_phl_stainfo_t *sta, bool ref
 
 	hsts = rtw_hal_mac_set_rrsr_ref_rate_sel(hal_info->hal_com, ref_rate_sel, sta->rlink->hw_band);
 
-	if (RTW_HAL_STATUS_SUCCESS != hsts)
-		goto out;
-out:
 	return hsts;
 }
 
@@ -443,9 +448,6 @@ rtw_hal_cfg_tx_ampdu(void *hal, struct rtw_phl_stainfo_t *sta)
 			__func__, sta->asoc_cap.num_ampdu);
 	}
 
-	if (RTW_HAL_STATUS_SUCCESS != hsts)
-		goto out;
-out:
 	return hsts;
 }
 
@@ -506,7 +508,7 @@ _hal_update_dctrl_tbl(struct hal_info_t *hal_info,
 
 out:
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	phl_fun_monitor_end(hal_info->phl_com, &start_t, __FUNCTION__);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return sts;
 }
@@ -945,8 +947,9 @@ rtw_hal_restore_sta_entry(struct rtw_phl_com_t* phl_com, void *hal,
 	}
 
 	if (is_connect) {
+	#ifdef CONFIG_PHL_PKTOFLD
 		rtw_phl_pkt_ofld_null_request(phl_com, sta, NULL);
-
+	#endif
 		hal_status = rtw_hal_cfg_tx_ampdu(hal, sta);
 		if (hal_status != RTW_HAL_STATUS_SUCCESS) {
 			PHL_ERR("rtw_hal_cfg_tx_ampdu failed\n");
@@ -983,8 +986,9 @@ rtw_hal_restore_sta_entry(struct rtw_phl_com_t* phl_com, void *hal,
 		/* reset rssi stat value */
 		sta->hal_sta->rssi_stat.ma_rssi_mgnt = 0;
 	} else {
+		#ifdef CONFIG_PHL_PKTOFLD
 		rtw_phl_pkt_ofld_reset_entry(phl_com, sta->macid);
-
+		#endif
 		hal_status = rtw_hal_bb_ra_deregister(hal_info, sta);
 		if (hal_status != RTW_HAL_STATUS_SUCCESS)
 			PHL_ERR("rtw_hal_bb_ra_deregister failed\n");
@@ -1029,8 +1033,9 @@ rtw_hal_update_sta_entry(struct rtw_phl_com_t* phl_com, void *hal,
 						    sta->rlink->hw_port,
 						    0);
 		}
+	#ifdef CONFIG_PHL_PKTOFLD
 		rtw_phl_pkt_ofld_null_request(phl_com, sta, NULL);
-
+	#endif
 		hal_status = rtw_hal_cfg_tx_ampdu(hal, sta);
 		if (hal_status != RTW_HAL_STATUS_SUCCESS) {
 			PHL_ERR("rtw_hal_cfg_tx_ampdu failed\n");
@@ -1069,8 +1074,9 @@ rtw_hal_update_sta_entry(struct rtw_phl_com_t* phl_com, void *hal,
 		/* reset rssi stat value */
 		sta->hal_sta->rssi_stat.ma_rssi_mgnt = 0;
 	} else {
+		#ifdef CONFIG_PHL_PKTOFLD
 		rtw_phl_pkt_ofld_reset_entry(phl_com, sta->macid);
-
+		#endif
 		hal_status = rtw_hal_bb_ra_deregister(hal_info, sta);
 		if (hal_status != RTW_HAL_STATUS_SUCCESS)
 			PHL_ERR("rtw_hal_bb_ra_deregister failed\n");
@@ -1099,7 +1105,7 @@ rtw_hal_change_sta_entry(void *hal, struct rtw_phl_stainfo_t *sta,
 #ifdef DBG_DBCC_MONITOR_TIME
 	u32 start_t = 0;
 
-	phl_fun_monitor_start(&start_t, true, __FUNCTION__);
+	PHL_FUN_MON_START(&start_t);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	PHL_TRACE(COMP_PHL_DBG, _PHL_INFO_, "%s: sta->macid(0x%X), mode(%d)\n",
 		__FUNCTION__, sta->macid , mode);
@@ -1121,7 +1127,7 @@ rtw_hal_change_sta_entry(void *hal, struct rtw_phl_stainfo_t *sta,
 	if (hal_status != RTW_HAL_STATUS_SUCCESS)
 		PHL_ERR("rtw_hal_bb_ra_update failed\n");
 #ifdef DBG_DBCC_MONITOR_TIME
-	phl_fun_monitor_end(&start_t, __FUNCTION__);
+	PHL_FUNC_MON_END(hal_info->phl_com, &start_t, TIME_PHL_MAX);
 #endif /* DBG_DBCC_MONITOR_TIME */
 	return hal_status;
 }

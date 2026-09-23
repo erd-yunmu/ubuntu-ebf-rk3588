@@ -28,6 +28,55 @@
 //#include "halbb_he_sigb_gen.h"
 #ifdef HALBB_PMAC_TX_SUPPORT
 
+const u8 ehtsig_msb2lsb_tab_8[8] = {
+    0, 4, 2, 6, 1, 5, 3, 7
+};
+
+const u8 ehtsig_msb2lsb_tab_16[16] = {
+    0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15
+};
+
+void halbb_ic_cfg_be(struct bb_info *bb, struct halbb_plcp_info *in,
+		     enum phl_phy_idx phy_idx)
+{
+	u16 i = 0;
+	u16 pw_a_cr = 0;
+	u32 table_len = 0;
+	u32 *pwr_comp_1ss = NULL;
+	u32 *pwr_comp_2ss = NULL;
+
+	if (bb->ic_type == BB_RTL8922A) {
+		pw_a_cr = 0xba28;
+		table_len = sizeof(pwr_comp_1ss_8922a)/sizeof(u32);
+		pwr_comp_1ss = (u32 *)pwr_comp_1ss_8922a;
+		pwr_comp_2ss = (u32 *)pwr_comp_2ss_8922a;
+		if (bb->pwr_comp_en && bb->phl_com->dev_cap.rfe_type <= 50) {// eFEM disable digital comp !!
+			if (in->usr[0].nss == 1) {
+				while (i < table_len) {
+					halbb_set_reg_cmn(bb, pw_a_cr, MASKDWORD, pwr_comp_1ss[i], phy_idx);
+					halbb_set_reg_cmn(bb, pw_a_cr + 0x100, MASKDWORD, pwr_comp_1ss[i], phy_idx);
+					pw_a_cr += 0x4;
+					i ++;
+				}
+			} else {
+				while (i < table_len) {
+					halbb_set_reg_cmn(bb, pw_a_cr, MASKDWORD, pwr_comp_2ss[i], phy_idx);
+					halbb_set_reg_cmn(bb, pw_a_cr + 0x100, MASKDWORD, pwr_comp_2ss[i], phy_idx);
+					pw_a_cr += 0x4;
+					i ++;
+				}
+			}
+		} else {
+			while (i < table_len) {
+				halbb_set_reg_cmn(bb, pw_a_cr, MASKDWORD, 0, phy_idx);
+				halbb_set_reg_cmn(bb, pw_a_cr + 0x100, MASKDWORD, 0, phy_idx);
+				pw_a_cr += 0x4;
+				i ++;
+			}
+		}
+	}
+}
+
 u32 halbb_c2h_ehtsig_rpt(struct bb_info *bb, u16 len, u8 *c2h)
 {
 	struct halbb_ehtsig_rpt_info *eht_rpt_i;
@@ -98,7 +147,7 @@ void halbb_ppdu_var_type_cfg_7(struct bb_info *bb_0, struct halbb_plcp_info *in,
 {
 	struct bb_info *bb = bb_0;
 	u8 ppdu_type = 0, ppdu_var = 0;
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 #ifdef HALBB_DBCC_SUPPORT
 	HALBB_GET_PHY_PTR(bb_0, bb, phy_idx);
@@ -165,7 +214,7 @@ void halbb_cfg_max_mcs_7(struct bb_info *bb, struct halbb_plcp_info *in,
 {
 	u8 i = 0;
 	u32 max_mcs = 0;
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	for (i = 0; i < in->n_user; i++) {
 		if (!((in->ppdu_type >= EHT_MU_SU_FMT) &&
@@ -609,8 +658,10 @@ u32 halbb_ru_size_id_2_ru_alloc_7(struct bb_info *bb, u8 ru_id, u8 ru_size, u8 p
 	bool PS160_RU996x3_484[8] = {0, 0, 0, 0, 1, 1, 1, 1};
 
 	if (dbw <= DBW80) {
-		if (!((ru_size <= RU996) || (ru_size >= RU52_26 && ru_size <= RU484_242)))
+		if (!((ru_size <= RU996) || (ru_size >= RU52_26 && ru_size <= RU484_242))) {
 			BB_WARNING("Illegal ru_size in BW80 !!");
+			return 0;
+		}
 		PS160 = 0;
 		B_0 = 0;
 		ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + ru_id - 1) * 2 + B_0;
@@ -618,18 +669,24 @@ u32 halbb_ru_size_id_2_ru_alloc_7(struct bb_info *bb, u8 ru_id, u8 ru_size, u8 p
 		PS160 = 0;
 
 		if (ru_size == RU996_484) {
-			if (!(ru_id > 0 && ru_id <= 4))
+			if (!(ru_id > 0 && ru_id <= 4)) {
 				BB_WARNING("Illegal ru_id when ru_size = RU996_484 in BW160 !!");
+				return 0;
+			}
 			B_0 = B0_RU996_484[ru_id - 1];
 			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id % 2 == 0 ? 1 : 0)) * 2 + B_0;
 		} else if (ru_size == RU996_484_242) {
-			if (!(ru_id > 0 && ru_id <= 8))
+			if (!(ru_id > 0 && ru_id <= 8)) {
 				BB_WARNING("Illegal ru_id when ru_size = RU996_484_242 in BW160 !!");
+				return 0;
+			}
 			B_0 = B0_RU996_484_242[ru_id - 1];
 			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id > 4 ? ru_id - 4 : ru_id) - 1) * 2 + B_0;
 		} else if (ru_size == RU996X2) {
-			if (!(ru_id == 1))
+			if (!(ru_id == 1)) {
 				BB_WARNING("Illegal ru_id when ru_size = RU996x2 in BW160 !!");
+				return 0;
+			}
 			B_0 = 1;
 			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + ru_id - 1) * 2 + B_0;
 		} else { // RU_size <= RU996
@@ -641,16 +698,21 @@ u32 halbb_ru_size_id_2_ru_alloc_7(struct bb_info *bb, u8 ru_id, u8 ru_size, u8 p
 				seg_p160_s80 = 0;
 			} else {
 				BB_WARNING("prim_sb is illegal !!");
+				return 0;
 			}
 
 			// Determine which 80 it lacates
-			if (!(ru_size <= RU484_242))
+			if (!(ru_size <= RU484_242)) {
 				BB_WARNING("Illegal ru_size in BW160 !!");
+				return 0;
+			}
 
 			loc_80 = (ru_id % BW80_RU_id_max_table[ru_size] == 0) ? (ru_id / BW80_RU_id_max_table[ru_size] - 1) : (ru_id / BW80_RU_id_max_table[ru_size]);
 
-			if (!(loc_80 >= 0 && loc_80 <= 1))
+			if (!(loc_80 <= 1)) {
 				BB_WARNING("loc_80 is illegal in BW160 !!");
+				return 0;
+			}
 
 			if (loc_80 == seg_p160_s80)
 				B_0 = 1;
@@ -662,8 +724,10 @@ u32 halbb_ru_size_id_2_ru_alloc_7(struct bb_info *bb, u8 ru_id, u8 ru_size, u8 p
 		}
 	} else if (dbw == DBW320) {
 		if (ru_size == RU996_484) {
-			if (!(ru_id > 0 && ru_id <= 8))
+			if (!(ru_id > 0 && ru_id <= 8)) {
 				BB_WARNING("Illegal ru_id when ru_size = RU996_484 in BW320 !!");
+				return 0;
+			}
 
 			B_0 = B0_RU996_484[ru_id - 1];
 
@@ -681,8 +745,10 @@ u32 halbb_ru_size_id_2_ru_alloc_7(struct bb_info *bb, u8 ru_id, u8 ru_size, u8 p
 
 			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + ((ru_id % 2) == 0 ? 1 : 0)) * 2 + B_0;
 		} else if (ru_size == RU996_484_242) {
-			if (!(ru_id > 0 && ru_id <= 16))
+			if (!(ru_id > 0 && ru_id <= 16)) {
 				BB_WARNING("Illegal ru_id when ru_size = RU996_484_242 in BW320 !!");
+				return 0;
+			}
 
 			B_0 = B0_RU996_484_242[ru_id - 1];
 
@@ -700,45 +766,56 @@ u32 halbb_ru_size_id_2_ru_alloc_7(struct bb_info *bb, u8 ru_id, u8 ru_size, u8 p
 
 			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id > 4 ? ru_id - 4 : ru_id) - 1) * 2 + B_0;
 		} else if (ru_size == RU996X2) {
-			if (!(ru_id > 0 && ru_id <= 2))
+			if (!(ru_id > 0 && ru_id <= 2)) {
 				BB_WARNING("Illegal ru_id when ru_size = RU996x2 in BW320 !!");
+				return 0;
+			}
 
 			B_0 = 1;
 			PS160 = PS160_RU996x2[ru_id - 1];
 
 			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size]) * 2 + B_0;
 		} else if (ru_size == RU996X2_484) {
-			if (!(ru_id > 0 && ru_id <= 12))
+			if (!(ru_id > 0 && ru_id <= 12)) {
 				BB_WARNING("Illegal ru_id when ru_size = RU996x2_484 in BW320 !!");
+				return 0;
+			}
 
 			B_0 = B0_RU996x2_484[ru_id - 1];
 			PS160 = PS160_RU996x2_484[ru_id - 1];
 
 			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + RU996x2_484_allocation_offset_table_specific[ru_id - 1]) * 2 + B_0;
 		} else if (ru_size == RU996X3) {
-			if (!(ru_id >0 && ru_id <= 4))
+			if (!(ru_id >0 && ru_id <= 4)) {
 				BB_WARNING("Illegal ru_id when ru_size = RU996x3 in BW320 !!");
+				return 0;
+			}
 
 			B_0 = B0_RU996x3[ru_id - 1];
 			PS160 = PS160_RU996x3[ru_id - 1];
 
 			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size]) * 2 + B_0;
 		} else if (ru_size == RU996X3_484) {
-			if (!(ru_id > 0 && ru_id <= 8))
+			if (!(ru_id > 0 && ru_id <= 8)) {
 				BB_WARNING("Illegal ru_id when ru_size = RU996x3_484 in BW320 !!");
+				return 0;
+			}
 
 			B_0 = B0_RU996x3_484[ru_id - 1];
 			PS160 = PS160_RU996x3_484[ru_id - 1];
 
 			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id % 2 == 0 ? 1 : 0)) * 2 + B_0;
 		} else if (ru_size == RU996X4) {
-			if (!(ru_id == 1))
+			if (!(ru_id == 1)) {
 				BB_WARNING("Illegal ru_id when ru_size = RU996x4 in BW320 !!");
+				return 0;
+			}
 
 			B_0 = 1;
 			PS160 = 1;
 
-			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id % 2 == 0 ? 1 : 0)) * 2 + B_0;
+			//ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size] + (ru_id % 2 == 0 ? 1 : 0)) * 2 + B_0;
+			ru_alloc = PS160 * 256 + (RU_allocation_offset_table[ru_size]) * 2 + B_0;
 		} else {// ru_size <= RU996
 			// Determine seg_p160_p80, seg_p160_s80. seg_s160_l80, seg_s160_u80 by prim_sb
 			if (prim_sb < 4) {
@@ -763,15 +840,20 @@ u32 halbb_ru_size_id_2_ru_alloc_7(struct bb_info *bb, u8 ru_id, u8 ru_size, u8 p
 				seg_s160_u80 = 1;
 			} else {
 				BB_WARNING("prim_sb is illegal !!");
+				return 0;
 			}
 
-			if (!(ru_size <= RU484_242))
+			if (!(ru_size <= RU484_242)) {
 				BB_WARNING("Illegal ru_size in BW320 !!");
+				return 0;
+			}
 
 			loc_80 = ru_id % BW80_RU_id_max_table[ru_size] == 0 ? (ru_id / BW80_RU_id_max_table[ru_size] - 1) : (ru_id / BW80_RU_id_max_table[ru_size]);
 
-			if (!(loc_80 >= 0 && loc_80 <= 3))
+			if (!(loc_80 <= 3)) {
 				BB_WARNING("loc_80 is illegal in BW320 !!");
+				return 0;
+			}
 
 			if (loc_80 == seg_p160_p80 || loc_80 == seg_p160_s80)
 				PS160 = 0;
@@ -807,7 +889,7 @@ void halbb_he_sigb_7(struct bb_info *bb, struct halbb_plcp_info *in,
 	u16 he_n_sigb_sym = 0;
 	u32 ru_alloc = 0;
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	u32 hesigb_ehtsig_cr[80] = {cr->hesigb_ehtsig_0, cr->hesigb_ehtsig_1,
 				    cr->hesigb_ehtsig_2, cr->hesigb_ehtsig_3,
@@ -914,6 +996,405 @@ void halbb_he_sigb_7(struct bb_info *bb, struct halbb_plcp_info *in,
 }
 #endif
 
+void halbb_ehtsig_crc8(struct bb_info *bb, u32 *data, u32 len, u32 *crc_tmp)
+{
+	u32 i = 0, j = 0;
+	u32 c[8] = {0}, c_tmp[8] = {0}, bit = 0;
+
+	for (i = 0; i < 8; i++)
+		c[i] = 1;
+
+	for (i = 0; i < len; i++) {
+        	bit = data[i];
+        	if(c[7]==1) {
+        		c_tmp[0] = 1 - bit;
+			if(c[0]==1)
+				c_tmp[1] = bit;
+			else
+				c_tmp[1] = 1 - bit;
+
+			if(c[1]==1)
+				c_tmp[2] = bit;
+			else
+				c_tmp[2] = 1 - bit;
+		} else {
+			c_tmp[0] = bit;
+			if(c[0]==1)
+				c_tmp[1] = 1 - bit;
+			else
+				c_tmp[1] = bit;
+
+			if(c[1]==1)
+				c_tmp[2] = 1 - bit;
+			else
+				c_tmp[2] = bit;
+		}
+
+		for (j = 2; j <= 6; j++) // c2-c7 : shift
+			c_tmp[j+1] = c[j];
+
+		for (j = 0; j < 8; j++)
+			c[j] = c_tmp[j];
+	}
+
+	for (i = 0; i < 8; i++)
+		crc_tmp[i] = 1 - c_tmp[i];
+}
+
+u32 halbb_ehtsig_msb2lsb(struct bb_info *bb, u32 x, u32 nbits)
+{
+	u32 lsb = 0, i = 0;
+
+	for (i = 0; i < nbits; i++) {
+		lsb = (lsb << 1) | (x & 0x1);
+		x = x >> 1;
+	}
+
+	return lsb;
+}
+
+u8 halbb_ehtsig_msb2lsb_tab_256(struct bb_info *bb, u8 val)
+{
+    return (ehtsig_msb2lsb_tab_16[val & 0xf] << 4) | ehtsig_msb2lsb_tab_16[val >> 4];
+}
+
+void halbb_ehtsig_bs_write(struct bb_info *bb, u8 *buf, u32 *byte_ptr,
+			   u32 *bit_ptr, u32 data, u32 len)
+{
+	u32 w_size = 0;
+	u32 bmask = 0;
+	u8 d_tmp = 0;
+
+	do {
+		if (len >= (*bit_ptr)) {
+			w_size = (*bit_ptr);
+			len = len - w_size;
+			bmask = ((u32)1 << w_size) - 1;
+			d_tmp = (u8)((data >> len) & bmask);
+			buf[(*byte_ptr)] = buf[(*byte_ptr)] | d_tmp;
+			*bit_ptr = 8;
+			(*byte_ptr)++;
+		} else {
+			w_size = len;
+			len = 0;
+			bmask = ((u32)1 << w_size) - 1;
+			d_tmp = (u8)((data & bmask) << ((*bit_ptr) - w_size));
+			buf[(*byte_ptr)] = buf[(*byte_ptr)] | d_tmp;
+			*bit_ptr = *bit_ptr - w_size;
+		}
+	} while (len > 0);
+}
+
+u32 halbb_ehtsig_uf_gen_ofdma_tab(struct bb_info *bb, u8 sta_id, u8 mcs, u8 rsv,
+				  u8 nsts, u8 beamformed, u8 coding)
+{
+	u32 uf_out = 0;
+
+	uf_out = (u32)(coding | (beamformed << 1) |
+			(ehtsig_msb2lsb_tab_16[nsts] << 2) |
+			(rsv << 6) | (ehtsig_msb2lsb_tab_16[mcs] << 7) |
+			(halbb_ehtsig_msb2lsb(bb, sta_id, 11) << 11));
+
+	return uf_out;
+}
+
+u8 halbb_ehtsig_crc8_comm_field(struct bb_info *bb, u32 *ru_alloc, u32 *uf_data,
+				u8 crc_idx, u8 L, u32 u_sig_overflow,
+				u8 nb_u_sig_overflow)
+{
+	u32 i,j,n;
+	u32 tot_len=0;
+	u32 N;
+	u8 crc_out = 0;
+	u32 d_buf;
+	u32 N_ = 0;
+	u32 data[109] = {0}; // max bit number of common field = 109
+    	u32 crc_tmp[8] = {0};
+
+	switch(L) {
+        	case 1: // BW20
+			N = 1;
+			break;
+        	case 2: // BW40
+        		N = 1;
+        		break;
+        	case 3: // BW80
+        		N = 2;
+        		break;
+        	case 4: // BW160 or BW80_80
+        		N = 4;
+        		break;
+        	case 5: // BW320
+			N = 8;
+			break;
+		default:
+			return 0xFF;
+			break;
+	}
+
+	if (crc_idx == 1) {
+		if (L <= 2) {
+			N_ = N;
+			tot_len = N*9;
+		} else {
+			N_ = 2;
+			tot_len = 2*9;
+		}
+        	tot_len = tot_len + (u32)(nb_u_sig_overflow);
+	} else if (crc_idx == 2) {
+        	if (L <= 2) {
+        		N_ = 0;
+        		tot_len = 0;
+        	} else {
+        		N_ = N-2;
+        		tot_len = (N-2)*9;
+        	}
+	} else {
+		if (nb_u_sig_overflow == 16)
+        		tot_len = 0;
+        	else
+        		tot_len = 22;
+        	tot_len = tot_len + (u32)(nb_u_sig_overflow);
+	}
+
+	if (crc_idx == 1) {
+		d_buf = u_sig_overflow;
+		for (i=(u32)(nb_u_sig_overflow-1);  ; i--) {
+        		data[i] = d_buf & 1;
+        		d_buf = d_buf >> 1;
+        	}
+        	j = 0;
+        	for (n = N_-1;  ; n--) {
+        		d_buf = ru_alloc[n];
+        		for(i = tot_len - j * 9 - 1; i > tot_len - (j + 1) * 9 - 1; i--) {
+        			data[i] = d_buf & 1;
+        			d_buf = d_buf >> 1;
+        		}
+        		j++;
+        	}
+	} else if (crc_idx == 2) {
+		for (n = 2; n < N ; n++) {
+        		d_buf = ru_alloc[n];
+        		for(i=8+(n-2)*9; i>= 0+(n-2)*9 ; i--) {
+        			data[i] = d_buf & 1;
+        			d_buf = d_buf >> 1;
+        		}
+		}
+	} else {
+		d_buf = u_sig_overflow;
+		for (i = 0; i < nb_u_sig_overflow; i++) {
+        		data[(u32)(nb_u_sig_overflow) - i - 1] = d_buf & 0x1;
+        		d_buf = d_buf >> 1;
+        	}
+		if (nb_u_sig_overflow > 16) {
+        		d_buf = uf_data[0];
+        		for (i = tot_len - 1; i >= (u32)(nb_u_sig_overflow); i--) {
+        			data[i] = d_buf & 1;
+        			d_buf = d_buf >> 1;
+        		}
+        	}
+	}
+
+	// Perform CRC
+	halbb_ehtsig_crc8(bb, data, tot_len, crc_tmp);
+
+	// Prepare output
+	crc_out = 0;
+	for(i = 0; i < 4; i++) {
+		crc_out = crc_out << 1;
+		crc_out = crc_out | (u8)crc_tmp[7 - i];
+	}
+
+	return crc_out;
+}
+
+void halbb_eht_sig_su_compute(struct bb_info *bb,
+			      struct plcp_tx_pre_fec_padding_setting_in_t *in_plcp,
+			      u8 *ehtsig_content_ptr,
+			      u8 ppdu_bw, u8 ppdu_type_and_compression,
+			      u8 en_ehtsig_padding, u8 force_ehtsig_mcs,
+			      u8 force_ehtsig_dcm, u16 *ehtsig_n_sym,
+			      u32 *content_channel_len_max)
+{
+	struct bb_h2c_ehtsig_sigb *eht_sig = &bb->bb_h2c_ehtsig_sigb_i;
+	u32 u_sig_overflow = 0, max_num_cc_ofdm_sym = 0;
+	u8 num_cc1_data_bits = 0, res = 0;
+	u32 cf_data = 0, sta_uf_data = 0, num_cc1_ofdm_sym = 0, num_cc2_ofdm_sym = 0;
+	u32 max_num_cc_bits_w_data_padding = 0, cc1_data_byte_len = 0;
+	u32 max_num_cc_bytes_w_data_padding = 0, cc1_byte_len = 0;
+	u32 cc2_byte_offset = 0;
+	u8 nss = 0, bf = 0, disregard_ndp = 0, ndp = 0, subtrahend_val = 0;
+	u8 spat_reuse = 0, gi_ltf = 0, ltf_symb = 0, nbits = 0, cf_crc = 0;
+	u8 ldpc_extra_symb_seg = 0, cc2_byte_offset_incr = 0, i = 0;
+	u8 pre_fec = 0, pe_disambiguity = 0, disregard = 0, num_sta = 0;
+	u8 ehtsig_mcs = 13, ehtsig_dcm = 0, tail = 0;
+	u8 *cont_chan_bs = &ehtsig_content_ptr[0];
+	u32 cc_byte_ptr = 0, cc_bit_ptr = 8;
+	u8 subtrahend[4] = {26, 52, 104, 13}; // NDP EHT-SIG-MCS = 0; EHT-SIG-MCS value = 0
+
+	spat_reuse = eht_sig->ehtsig_sigb_i.usig_spat_reuse;
+	gi_ltf = eht_sig->ehtsig_sigb_i.usig_spat_gi_ltf;
+	ltf_symb = eht_sig->ehtsig_sigb_i.usig_ltf_symb;
+	num_sta = eht_sig->ehtsig_sigb_i.sta_list_num;
+
+	if (eht_sig->ehtsig_sigb_i.ul_dl == 0) {// DL
+		if (ppdu_type_and_compression > 0) {// 1 or 2 : non-OFDMA
+			if (num_sta ==0)
+				ndp = 1;
+		}
+	} else {// UL
+		if (ppdu_type_and_compression == 0) { // 1 : non-OFDMA
+			if (num_sta ==0)
+				ndp = 1;
+		}
+	}
+
+	if (ndp) {
+		nss = eht_sig->ehtsig_sigb_i.usig_nss;
+		bf = eht_sig->ehtsig_sigb_i.usig_bf;
+		disregard_ndp = eht_sig->ehtsig_sigb_i.usig_disregard_ndp;
+
+		u_sig_overflow = (u32)((halbb_ehtsig_msb2lsb(bb, disregard_ndp, 2)) |
+				(bf << 2) |
+				(ehtsig_msb2lsb_tab_16[nss] << 3) |
+				(ehtsig_msb2lsb_tab_8[ltf_symb] << 7) |
+				(halbb_ehtsig_msb2lsb(bb, gi_ltf, 2) << 10) |
+				(ehtsig_msb2lsb_tab_16[spat_reuse] << 12));
+		cf_data = u_sig_overflow;
+	} else {
+		ldpc_extra_symb_seg = eht_sig->ehtsig_sigb_i.usig_ldpc_extra_symb_seg;
+		pre_fec = eht_sig->ehtsig_sigb_i.usig_prefec;
+		pe_disambiguity = eht_sig->ehtsig_sigb_i.usig_pe_disambiguity;
+		disregard = eht_sig->ehtsig_sigb_i.usig_disregard;
+
+		u_sig_overflow = (u32)((ehtsig_msb2lsb_tab_16[disregard]) |
+					(pe_disambiguity << 4) |
+					(halbb_ehtsig_msb2lsb(bb, pre_fec, 2) << 5) |
+					(ldpc_extra_symb_seg << 7) |
+					(ehtsig_msb2lsb_tab_8[ltf_symb] << 8) |
+					(halbb_ehtsig_msb2lsb(bb, gi_ltf, 2) << 11) |
+					(ehtsig_msb2lsb_tab_16[spat_reuse] << 13) );
+
+		cf_data = u_sig_overflow << 3;
+	}
+
+	if (ndp)
+		sta_uf_data = 0;
+	else
+		sta_uf_data = halbb_ehtsig_uf_gen_ofdma_tab(bb, 0,	//mac_id
+						    eht_sig->ehtsig_sigb_i.usr_info[0].mcs,
+						    1,		//rsv
+						    eht_sig->ehtsig_sigb_i.usr_info[0].nsts,
+						    0,		//txbf
+						    eht_sig->ehtsig_sigb_i.usr_info[0].coding);
+
+	ehtsig_mcs = force_ehtsig_mcs;
+	ehtsig_dcm = force_ehtsig_dcm;
+
+	if (ndp)
+		num_cc1_data_bits = 26;
+	else
+		num_cc1_data_bits = 20 + 22 + 10;
+
+	if (force_ehtsig_mcs == 15) { // EHT-MCS index to value of EHT-SIG-MCS field
+		force_ehtsig_mcs = 3;
+	} else if (force_ehtsig_mcs == 3) {
+		force_ehtsig_mcs = 2;
+	}
+	if (ndp == 1) { // NDP
+		force_ehtsig_mcs = 0;
+	}
+	subtrahend_val = subtrahend[force_ehtsig_mcs];
+
+	res = num_cc1_data_bits;
+	// num_cc1_ofdm_sym = 0;
+
+	while (res > subtrahend_val) {
+		res -= subtrahend_val;
+		num_cc1_ofdm_sym++;
+	}
+	num_cc1_ofdm_sym++;
+	// num_cc2_ofdm_sym = 0;
+
+	if (num_cc1_ofdm_sym >= num_cc2_ofdm_sym)
+		max_num_cc_ofdm_sym = num_cc1_ofdm_sym;
+	else
+		max_num_cc_ofdm_sym = num_cc2_ofdm_sym;
+	max_num_cc_bits_w_data_padding = max_num_cc_ofdm_sym * subtrahend_val;
+
+	cc1_data_byte_len = (num_cc1_data_bits >> 3) + ((num_cc1_data_bits & 0x7) != 0);
+	max_num_cc_bytes_w_data_padding = (max_num_cc_bits_w_data_padding >> 3) + ((max_num_cc_bits_w_data_padding & 0x7) != 0);
+
+	if (en_ehtsig_padding)
+		cc1_byte_len = max_num_cc_bytes_w_data_padding;
+	else
+		cc1_byte_len = cc1_data_byte_len;
+	cc2_byte_offset_incr = (cc1_byte_len & 0x7) != 0;
+	cc2_byte_offset = ((cc1_byte_len >> 3) + cc2_byte_offset_incr) << 3;
+
+	if (ndp==1)
+		nbits = 16;
+	else
+		nbits = 17 + 3;
+
+	cf_crc = halbb_ehtsig_crc8_comm_field(bb, 0, &sta_uf_data, 0, ppdu_bw + 1,cf_data,nbits);
+
+	halbb_ehtsig_bs_write(bb, cont_chan_bs, &cc_byte_ptr, &cc_bit_ptr, cf_data, nbits);
+	if (!ndp)
+		halbb_ehtsig_bs_write(bb, cont_chan_bs, &cc_byte_ptr, &cc_bit_ptr, sta_uf_data, 22);
+	halbb_ehtsig_bs_write(bb, cont_chan_bs, &cc_byte_ptr, &cc_bit_ptr, cf_crc, 4);
+	halbb_ehtsig_bs_write(bb, cont_chan_bs, &cc_byte_ptr, &cc_bit_ptr, tail, 6);
+
+	for (i = 0; i < 96; i++)
+		ehtsig_content_ptr[i] = halbb_ehtsig_msb2lsb_tab_256(bb, ehtsig_content_ptr[i]);
+
+	*ehtsig_n_sym = (u16)max_num_cc_ofdm_sym;
+	*content_channel_len_max = cc1_byte_len;
+}
+
+void halbb_eht_sig_gen(struct bb_info *bb,
+		       struct plcp_tx_pre_fec_padding_setting_in_t *in_plcp,
+		       u8 *ehtsig_content_ptr, u8 ppdu_bw,
+		       u8 ppdu_type_and_compression,
+		       enum phl_phy_idx phy_idx)
+{
+	struct bb_h2c_ehtsig_sigb *eht_sig = &bb->bb_h2c_ehtsig_sigb_i;
+	u32 content_channel_len_max = 0, ehtsig_sigb_cr = 0, val = 0;
+	u16 ehtsig_n_sym = 0;
+	u8 force_ehtsig_mcs = eht_sig->ehtsig_sigb_mcs;
+	u32 i = 0;
+	u8 j = 0, byte0 = 0, byte1 = 0, byte2 = 0, byte3 = 0;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
+	u32 hesigb_ehtsig_cr[10] = {cr->hesigb_ehtsig_0, cr->hesigb_ehtsig_1,
+				    cr->hesigb_ehtsig_2, cr->hesigb_ehtsig_3,
+				    cr->hesigb_ehtsig_4, cr->hesigb_ehtsig_5,
+				    cr->hesigb_ehtsig_6, cr->hesigb_ehtsig_7,
+				    cr->hesigb_ehtsig_8, cr->hesigb_ehtsig_9};
+
+	for (i = 0; i < 10; i++)
+		halbb_set_reg_cmn(bb, hesigb_ehtsig_cr[i], MASKDWORD, 0, phy_idx);
+
+	halbb_eht_sig_su_compute(bb, in_plcp, ehtsig_content_ptr, ppdu_bw,
+				 ppdu_type_and_compression, 1, force_ehtsig_mcs,
+				 0, &ehtsig_n_sym, &content_channel_len_max);
+
+	in_plcp->n_hesigb_sym = ehtsig_n_sym;
+
+	for (i = 0; i < content_channel_len_max;) {
+		ehtsig_sigb_cr = hesigb_ehtsig_cr[j];
+
+		byte0 = ehtsig_content_ptr[i++];
+		byte1 = ehtsig_content_ptr[i++];
+		byte2 = ehtsig_content_ptr[i++];
+		byte3 = ehtsig_content_ptr[i++];
+
+		val = byte0 | (byte1 << 8) | (byte2 << 16) | (byte3 << 24);
+
+		halbb_set_reg_cmn(bb, ehtsig_sigb_cr, 0xffffffff, val, phy_idx);
+		j++;
+	}
+}
+
 bool halbb_eht_sig_7(struct bb_info *bb, struct halbb_plcp_info *in,
 		   struct plcp_tx_pre_fec_padding_setting_in_t *in_plcp,
 		   struct plcp_tx_pre_fec_padding_setting_out_t *out,
@@ -921,74 +1402,75 @@ bool halbb_eht_sig_7(struct bb_info *bb, struct halbb_plcp_info *in,
 {
 	struct bb_h2c_ehtsig_sigb *eht_sig = &bb->bb_h2c_ehtsig_sigb_i;
 	u16 i = 0;
-	u16 cmdlen;
-	bool ret_val = false;
-	u32 *bb_h2c = (u32 *)eht_sig;
-	bool eht_sig_valid = false;
-	bool eht_sig_pol = false;
-	u16 eht_sig_n_sym = 0;
+//	u16 cmdlen;
+//	bool ret_val = false;
+//	u32 *bb_h2c = (u32 *)eht_sig;
+//	bool eht_sig_valid = false;
+//	bool eht_sig_pol = false;
+//	u16 eht_sig_n_sym = 0;
 	u8 nss_max = 0, txsb_para = 0;
 	u32 ru_alloc = 0;
 	u32 ch20_with_data = halbb_ru_occupied_sub20_eht_7(bb, in, out);
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
-
-	u32 hesigb_ehtsig_cr[80] = {cr->hesigb_ehtsig_0, cr->hesigb_ehtsig_1,
-				    cr->hesigb_ehtsig_2, cr->hesigb_ehtsig_3,
-				    cr->hesigb_ehtsig_4, cr->hesigb_ehtsig_5,
-				    cr->hesigb_ehtsig_6, cr->hesigb_ehtsig_7,
-				    cr->hesigb_ehtsig_8, cr->hesigb_ehtsig_9,
-				    cr->hesigb_ehtsig_10, cr->hesigb_ehtsig_11,
-				    cr->hesigb_ehtsig_12, cr->hesigb_ehtsig_13,
-				    cr->hesigb_ehtsig_14, cr->hesigb_ehtsig_15,
-				    cr->hesigb_ehtsig_16, cr->hesigb_ehtsig_17,
-				    cr->hesigb_ehtsig_18, cr->hesigb_ehtsig_19,
-				    cr->hesigb_ehtsig_20, cr->hesigb_ehtsig_21,
-				    cr->hesigb_ehtsig_22, cr->hesigb_ehtsig_23,
-				    cr->hesigb_ehtsig_24, cr->hesigb_ehtsig_25,
-				    cr->hesigb_ehtsig_26, cr->hesigb_ehtsig_27,
-				    cr->hesigb_ehtsig_28, cr->hesigb_ehtsig_29,
-				    cr->hesigb_ehtsig_30, cr->hesigb_ehtsig_31,
-				    cr->hesigb_ehtsig_32, cr->hesigb_ehtsig_33,
-				    cr->hesigb_ehtsig_34, cr->hesigb_ehtsig_35,
-				    cr->hesigb_ehtsig_36, cr->hesigb_ehtsig_37,
-				    cr->hesigb_ehtsig_38, cr->hesigb_ehtsig_39,
-				    cr->hesigb_ehtsig_40, cr->hesigb_ehtsig_41,
-				    cr->hesigb_ehtsig_42, cr->hesigb_ehtsig_43,
-				    cr->hesigb_ehtsig_44, cr->hesigb_ehtsig_45,
-				    cr->hesigb_ehtsig_46, cr->hesigb_ehtsig_47,
-				    cr->hesigb_ehtsig_48, cr->hesigb_ehtsig_49,
-				    cr->hesigb_ehtsig_50, cr->hesigb_ehtsig_51,
-				    cr->hesigb_ehtsig_52, cr->hesigb_ehtsig_53,
-				    cr->hesigb_ehtsig_54, cr->hesigb_ehtsig_55,
-				    cr->hesigb_ehtsig_56, cr->hesigb_ehtsig_57,
-				    cr->hesigb_ehtsig_58, cr->hesigb_ehtsig_59,
-				    cr->hesigb_ehtsig_60, cr->hesigb_ehtsig_61,
-				    cr->hesigb_ehtsig_62, cr->hesigb_ehtsig_63,
-				    cr->hesigb_ehtsig_64, cr->hesigb_ehtsig_65,
-				    cr->hesigb_ehtsig_66, cr->hesigb_ehtsig_67,
-				    cr->hesigb_ehtsig_68, cr->hesigb_ehtsig_69,
-				    cr->hesigb_ehtsig_70, cr->hesigb_ehtsig_71,
-				    cr->hesigb_ehtsig_72, cr->hesigb_ehtsig_73,
-				    cr->hesigb_ehtsig_74, cr->hesigb_ehtsig_75,
-				    cr->hesigb_ehtsig_76, cr->hesigb_ehtsig_77,
-				    cr->hesigb_ehtsig_78, cr->hesigb_ehtsig_79};
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
+	u8 sigb_ehtsig_content[96] = {0};
+	u8 *sigb_ehtsig_content_ptr = (u8 *)&sigb_ehtsig_content[0];
+//	u32 hesigb_ehtsig_cr[80] = {cr->hesigb_ehtsig_0, cr->hesigb_ehtsig_1,
+//				    cr->hesigb_ehtsig_2, cr->hesigb_ehtsig_3,
+//				    cr->hesigb_ehtsig_4, cr->hesigb_ehtsig_5,
+//				    cr->hesigb_ehtsig_6, cr->hesigb_ehtsig_7,
+//				    cr->hesigb_ehtsig_8, cr->hesigb_ehtsig_9,
+//				    cr->hesigb_ehtsig_10, cr->hesigb_ehtsig_11,
+//				    cr->hesigb_ehtsig_12, cr->hesigb_ehtsig_13,
+//				    cr->hesigb_ehtsig_14, cr->hesigb_ehtsig_15,
+//				    cr->hesigb_ehtsig_16, cr->hesigb_ehtsig_17,
+//				    cr->hesigb_ehtsig_18, cr->hesigb_ehtsig_19,
+//				    cr->hesigb_ehtsig_20, cr->hesigb_ehtsig_21,
+//				    cr->hesigb_ehtsig_22, cr->hesigb_ehtsig_23,
+//				    cr->hesigb_ehtsig_24, cr->hesigb_ehtsig_25,
+//				    cr->hesigb_ehtsig_26, cr->hesigb_ehtsig_27,
+//				    cr->hesigb_ehtsig_28, cr->hesigb_ehtsig_29,
+//				    cr->hesigb_ehtsig_30, cr->hesigb_ehtsig_31,
+//				    cr->hesigb_ehtsig_32, cr->hesigb_ehtsig_33,
+//				    cr->hesigb_ehtsig_34, cr->hesigb_ehtsig_35,
+//				    cr->hesigb_ehtsig_36, cr->hesigb_ehtsig_37,
+//				    cr->hesigb_ehtsig_38, cr->hesigb_ehtsig_39,
+//				    cr->hesigb_ehtsig_40, cr->hesigb_ehtsig_41,
+//				    cr->hesigb_ehtsig_42, cr->hesigb_ehtsig_43,
+//				    cr->hesigb_ehtsig_44, cr->hesigb_ehtsig_45,
+//				    cr->hesigb_ehtsig_46, cr->hesigb_ehtsig_47,
+//				    cr->hesigb_ehtsig_48, cr->hesigb_ehtsig_49,
+//				    cr->hesigb_ehtsig_50, cr->hesigb_ehtsig_51,
+//				    cr->hesigb_ehtsig_52, cr->hesigb_ehtsig_53,
+//				    cr->hesigb_ehtsig_54, cr->hesigb_ehtsig_55,
+//				    cr->hesigb_ehtsig_56, cr->hesigb_ehtsig_57,
+//				    cr->hesigb_ehtsig_58, cr->hesigb_ehtsig_59,
+//				    cr->hesigb_ehtsig_60, cr->hesigb_ehtsig_61,
+//				    cr->hesigb_ehtsig_62, cr->hesigb_ehtsig_63,
+//				    cr->hesigb_ehtsig_64, cr->hesigb_ehtsig_65,
+//				    cr->hesigb_ehtsig_66, cr->hesigb_ehtsig_67,
+//				    cr->hesigb_ehtsig_68, cr->hesigb_ehtsig_69,
+//				    cr->hesigb_ehtsig_70, cr->hesigb_ehtsig_71,
+//				    cr->hesigb_ehtsig_72, cr->hesigb_ehtsig_73,
+//				    cr->hesigb_ehtsig_74, cr->hesigb_ehtsig_75,
+//				    cr->hesigb_ehtsig_76, cr->hesigb_ehtsig_77,
+//				    cr->hesigb_ehtsig_78, cr->hesigb_ehtsig_79};
 
 	if (in->ppdu_type >= EHT_TB_FMT) {
 		BB_WARNING("[EHT-SIG] Phy%d PPDU not EHT format !!", phy_idx);
 		return false;
 	}
 
-	for (i = 0; i < 80; i++)
-		halbb_set_reg_cmn(bb, hesigb_ehtsig_cr[i], MASKDWORD, 0, phy_idx);
+//	for (i = 0; i < 80; i++)
+//		halbb_set_reg_cmn(bb, hesigb_ehtsig_cr[i], MASKDWORD, 0, phy_idx);
 
-	for (i = 0; i < 80; i++) {
-		eht_sig->ehtsig_sigb_cr[i].address_0 = (u8)(hesigb_ehtsig_cr[i] & 0xff);
-		eht_sig->ehtsig_sigb_cr[i].address_1 = (u8)((hesigb_ehtsig_cr[i] & 0xff00) >> 8);
-		eht_sig->ehtsig_sigb_cr[i].address_2 = (u8)((hesigb_ehtsig_cr[i] & 0xff0000) >> 16);
-		eht_sig->ehtsig_sigb_cr[i].address_3 = (u8)((hesigb_ehtsig_cr[i] & 0xff000000) >> 24);
-	}
+//	for (i = 0; i < 80; i++) {
+//		eht_sig->ehtsig_sigb_cr[i].address_0 = (u8)(hesigb_ehtsig_cr[i] & 0xff);
+//		eht_sig->ehtsig_sigb_cr[i].address_1 = (u8)((hesigb_ehtsig_cr[i] & 0xff00) >> 8);
+//		eht_sig->ehtsig_sigb_cr[i].address_2 = (u8)((hesigb_ehtsig_cr[i] & 0xff0000) >> 16);
+//		eht_sig->ehtsig_sigb_cr[i].address_3 = (u8)((hesigb_ehtsig_cr[i] & 0xff000000) >> 24);
+//	}
 
-	cmdlen = sizeof(struct bb_h2c_ehtsig_sigb);
+//	cmdlen = sizeof(struct bb_h2c_ehtsig_sigb);
 
 	eht_sig->phy_idx = phy_idx;
 
@@ -1050,10 +1532,14 @@ bool halbb_eht_sig_7(struct bb_info *bb, struct halbb_plcp_info *in,
 		eht_sig->ehtsig_sigb_i.usr_info[i].ps160 = (ru_alloc & BIT(8)) >> 8;
 	}
 
-	bb->bb_plcp_i.c2h_done = 0;
+	halbb_eht_sig_gen(bb, in_plcp, sigb_ehtsig_content_ptr,
+			  eht_sig->ehtsig_sigb_i.ppdu_bw, 1, phy_idx);
 
-	ret_val = halbb_fill_h2c_cmd(bb, cmdlen, DM_H2C_FW_EHTSIG_SIGB,
-				     HALBB_H2C_DM, bb_h2c);
+
+//	bb->bb_plcp_i.c2h_done = 0;
+
+//	ret_val = halbb_fill_h2c_cmd(bb, cmdlen, DM_H2C_FW_EHTSIG_SIGB,
+//				     HALBB_H2C_DM, bb_h2c);
 
 	BB_DBG(bb, DBG_PHY_CONFIG,
 	       "[EHT-SIG] {ppdu_bw, sta_list_num}={%d,%d}\n",
@@ -1067,25 +1553,26 @@ bool halbb_eht_sig_7(struct bb_info *bb, struct halbb_plcp_info *in,
 	       eht_sig->ehtsig_sigb_i.usr_info[0].dcm,
 	       eht_sig->ehtsig_sigb_i.usr_info[0].mcs,
 	       eht_sig->ehtsig_sigb_i.usr_info[0].ps160);
+	// original : 500
+	// temporarily increase to 10000 to avoid fail caused by long c2h time
+//	for (i = 0; i < 10000; i++) {
+//		halbb_delay_us(bb, 10);
+//		if (bb->bb_plcp_i.c2h_done) {
+//			// eht_sig_valid = (bool)bb->bb_plcp_i.ru2su_flag;
+//			// Shared para. with n_ehtsig_sym
+//			in_plcp->n_hesigb_sym = (u16)bb->bb_plcp_i.ehtsig_sym_num;
+//			break;
+//		}
+//	}
 
-	for (i = 0; i < 500; i++) {
-		halbb_delay_us(bb, 10);
-		if (bb->bb_plcp_i.c2h_done) {
-			// eht_sig_valid = (bool)bb->bb_plcp_i.ru2su_flag;
-			// Shared para. with n_ehtsig_sym
-			in_plcp->n_hesigb_sym = (u16)bb->bb_plcp_i.ehtsig_sym_num;
-			break;
-		}
-	}
+//	if (!bb->bb_plcp_i.c2h_done) {
+//		BB_WARNING("[EHT-SIG] Phy%d EHT-SIG not ready !!", phy_idx);
+//		return false;
+//	}
 
-	if (!bb->bb_plcp_i.c2h_done) {
-		BB_WARNING("[EHT-SIG] Phy%d EHT-SIG not ready !!", phy_idx);
-		return false;
-	}
-
-	BB_DBG(bb, DBG_PHY_CONFIG,
-	       "[EHT-SIG] C2H polling time=%d, c2h_done=%d, phy_idx=%d\n",
-	       i, bb->bb_plcp_i.c2h_done, phy_idx);
+//	BB_DBG(bb, DBG_PHY_CONFIG,
+//	       "[EHT-SIG] C2H polling time=%d, c2h_done=%d, phy_idx=%d\n",
+//	       i, bb->bb_plcp_i.c2h_done, phy_idx);
 
 	return true;
 }
@@ -1208,7 +1695,7 @@ void halbb_plcp_lsig_7(struct bb_info *bb, struct halbb_plcp_info *in,
 	u32 lsig_bits = 0;
 	u32 lsig = 0;
 	u8 i = 0;
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	BB_DBG(bb, DBG_BIT14, "<====== %s ======>\n", __func__);
 
@@ -1268,7 +1755,7 @@ void halbb_plcp_siga_7(struct bb_info *bb, struct halbb_plcp_info *in,
 	u8 crc4_out = 0;
 	u8 i = 0;
 	u8 n_he_ltf[8] = { 0, 1, 1, 2, 2, 3, 3, 4 };
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	BB_DBG(bb, DBG_BIT14, "<====== %s ======>\n", __func__);
 
@@ -1472,7 +1959,7 @@ void halbb_plcp_usig_7(struct bb_info *bb, struct halbb_plcp_info *in,
 	u8 eht_sig_mcs = 0;
 	u8 i = 0;
 	u8 n_he_ltf[8] = { 0, 1, 1, 2, 2, 3, 3, 4 };
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	BB_DBG(bb, DBG_BIT14, "<====== %s ======>\n", __func__);
 
@@ -1575,7 +2062,7 @@ void halbb_cfg_txinfo_7(struct bb_info *bb, struct halbb_plcp_info *in,
 	u32 ch20_with_data = 0;
 	u8 i = 0;
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	BB_DBG(bb, DBG_BIT14, "<====== %s ======>\n", __func__);
 
@@ -1611,7 +2098,7 @@ void halbb_cfg_txctrl_7(struct bb_info *bb, struct halbb_plcp_info *in,
 {
 	u8 i = 0;
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	u32 pw_boost_fac[4] = {cr->usr0_pw_boost_fctr_db, cr->usr1_pw_boost_fctr_db,
 						   cr->usr2_pw_boost_fctr_db, cr->usr3_pw_boost_fctr_db};
@@ -1813,7 +2300,7 @@ void halbb_plcp_delimiter_7(struct bb_info *bb, struct halbb_plcp_info *in,
 	u8 i = 0;
 	u8 j = 0;
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	u32 delmter[4] = {cr->usr0_delmter, cr->usr1_delmter, cr->usr2_delmter,
 					  cr->usr3_delmter};
@@ -1879,7 +2366,7 @@ void halbb_plcp_delimiter_7(struct bb_info *bb, struct halbb_plcp_info *in,
 
 void halbb_cfg_cck_7(struct bb_info *bb, struct halbb_plcp_info *in, enum phl_phy_idx phy_idx)
 {
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	// === 11b_tx_pmac_psdu_byte === //
 	halbb_set_reg_cmn(bb, cr->usr0_mdpu_len_byte, cr->usr0_mdpu_len_byte_m, in->usr[0].apep, phy_idx);
@@ -1902,7 +2389,7 @@ void halbb_vht_sigb_7(struct bb_info *bb, struct halbb_plcp_info *in,
 	unsigned char sigb[32] = {0};
 	u8 i = 0;
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	u32 vht_sigb_cr[4] = {cr->vht_sigb0, cr->vht_sigb1, cr->vht_sigb2,
 						  cr->vht_sigb3};
@@ -1963,7 +2450,7 @@ void halbb_service_7(struct bb_info *bb, struct halbb_plcp_info *in,
 	u8 i = 0;
 	u32 scrambler_seed[4] = {0};
 
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	u32 service[4] = {cr->usr0_service, cr->usr1_service, cr->usr2_service,
 					  cr->usr3_service};
@@ -2056,18 +2543,18 @@ void halbb_show_input(struct bb_info *bb, struct halbb_plcp_info *in)
 }
 #endif
 
-enum plcp_sts halbb_plcp_gen_7(struct bb_info *bb, struct halbb_plcp_info *in,
+enum plcp_sts halbb_plcp_gen_be(struct bb_info *bb, struct halbb_plcp_info *in,
 		    struct usr_plcp_gen_in *user, enum phl_phy_idx phy_idx)
 {
-	struct bb_plcp_cr_info *cr = &bb->bb_plcp_i.bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 	enum plcp_sts tmp = PLCP_SUCCESS;
-	struct plcp_tx_pre_fec_padding_setting_in_t in_plcp;
-	struct plcp_tx_pre_fec_padding_setting_out_t out;
+	struct plcp_tx_pre_fec_padding_setting_in_t in_plcp = {0};
+	struct plcp_tx_pre_fec_padding_setting_out_t out = {0};
 	//struct _bb_result he_result;
 
 	halbb_mem_cpy(bb, in->usr, user, 4*sizeof(struct usr_plcp_gen_in));
 
-	BB_DBG(bb, DBG_BIT14, "<====== %s ======>\n", __func__);
+	BB_DBG(bb, DBG_BIT14, "<====== %s ======> phy-%d\n", __func__, phy_idx);
 
 	if (bb->bb_dbg_i.cr_mp_recorder_en)
 		BB_TRACE("[MP] // <====== Set PMAC PLCP Info ======>\n");
@@ -2089,7 +2576,7 @@ enum plcp_sts halbb_plcp_gen_7(struct bb_info *bb, struct halbb_plcp_info *in,
 		if ((in->usr[0].mcs == 0) && (in->long_preamble_en == 0))
 			tmp = CCK_INVALID;
 	} else {
-		if (in->ppdu_type >= EHT_MU_SU_FMT) {
+		if (in->ppdu_type >= EHT_MU_SU_FMT && in->ppdu_type < EHT_TB_FMT) {
 			// Calculate user specific field & EHT_SIG_Nsym (with incorrect common field para.)
 			if (!halbb_eht_sig_7(bb, in, &in_plcp, &out, phy_idx))
 				return EHT_INVALID;
@@ -2125,6 +2612,13 @@ enum plcp_sts halbb_plcp_gen_7(struct bb_info *bb, struct halbb_plcp_info *in,
 	if (bb->bb_dbg_i.cr_mp_recorder_en)
 		BB_TRACE("[MP] // <====== Set PMAC PLCP Info [End] ======>\n");
 
+	BB_TRACE("pre_fec_padding_factor = %d\n", out.pre_fec_padding_factor);
+	BB_TRACE("ldpc_extra = %d\n", out.ldpc_extra);
+	BB_TRACE("disamb = %d\n", out.disamb);
+
+	// IC config
+	halbb_ic_cfg_be(bb, in, phy_idx);
+
 	return tmp;
 }
 
@@ -2132,7 +2626,7 @@ enum plcp_sts halbb_plcp_gen_7(struct bb_info *bb, struct halbb_plcp_info *in,
 void halbb_cr_cfg_plcp_init_7(struct bb_info *bb)
 {
 	struct bb_plcp_info *plcp_info = &bb->bb_plcp_i;
-	struct bb_plcp_cr_info *cr = &plcp_info->bb_plcp_cr_i;
+	struct bb_plcp_cr_info *cr = &bb->bb_cmn_hooker->bb_plcp_cr_i;
 
 	switch (bb->cr_type) {
 
@@ -3029,7 +3523,7 @@ void halbb_cr_cfg_plcp_init_7(struct bb_info *bb)
 
 #else
 
-enum plcp_sts halbb_plcp_gen_7(struct bb_info *bb, struct halbb_plcp_info *in,
+enum plcp_sts halbb_plcp_gen_be(struct bb_info *bb, struct halbb_plcp_info *in,
 		    struct usr_plcp_gen_in *user, enum phl_phy_idx phy_idx)
 {
 	return SPEC_INVALID;

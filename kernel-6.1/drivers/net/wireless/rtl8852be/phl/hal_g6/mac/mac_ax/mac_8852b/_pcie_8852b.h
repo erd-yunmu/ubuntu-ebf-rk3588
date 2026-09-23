@@ -21,6 +21,8 @@
 #include "../mac_priv.h"
 #if MAC_AX_8852B_SUPPORT
 
+#define B_IO_BUSY (B_AX_PCIEIO_BUSY | B_AX_PCIEIO_TX_BUSY | B_AX_PCIEIO_RX_BUSY)
+
 /**
  * @addtogroup HCI
  * @{
@@ -312,6 +314,29 @@ u32 pcie_ltr_read_8852b(struct mac_ax_adapter *adapter,
  */
 u32 ltr_sw_trigger_8852b(struct mac_ax_adapter *adapter,
 			 enum mac_ax_pcie_ltr_sw_ctrl ctrl);
+/**
+ * @}
+ * @}
+ */
+
+/**
+ * @addtogroup HCI
+ * @{
+ * @addtogroup PCIE
+ * @{
+ */
+
+/**
+ * @brief ltr_dyn_ctrl_8852b
+ *
+ * @param *adapter
+ * @param type
+ * @param *param
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 ltr_dyn_ctrl_8852b(struct mac_ax_adapter *adapter, enum mac_ax_ltr_dyn_ctrl_tp type,
+		       void *param);
 /**
  * @}
  * @}
@@ -756,6 +781,17 @@ u32 get_pcie_sup_speed_8852b(struct mac_ax_adapter *adapter);
  * @addtogroup PCIE
  * @{
  */
+u32 get_pcie_support_width_8852b(struct mac_ax_adapter *adapter, u16 *width);
+
+u32 get_pcie_link_width_8852b(struct mac_ax_adapter *adapter, u16 *width);
+
+u32 set_pcie_link_width_8852b(struct mac_ax_adapter *adapter,
+			      enum mac_ax_pcie_link_width set_width);
+
+u32 pcie_aspm_frontdoor_set_8852b(struct mac_ax_adapter *adapter);
+
+u32 pcie_set_oobs_8852b(struct mac_ax_adapter *adapter,
+			struct mac_ax_intf_info *intf_info);
 
 #endif /* #if MAC_AX_8852B_SUPPORT */
 #endif

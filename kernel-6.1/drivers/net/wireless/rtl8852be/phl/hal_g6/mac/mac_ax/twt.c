@@ -15,6 +15,7 @@
 
 #include "twt.h"
 
+#if MAC_FEAT_TWT_STA || MAC_FEAT_TWTAP
 u32 twt_info_init(struct mac_ax_adapter *adapter)
 {
 	adapter->twt_info =
@@ -106,6 +107,20 @@ u32 mac_twt_info_upd_h2c(struct mac_ax_adapter *adapter,
 		cpu_to_le32(SET_WORD(info->trgt_h,
 				     FWCMD_H2C_TWTINFO_UPD_TGT_H));
 
+#if NINTENDO_EN
+	content->dword4 =
+		cpu_to_le32(SET_WORD(info->ptt_bef,
+				     FWCMD_H2C_TWTINFO_UPD_PTT_BEF) |
+			    SET_WORD(info->ptt_aft,
+				     FWCMD_H2C_TWTINFO_UPD_PTT_AFT) |
+			    SET_WORD(info->dma_ch,
+				     FWCMD_H2C_TWTINFO_UPD_DMA_CH) |
+			    SET_WORD(info->strerly_intv,
+				     FWCMD_H2C_TWTINFO_UPD_STRERLY_INTV) |
+			    SET_WORD(info->enderly_intv,
+				     FWCMD_H2C_TWTINFO_UPD_ENDERLY_INTV));
+#endif
+
 	ret = mac_h2c_common(adapter, &h2c_info, (u32 *)content);
 
 	PLTFM_FREE(content, h2c_info.content_len);
@@ -126,7 +141,7 @@ u32 mac_twt_act_h2c(struct mac_ax_adapter *adapter,
 	h2c_info.h2c_class = FWCMD_H2C_CL_TWT;
 	h2c_info.h2c_func = FWCMD_H2C_FUNC_TWT_STANSP_UPD;
 	h2c_info.rec_ack = 0;
-	h2c_info.done_ack = 1;
+	h2c_info.done_ack = 0;
 
 	content = (struct fwcmd_twt_stansp_upd *)
 		  PLTFM_MALLOC(h2c_info.content_len);
@@ -149,7 +164,9 @@ u32 mac_twt_act_h2c(struct mac_ax_adapter *adapter,
 
 	return ret;
 }
+#endif //#if MAC_FEAT_TWT_STA || MAC_FEAT_TWTAP
 
+#if MAC_FEAT_TWTAP
 u32 mac_twt_staanno_h2c(struct mac_ax_adapter *adapter,
 			struct mac_ax_twtanno_para *info)
 {
@@ -162,7 +179,7 @@ u32 mac_twt_staanno_h2c(struct mac_ax_adapter *adapter,
 	h2c_info.h2c_cat = FWCMD_H2C_CAT_MAC;
 	h2c_info.h2c_class = FWCMD_H2C_CL_TWT;
 	h2c_info.h2c_func = FWCMD_H2C_FUNC_TWT_ANNOUNCE_UPD;
-	h2c_info.rec_ack = 1;
+	h2c_info.rec_ack = 0;
 	h2c_info.done_ack = 0;
 
 	hdr = (struct fwcmd_twt_announce_upd *)PLTFM_MALLOC(h2c_info.content_len);
@@ -181,7 +198,9 @@ u32 mac_twt_staanno_h2c(struct mac_ax_adapter *adapter,
 
 	return ret;
 }
+#endif
 
+#if MAC_FEAT_TWTAP
 void mac_twt_wait_anno(struct mac_ax_adapter *adapter,
 		       u8 *c2h_content, u8 *upd_addr)
 {
@@ -198,6 +217,7 @@ void mac_twt_wait_anno(struct mac_ax_adapter *adapter,
 	para->macid2 = GET_FIELD(plat_c2h_content,
 				 FWCMD_C2H_WAIT_ANNOUNCE_MACID2);
 }
+#endif
 
 u32 mac_get_tsf(struct mac_ax_adapter *adapter, struct mac_ax_port_tsf *tsf)
 {

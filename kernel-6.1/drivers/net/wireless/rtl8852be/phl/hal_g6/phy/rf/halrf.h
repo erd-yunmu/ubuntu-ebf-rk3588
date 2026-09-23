@@ -28,6 +28,8 @@
 
 /*@--------------------------[Define] ---------------------------------------*/
 
+#define HALRF_DZ_LOG
+
 /*H2C cmd ID*/
 /*Class 8*/
 /*Class 9*/
@@ -38,6 +40,12 @@
 #define FWCMD_H2C_DPK_OFFLOAD 3
 #define FWCMD_H2C_IQK_OFFLOAD 4
 #define FWCMD_H2C_PWR_TBL_OFFLOAD 5
+#define FWCMD_H2C_FT_RFQ 8
+#define FWCMD_H2C_LPS_CFG 9
+#define FWCMD_H2C_RF_REG_FCS 0xA
+#define FWCMD_H2C_BB_REG_FCS 0xB
+#define FWCMD_H2C_KIP_REG_FCS 0xC
+#define FWCMD_H2C_RF_INIT_CFG 0xE
 
 /*C2H classid*/
 enum halrf_c2h_classid {
@@ -46,6 +54,13 @@ enum halrf_c2h_classid {
 };
 
 /*@--------------------------[Enum]------------------------------------------*/
+
+enum halrf_diag_event_level {
+	HALRF_DIAG_EVT_LVL_FATAL = 0,
+	HALRF_DIAG_EVT_LVL_CRITICAL = 1,
+	HALRF_DIAG_EVT_LVL_ERROR = 2
+};
+
 enum halrf_func_idx {
 	RF00_PWR_TRK = 0,
 	RF01_IQK = 1,
@@ -193,6 +208,25 @@ struct halrf_op5k_info {
 #define RF_BACKUP_RF_REG_MAX_NUM (16)
 #define RF_BACKUP_KIP_REG_MAX_NUM (16)
 
+#define RF_FCS_NUM 20
+#ifdef CONFIG_PHL_RFK_FCS_SUPPPORT
+#define HALRF_FCS_SUPPORT
+#endif
+// #ifdef HALRF_FCS_SUPPORT
+// #define RF_FCS_NUM MAX_RFK_FCS_NUMBER
+// #endif
+
+#define HALRF_FCS_FW_RELOAD 0
+
+#if defined(RF_8852C_SUPPORT) 
+#define RFK_REG 3136
+#elif defined (RF_8852B_SUPPORT)
+#define RFK_REG 2560
+#else
+#define RFK_REG 1	//TBD
+#endif
+
+#define FCS_TO_FW_DATA_SIZE 400
 
 struct halrf_iqk_ops {
 	u8 (*iqk_kpath)(struct rf_info *rf, enum phl_phy_idx phy_idx);	
@@ -202,8 +236,20 @@ struct halrf_iqk_ops {
 	void (*iqk_macbb_setting)(struct rf_info *rf, enum phl_phy_idx phy_idx, u8 path);
 	void (*iqk_start_iqk)(struct rf_info *rf, enum phl_phy_idx phy_idx, u8 path);
 	void (*iqk_restore)(struct rf_info *rf, u8 path);
-	void (*iqk_afebb_restore)(struct rf_info *rf, enum phl_phy_idx phy_idx, u8 path);	
+	void (*iqk_afebb_restore)(struct rf_info *rf, enum phl_phy_idx phy_idx, u8 path);
 };
+
+#ifdef HALRF_FCS_SUPPORT
+struct halrf_fcs_info {
+	u32	bkp_index;
+	u32 rst_index;
+	u32	fcs_ch[RF_FCS_NUM]; // ch
+	u32 lok1[RF_FCS_NUM][2]; // 0x5C ch/path
+	u32 lok2[RF_FCS_NUM][2]; // 0x58 ch/path	
+	u32 lok3[RF_FCS_NUM][2]; // 0x55 ch/path	
+	u32 rf_reg[RF_FCS_NUM][RFK_REG]; // ch/reg
+};
+#endif
 
 struct rfk_iqk_info {
 	struct halrf_iqk_ops *rf_iqk_ops;
@@ -249,43 +295,58 @@ struct halrf_dbcc_info {
 };
 
 struct halrf_rfk_ops {
-	void (*halrf_ops_rx_dck)(struct rf_info *rf, enum phl_phy_idx phy, bool is_afe);
-	void (*halrf_ops_do_txgapk)(struct rf_info *rf, enum phl_phy_idx phy);
-	void (*halrf_ops_tssi_disable)(struct rf_info *rf, enum phl_phy_idx phy);
-	void (*halrf_ops_do_tssi)(struct rf_info *rf, enum phl_phy_idx phy, bool hwtx_en);
-	void (*halrf_ops_dpk)(struct rf_info *rf, enum phl_phy_idx phy, bool force);
-	void (*halrf_ops_dack)(struct rf_info *rf, bool force);
-	void (*halrf_ops_lck)(struct rf_info *rf);
-	void (*halrf_ops_lck_tracking)(struct rf_info *rf);
-	void (*halrf_ops_lo_test)(struct rf_info *rf, bool is_on, enum rf_path path);
-	void (*halrf_config_radio_to_fw)(struct rf_info *rf);
-	void (*halrf_ops_txgapk_w_table_default)(struct rf_info *rf, enum phl_phy_idx phy);
-	void (*halrf_ops_txgapk_enable)(struct rf_info *rf, enum phl_phy_idx phy);
-	void (*halrf_ops_txgapk_init)(struct rf_info *rf);
-	void (*halrf_ops_adie_pow_ctrl)(struct rf_info *rf, bool rf_off, bool others_off);
-	void (*halrf_ops_afe_pow_ctrl)(struct rf_info *rf, bool adda_off, bool pll_off);
-	void (*halrf_ops_set_gpio_by_ch)(struct rf_info *rf, enum phl_phy_idx phy, enum band_type band);
+	void (*ops_rx_dck)(struct rf_info *rf, enum phl_phy_idx phy, bool is_afe);
+	void (*ops_do_txgapk)(struct rf_info *rf, enum phl_phy_idx phy);
+	void (*ops_tssi_disable)(struct rf_info *rf, enum phl_phy_idx phy);
+	void (*ops_do_tssi)(struct rf_info *rf, enum phl_phy_idx phy, bool hwtx_en);
+	void (*ops_dpk)(struct rf_info *rf, enum phl_phy_idx phy, bool force);
+	void (*ops_dack)(struct rf_info *rf, bool force);
+	void (*ops_lck)(struct rf_info *rf);
+	void (*ops_lck_tracking)(struct rf_info *rf);
+	void (*ops_lo_test)(struct rf_info *rf, bool is_on, enum rf_path path);
+	void (*ops_config_radio_to_fw)(struct rf_info *rf);
+	void (*ops_txgapk_w_table_default)(struct rf_info *rf, enum phl_phy_idx phy);
+	void (*ops_txgapk_enable)(struct rf_info *rf, enum phl_phy_idx phy);
+	void (*ops_txgapk_init)(struct rf_info *rf);
+	void (*ops_adie_pow_ctrl)(struct rf_info *rf, bool rf_off, bool others_off);
+	void (*ops_afe_pow_ctrl)(struct rf_info *rf, bool adda_off, bool pll_off);
+	void (*ops_set_gpio_by_ch)(struct rf_info *rf, enum phl_phy_idx phy, enum band_type band);
+	bool (*ops_chlk_reload_check)(struct rf_info *rf, enum phl_phy_idx phy);
+	void (*ops_long_pkt_comp)(struct rf_info *rf, enum phl_phy_idx phy);	
 };
 
-struct halrf_rt_rpt {
-	u32 ch_info[10][2][2]; //last10 /cv
-	u8 tssi_code[10][2]; //tssi/path
-	u32 drv_lck_fail_count;
-	u32 fw_lck_fail_count;
-};
 
-struct halrf_rfk_dz_rpt {
-	u32 iqk_dz_code;
-	u32 dpk_dz_code;
-	u32 dack_s0_dz_code;
-	u32 dack_s1_dz_code;	
-	u32 rxdck_dz_code;
-	u32 txgapk_dz_code;
-	u32 tssi_dz_code;
+struct halrf_do_ops_info {
+	bool is_do_ops_rxdck;
+	bool is_do_ops_txgapk;
+	bool is_do_ops_tssi_disable;
+	bool is_do_ops_tssi;
+	bool is_do_ops_dpk;
+	bool is_do_ops_dack;
+	bool is_do_ops_lck;
+	bool is_do_ops_lck_trk;
+	bool is_do_ops_lo_test;
+	bool is_do_ops_radio_to_fw;
+	bool is_do_ops_txgapk_default;
+	bool is_do_ops_txgapk_en;
+	bool is_do_ops_txgapk_init;
+	bool is_do_ops_adie_pow_ctrl;
+	bool is_do_ops_afe_pow_ctrl;
+	bool is_do_ops_set_gpio_by_ch;
+	bool is_do_ops_chlk_reload_chk;
+	bool is_do_ops_get_thermal;
+    	bool is_do_ops_dack_sft_rest;
 };
 
 //===========
 
+struct halrf_rfk_ver  {
+	u8 dack_ver;
+	u8 rxdck_ver;
+	u8 txgapk_ver;
+	u8 tssi_ver;
+	u8 dpk_ver;
+};
 struct rf_info {
 	struct rtw_phl_com_t	*phl_com;
 	struct rtw_hal_com_t	*hal_com;
@@ -383,14 +444,21 @@ struct rf_info {
 	struct halrf_op5k_info op5k_info;
 	struct halrf_mcc_info mcc_info;
 	struct halrf_dbcc_info dbcc_info;
-	//
 	struct halrf_rfk_ops *rf_rfk_ops;
+	struct halrf_do_ops_info ops_info;
+#ifdef HALRF_DZ_LOG
 	struct halrf_rt_rpt rf_rt_rpt;
 	struct halrf_rfk_dz_rpt rfk_dz_rpt;
+	struct halrf_ex_dz_info ex_dz_info;
+#endif
+#ifdef HALRF_FCS_SUPPORT
+	struct halrf_fcs_info	fcs_info;
+#endif
 };
 
 /*@--------------------------[Prptotype]-------------------------------------*/
 void halrf_si_reset(struct rf_info *rf);
+void halrf_bb_reset_trigger(struct rf_info *rf, enum phl_phy_idx phy_idx);
 
 #endif
 

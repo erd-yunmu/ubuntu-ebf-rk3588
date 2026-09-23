@@ -77,8 +77,6 @@ void rtw_free_pwrctrl_priv(_adapter *adapter)
 }
 
 #ifdef CONFIG_RESUME_IN_WORKQUEUE
-extern int rtw_resume_process(_adapter *padapter);
-
 static void resume_workitem_callback(struct work_struct *work)
 {
 	struct pwrctrl_priv *pwrpriv = container_of(work, struct pwrctrl_priv, resume_work);
@@ -125,7 +123,6 @@ inline void rtw_set_do_late_resume(struct pwrctrl_priv *pwrpriv, bool enable)
 #endif
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
-extern int rtw_resume_process(_adapter *padapter);
 static void rtw_early_suspend(struct early_suspend *h)
 {
 	struct pwrctrl_priv *pwrpriv = container_of(h, struct pwrctrl_priv, early_suspend);
@@ -176,9 +173,6 @@ void rtw_unregister_early_suspend(struct pwrctrl_priv *pwrpriv)
 #endif /* CONFIG_HAS_EARLYSUSPEND */
 
 #ifdef CONFIG_ANDROID_POWER
-#if defined(CONFIG_USB_HCI) || defined(CONFIG_SDIO_HCI) || defined(CONFIG_GSPI_HCI)
-	extern int rtw_resume_process(_adapter *padapter);
-#endif
 static void rtw_early_suspend(android_early_suspend_t *h)
 {
 	struct pwrctrl_priv *pwrpriv = container_of(h, struct pwrctrl_priv, early_suspend);
@@ -232,8 +226,9 @@ static void _rtw_ssmps(_adapter *adapter, struct sta_info *sta)
 	struct mlme_ext_priv *pmlmeext = &(adapter->mlmeextpriv);
 	struct mlme_ext_info *pmlmeinfo = &(pmlmeext->mlmext_info);
 
-	issue_action_SM_PS_wait_ack(adapter , sta->phl_sta->mac_addr,
-			sta->phl_sta->asoc_cap.sm_ps, 3, 1);
+	if (!check_fwstate(&adapter->mlmepriv, WIFI_AP_STATE))
+		issue_action_SM_PS_wait_ack(adapter , sta->phl_sta->mac_addr,
+		    sta->phl_sta->asoc_cap.sm_ps, 3, 1);
 
 	if (sta->phl_sta->asoc_cap.sm_ps == SM_PS_STATIC) {
 		pmlmeext->txss_bk = sta->phl_sta->asoc_cap.nss_rx;
@@ -247,32 +242,154 @@ static void _rtw_ssmps(_adapter *adapter, struct sta_info *sta)
 		rtw_phl_sta_assoc_cap_process(sta->phl_sta, _FALSE);
 	}
 
-	rtw_phl_cmd_change_stainfo(adapter_to_dvobj(adapter)->phl,
-				   sta->phl_sta,
-				   STA_CHG_RAMASK,
-				   NULL,
-				   0,
-				   PHL_CMD_DIRECTLY,
-				   0);
+	rtw_sta_hal_ra_mask_update_cmd(adapter, sta, RTW_CMDF_DIRECTLY);
 }
 
 void rtw_ssmps_enter(_adapter *adapter, struct sta_info *sta)
 {
-	if (sta->phl_sta->asoc_cap.sm_ps == SM_PS_STATIC)
+	RTW_INFO(ADPT_FMT" STA [" MAC_FMT "] enter from %d to %d\n", ADPT_ARG(adapter),
+		MAC_ARG(sta->phl_sta->mac_addr), sta->phl_sta->asoc_cap.sm_ps,
+		sta->smps_mode);
+
+	if (sta->smps_mode == SM_PS_DISABLE) {
+		RTW_WARN("%s: invalid mode\n", __func__);
 		return;
+	}
 
-	RTW_INFO(ADPT_FMT" STA [" MAC_FMT "]\n", ADPT_ARG(adapter), MAC_ARG(sta->phl_sta->mac_addr));
-
-	sta->phl_sta->asoc_cap.sm_ps = SM_PS_STATIC;
-	_rtw_ssmps(adapter, sta);
+	switch (sta->phl_sta->asoc_cap.sm_ps) {
+	case SM_PS_DISABLE:
+		if (sta->smps_mode == SM_PS_STATIC) {
+			sta->phl_sta->asoc_cap.sm_ps = SM_PS_STATIC;
+			_rtw_ssmps(adapter, sta);
+		} else if (sta->smps_mode == SM_PS_DYNAMIC &&
+			   check_fwstate(&adapter->mlmepriv, WIFI_AP_STATE)) {
+			sta->phl_sta->asoc_cap.sm_ps = SM_PS_DYNAMIC;
+			sta->rtsen = 1;
+		}
+		break;
+	case SM_PS_STATIC:
+		if (sta->smps_mode == SM_PS_DYNAMIC &&
+		    check_fwstate(&adapter->mlmepriv, WIFI_AP_STATE)) {
+			sta->phl_sta->asoc_cap.sm_ps = SM_PS_DYNAMIC;
+			_rtw_ssmps(adapter, sta);
+			sta->rtsen = 1;
+		}
+		break;
+	case SM_PS_DYNAMIC:
+		if (sta->smps_mode == SM_PS_STATIC &&
+		    check_fwstate(&adapter->mlmepriv, WIFI_AP_STATE)) {
+			sta->phl_sta->asoc_cap.sm_ps = SM_PS_STATIC;
+			sta->rtsen = 0;
+			_rtw_ssmps(adapter, sta);
+		}
+		break;
+	}
 }
 
 void rtw_ssmps_leave(_adapter *adapter, struct sta_info *sta)
 {
-	if (sta->phl_sta->asoc_cap.sm_ps == SM_PS_DISABLE)
-		return;
+	RTW_INFO(ADPT_FMT" STA [" MAC_FMT "] leave from %d to %d\n", ADPT_ARG(adapter),
+		MAC_ARG(sta->phl_sta->mac_addr), sta->phl_sta->asoc_cap.sm_ps,
+		sta->smps_mode);
 
-	RTW_INFO(ADPT_FMT" STA [" MAC_FMT "] \n", ADPT_ARG(adapter), MAC_ARG(sta->phl_sta->mac_addr));
-	sta->phl_sta->asoc_cap.sm_ps = SM_PS_DISABLE;
-	_rtw_ssmps(adapter, sta);
+	if (sta->smps_mode != SM_PS_DISABLE) {
+		RTW_WARN("%s: invalid mode %d\n", __func__, sta->smps_mode);
+		return;
+	}
+
+	switch (sta->phl_sta->asoc_cap.sm_ps) {
+	case SM_PS_STATIC:
+		sta->phl_sta->asoc_cap.sm_ps = SM_PS_DISABLE;
+		_rtw_ssmps(adapter, sta);
+		break;
+	case SM_PS_DYNAMIC:
+		if (check_fwstate(&adapter->mlmepriv, WIFI_AP_STATE)) {
+			sta->phl_sta->asoc_cap.sm_ps = SM_PS_DISABLE;
+			sta->rtsen = 0;
+		}
+		break;
+	}
 }
+
+void rtw_update_ips_setting(int make_level, int ins_level, u8 *mode, u8 *cap, bool is_wow)
+{
+	if (ins_level != PS_IPS_MAX)
+		make_level = ins_level;
+
+	switch (make_level) {
+	case PS_IPS_NONE:
+		*mode = PS_OP_MODE_DISABLED;
+		*cap = PS_CAP_PWRON;
+		break;
+	case PS_IPS_RF_OFF:
+		*mode = is_wow? PS_OP_MODE_FORCE_ENABLED: PS_OP_MODE_AUTO;
+		*cap = PS_CAP_PWRON | PS_CAP_RF_OFF;
+		break;
+	case PS_IPS_CLK_GATED:
+		*mode = is_wow? PS_OP_MODE_FORCE_ENABLED: PS_OP_MODE_AUTO;
+		*cap = PS_CAP_PWRON | PS_CAP_RF_OFF | PS_CAP_CLK_GATED;
+		break;
+	case PS_IPS_PWR_GATED:
+		*mode = is_wow? PS_OP_MODE_FORCE_ENABLED: PS_OP_MODE_AUTO;
+		*cap = PS_CAP_PWRON | PS_CAP_RF_OFF | PS_CAP_CLK_GATED | PS_CAP_PWR_GATED;
+		break;
+	case PS_PWR_OFF:
+		*mode = is_wow? PS_OP_MODE_FORCE_ENABLED: PS_OP_MODE_AUTO;
+		*cap = PS_CAP_PWR_OFF;
+		break;
+	default:
+		RTW_ERR("%s ips mode level (%d) invalid\n", __func__, ins_level);
+	}
+}
+
+void rtw_update_lps_setting(int make_level, int ins_level, u8 *mode, u8 *cap, bool is_wow)
+{
+	if (ins_level != PS_LPS_MAX)
+		make_level = ins_level;
+
+	switch (make_level) {
+	case PS_LPS_NONE:
+		*mode = PS_OP_MODE_DISABLED;
+		*cap = PS_CAP_PWRON;
+		break;
+	case PS_LPS_RF_OFF:
+		*mode = is_wow? PS_OP_MODE_FORCE_ENABLED: PS_OP_MODE_AUTO;
+		*cap = PS_CAP_PWRON | PS_CAP_RF_OFF;
+		break;
+	case PS_LPS_CLK_GATED:
+		*mode = is_wow? PS_OP_MODE_FORCE_ENABLED: PS_OP_MODE_AUTO;
+		*cap = PS_CAP_PWRON | PS_CAP_RF_OFF | PS_CAP_CLK_GATED;
+		break;
+	case PS_LPS_PWR_GATED:
+		*mode = is_wow? PS_OP_MODE_FORCE_ENABLED: PS_OP_MODE_AUTO;
+		*cap = PS_CAP_PWRON | PS_CAP_RF_OFF | PS_CAP_CLK_GATED | PS_CAP_PWR_GATED;
+		break;
+	default:
+		RTW_ERR("%s lps mode level (%d) invalid\n", __func__, ins_level);
+	}
+}
+
+#if defined(CONFIG_RTW_LPS) || defined(CONFIG_RTW_LPS_WOW)
+void rtw_update_lps_listen_beacon_mode(
+	u8 bcn_mode, u8 awake_interval,
+	enum rtw_lps_listen_bcn_mode *lps_bcn_mode, u8 *lps_awake_interval)
+{
+	if (bcn_mode == RTW_LPS_LISTEN_BCN_MAX) {
+		*lps_bcn_mode = RTW_LPS_RLBM_MAX;
+		*lps_awake_interval = 0;
+	} else if (bcn_mode == RTW_LPS_RLBM_MIN ||
+		   bcn_mode == RTW_LPS_RLBM_MAX) {
+		*lps_bcn_mode = bcn_mode;
+		*lps_awake_interval = 0;
+		RTW_INFO(
+			"%s: awake interval will not be applied, since beacon mode is not RTW_LPS_RLBM_USERDEFINE\n",
+			__func__);
+	} else if (bcn_mode == RTW_LPS_RLBM_USERDEFINE) {
+		*lps_bcn_mode = bcn_mode;
+		*lps_awake_interval = awake_interval;
+	} else {
+		RTW_ERR("%s lps listen beacon mode (%d) invalid\n", __func__,
+			bcn_mode);
+	}
+}
+#endif /* defined(CONFIG_RTW_LPS) || defined(CONFIG_RTW_LPS_WOW) */
