@@ -62,23 +62,28 @@ int rtw_chset_init(struct rtw_chset *chset, u8 band_bmp)
 {
 	u8 ch_num = 0;
 	int band, i;
+	u8 (*center_chs_num)(u8);
+	u8 (*center_chs)(u8, u8);
+	u8 cch_num;
 
 	_rtw_memset(chset->chs, 0, sizeof(RT_CHANNEL_INFO) * MAX_CHANNEL_NUM);
 
 	for (band = 0; band < BAND_MAX; band++) {
-		u8 center_ch_num;
-		u8 (*center_chs)(u8, u8);
-
 		if (!(band_bmp & band_to_band_cap(band)))
 			continue;
 
-		center_ch_num = center_chs_num_of_band[band](CHANNEL_WIDTH_20);
+		center_chs_num = center_chs_num_of_band[band];
 		center_chs = center_chs_of_band[band];
+		if (!center_chs_num || !center_chs) {
+			rtw_warn_on(1);
+			continue;
+		}
 
 		chset->chs_of_band[band] = &chset->chs[ch_num];
 		chset->chs_len_of_band[band] = 0;
 
-		for (i = 0; i < center_ch_num; i++) {
+		cch_num = center_chs_num(CHANNEL_WIDTH_20);
+		for (i = 0; i < cch_num; i++) {
 			chset->chs[ch_num].band = band;
 			chset->chs[ch_num].ChannelNum = center_chs(CHANNEL_WIDTH_20, i);
 			chset->chs_len_of_band[band]++;;
@@ -148,6 +153,11 @@ static int _rtw_chset_search_bch(const struct rtw_chset *chset, enum band_type b
 int rtw_chset_search_bch(const struct rtw_chset *chset, enum band_type band, u32 ch)
 {
 	return _rtw_chset_search_bch(chset, band, ch, false);
+}
+
+int rtw_chset_search_bch_include_dis(const struct rtw_chset *chset, enum band_type band, u32 ch)
+{
+	return _rtw_chset_search_bch(chset, band, ch, true);
 }
 
 RT_CHANNEL_INFO *rtw_chset_get_chinfo_by_bch(struct rtw_chset *chset, enum band_type band, u32 ch, bool include_dis)

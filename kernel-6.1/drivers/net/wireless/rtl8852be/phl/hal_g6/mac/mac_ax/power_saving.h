@@ -21,12 +21,16 @@
 #include "fwcmd.h"
 #include "role.h"
 
+#if MAC_FEAT_LPS
+
 #define	MACID_GRP_SH	5
 #define	MACID_GRP_MASK	0x1F
 #define PORT_SH		4
 
 #define REQ_BCN_TO_VAL_MIN	4
 #define REQ_BCN_TO_VAL_MAX	64
+#define REQ_DTIM_TO_VAL_MIN	7
+#define REQ_DTIM_TO_VAL_MAX	15
 
 #define REQ_BCN_TO_VAL_NONVALID	0
 
@@ -37,6 +41,44 @@
 #define MP_INTER_BCN_LPS_OP_PCIE	0x48151B2
 #define MP_INTER_BCN_LPS_OP_USB		0x4C151B2
 #define MP_INTER_BCN_LPS_OP_SDIO	0x48051B2
+
+#define RPWM_SEQ_NUM_MAX                3
+#define CPWM_SEQ_NUM_MAX                3
+
+//RPWM bit definition
+#define PS_RPWM_TOGGLE			BIT(15)
+#define PS_RPWM_ACK             BIT(14)
+#define PS_RPWM_SEQ_NUM_SH      12
+#define PS_RPWM_SEQ_NUM_MSK     0x3
+#define PS_RPWM_NOTIFY_WAKE     BIT(8)
+#define PS_RPWM_STATE_SH        0
+#define PS_RPWM_STATE_MSK       0x7
+
+//CPWM bit definition
+#define PS_CPWM_TOGGLE			BIT(15)
+#define PS_CPWM_ACK             BIT(14)
+#define PS_CPWM_SEQ_NUM_SH      12
+#define PS_CPWM_SEQ_NUM_MSK     0x3
+#define PS_CPWM_RSP_SEQ_NUM_SH  8
+#define PS_CPWM_RSP_SEQ_NUM_MSK 0x3
+#define PS_CPWM_STATE_SH        0
+#define PS_CPWM_STATE_MSK       0x7
+
+//(workaround) CPWM register is in OFF area
+//LPS debug message bit definition
+#define B_PS_LDM_32K_EN         BIT(31)
+#define B_PS_LDM_32K_EN_SH      31
+
+// Bcn rx rate
+#define R_RXBCNHIT_RATE R_AX_USER_DEFINED_0
+#define B_AX_BCN_RATE_SH 0
+#define B_AX_BCN_RATE_MSK 0xff
+#define B_AX_BCN_HIT_RATE_SH 8
+#define B_AX_BCN_HIT_RATE_MSK 0xff
+#define B_AX_BCN_NO_HIT_RATE_SH 16
+#define B_AX_BCN_NO_HIT_RATE_MSK 0xff
+#define B_AX_ROLE_IDX_SH 24
+#define B_AX_ROLE_IDX_MSK 0xff
 
 /**
  * @enum last_rpwm_mode
@@ -51,6 +93,45 @@
 enum last_rpwm_mode {
 	LAST_RPWM_PS        = 0x0,
 	LAST_RPWM_ACTIVE    = 0x6,
+};
+
+/**
+ * @macid_grp_list
+ *
+ * @brief macid_grp_list
+ *
+ * @var macid_grp_list::MACID_GRP_0
+ * Please Place Description here.
+ * @var macid_grp_list::MACID_GRP_1
+ * Please Place Description here.
+ * @var macid_grp_list::MACID_GRP_2
+ * Please Place Description here.
+ * @var macid_grp_list::MACID_GRP_3
+ * Please Place Description here.
+ */
+enum macid_grp_list {
+	MACID_GRP_0	= 0,
+	MACID_GRP_1	= 1,
+	MACID_GRP_2	= 2,
+	MACID_GRP_3	= 3,
+};
+
+/**
+ * @_MAC_PWR_STATE_
+ *
+ * @brief _MAC_PWR_STATE_
+ *
+ * @var _MAC_PWR_STATE_::MAC_PWR_STATE_PDN
+ * Please Place Description here.
+ * @var _MAC_PWR_STATE_::MAC_PWR_STATE_ACTIVE
+ * Please Place Description here.
+ * @var _MAC_PWR_STATE_::MAC_PWR_STATE_LPS
+ * Please Place Description here.
+ */
+enum _MAC_PWR_STATE_ {
+	MAC_PWR_STATE_PDN = 0,     // 0: MAC power state is power down.
+	MAC_PWR_STATE_ACTIVE = 1,  // 1: MAC power state is active.
+	MAC_PWR_STATE_LPS = 2,     // 2: MAC power state is lps.
 };
 
 /**
@@ -129,27 +210,6 @@ struct ps_rpwm_parm {
 };
 
 /**
- * @macid_grp_list
- *
- * @brief macid_grp_list
- *
- * @var macid_grp_list::MACID_GRP_0
- * Please Place Description here.
- * @var macid_grp_list::MACID_GRP_1
- * Please Place Description here.
- * @var macid_grp_list::MACID_GRP_2
- * Please Place Description here.
- * @var macid_grp_list::MACID_GRP_3
- * Please Place Description here.
- */
-enum macid_grp_list {
-	MACID_GRP_0	= 0,
-	MACID_GRP_1	= 1,
-	MACID_GRP_2	= 2,
-	MACID_GRP_3	= 3,
-};
-
-/**
  * @struct ips_cfg
  * @brief ips_cfg
  *
@@ -213,7 +273,7 @@ struct req_pwr_state_cfg {
  * Please Place Description here.
  * @var req_pwr_lvl_cfg::bcn_to_lvl
  * Please Place Description here.
- * @var req_pwr_lvl_cfg::rsvd0
+ * @var req_pwr_lvl_cfg::dtim_to_val
  * Please Place Description here.
  */
 struct req_pwr_lvl_cfg {
@@ -222,7 +282,7 @@ struct req_pwr_lvl_cfg {
 	u32 ps_lvl:4;
 	u32 trx_lvl:4;
 	u32 bcn_to_lvl:4;
-	u32 rsvd0:4;
+	u32 dtim_to_val:4;
 };
 
 /**
@@ -238,6 +298,8 @@ struct lps_option_cfg {
 	u32 req_lps_option:1;
 	u32 rsvd0:31;
 };
+
+#endif // #if MAC_FEAT_LPS
 
 /**
  * @struct tbtt_tuning_cfg
@@ -258,6 +320,8 @@ struct tbtt_tuning_cfg {
 	u32 rsvd0:24;
 	u32 shift_val;
 };
+
+#if MAC_FEAT_LPS
 
 /**
  * @addtogroup PowerSaving
@@ -532,6 +596,29 @@ u32 mac_lps_option_cfg(struct mac_ax_adapter *adapter,
  */
 
 /**
+ * @brief mac_chk_mac_pwr_state
+ *
+ * @param *adapter
+ * @param *pwr_state
+ * @param *action
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 mac_chk_mac_pwr_state(struct mac_ax_adapter *adapter, u32 *pwr_state,
+			 enum mac_ax_chk_mac_pwr_state_action action);
+/**
+ * @}
+ * @}
+ */
+
+#endif // #if MAC_FEAT_LPS
+
+/**
+ * @}
+ * @}
+ */
+
+/**
  * @brief mac_tbtt_tuning_cfg
  *
  * @param *adapter
@@ -541,10 +628,6 @@ u32 mac_lps_option_cfg(struct mac_ax_adapter *adapter,
  */
 u32 mac_tbtt_tuning_cfg(struct mac_ax_adapter *adapter,
 			struct mac_ax_tbtt_tuning_info *tbtt_tuning_info);
-/**
- * @}
- * @}
- */
 
 #endif // #define _MAC_AX_POWER_SAVING_H_
 

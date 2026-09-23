@@ -16,7 +16,10 @@
 #define _HAL_BTC_H_
 
 #include "halbtc_fw.h"
+#include "halbtc_fwdef.h"
 #include "halbtc_dbg_cmd.h"
+
+#define BTC_BRANCH BTC_BRANCH_FORMAL
 
 #ifdef CONFIG_RTL8852A
 #define BTC_8852A_SUPPORT
@@ -36,6 +39,10 @@
 #define BTC_8852BT_SUPPORT
 #endif
 
+#ifdef CONFIG_RTL8852BPT
+#define BTC_8852B_SUPPORT
+#define BTC_8852BPT_SUPPORT
+#endif
 
 #ifdef CONFIG_RTL8851B
 #define BTC_8852B_SUPPORT
@@ -46,9 +53,18 @@
 #define BTC_8852C_SUPPORT
 #endif
 
+#ifdef CONFIG_RTL8842A
+#define BTC_8842A_SUPPORT
+#endif
+
 #ifdef CONFIG_RTL8852D
 #define BTC_8852D_SUPPORT
 #endif
+
+/* this follwing define setup must sync with fw-btc */
+/* ============================================================= */
+#define BTC_AISO_SUPPORT
+//#define BTC_FDDT_TRAIN_SUPPORT /* this setup must sync with fw btc  */
 
 #ifdef CONFIG_PHL_IO_OFLD
 #define BTC_CONFIG_FW_IO_OFLD_SUPPORT
@@ -60,15 +76,19 @@
 #define BTC_PLATFORM_BIG_ENDIAN 1
 #endif
 
-#define BTC_GPIO_DBG_EN 1
+//#define BTC_PAUTO_LESCAN
+#define LE_INIT_INTVL 160
+/* ============================================================= */
+
 #define BTC_PHY_MAX 2
 #define BTC_WL_TX_PWR_CTRL_OFLD
-#define BTC_WL_MAX_ROLE_NUMBER 6  /* Must = MAX_WIFI_ROLE_NUMBER */
 
 #define BTC_FDDT_INFO_MAP_DEF 0x1f
 
 #define BTC_WL_RX_TP_LOW_THRES 10
 #define BTC_WL_TX_TP_LOW_THRES 1
+
+#define BTC_WL_TP_BUSY_THRES 1600 /* in k-bit/sec */
 
 #define BTC_SCBD_REWRITE_DELAY 1000
 #define BTC_MSG_MAXLEN 200
@@ -80,8 +100,9 @@
 #define BTC_RSN_MAXLEN 32
 #define BTC_ACT_MAXLEN 32
 #define BTC_PERIODIC_TIME 100 /* 100ms, must be non zero and < 2000 */
+#define BTC_COUNTRY_CODE_TIME 2000 /*sned country code to BT every 2s until BT receive*/
+#define BTC_FORCE_LEAVE_PS_TIME 2000 /*force leave ps 2s at most when receive country code*/
 #define BTC_WRFK_MAXT 300 /* WL RFK 300ms */
-#define BTC_BRFK_MAXT 800 /* BT RFK 800ms */
 #define BTC_SPKT_MAXT 4000 /* special pkt unit: 4000ms */
 #define BTC_REA2DP_MAXT 16000 /* for A2DP resume, 16sec = 16000ms */
 #define BTC_WLPS_MAXT 6000
@@ -115,13 +136,16 @@
 #define BTC_BB_PRE_AGC_FWCTRL 2
 #define BTC_BB_PRE_AGC_NOTFOUND 3
 
-#define BTC_BB_TX_1SS_LIMIT 0 /* if halbb support rtw_hal_btc_cfg_tx_1ss */
+#define BTC_BB_TX_1SS_LIMIT 1 /* if halbb support rtw_hal_btc_cfg_tx_1ss */
 
 #define BTC_AP_BLIST 0 /* Sporton AP issue*/
 
 #define R_BTC_ZB_COEX_TBL_0 0xDA28
 #define R_BTC_ZB_COEX_TBL_1 0xDA2C
 #define R_BTC_ZB_BREAK_TBL  0xDA50
+
+#define BTC_COUNTRY_CODE_OP 4 /*for mailbox 0x11*/
+#define BTC_COUNTRY_CODE_RETRY_LIMIT 3
 
 struct btc_t;
 
@@ -152,6 +176,7 @@ struct btc_t;
 
 #define BTC_TDMA_WLROLE_MAX 3
 #define BTC_FREERUN_ANTISO_MIN 30
+#define BTC_DEFAULT_ANISO 10
 #define BTC_FDDTRAIN_ANTISO_MIN 10
 #define BTC_FDDTRAIN_ANTISO_MAX 40
 #define BTC_BT_RX_NORMAL_LVL 7
@@ -195,9 +220,6 @@ struct btc_t;
 #define _update_poicy hal_btc_fw_set_policy
 #define _set_fw_rpt hal_btc_fw_set_rpt
 
-#define run_rsn(r) \
-	(hal_mem_cmp(btc->hal, btc->dm.run_reason, r, _os_strlen((u8*)r))? 0:1)
-
 #define _rsn_cpy(dst, src, len) \
 	do { \
 		len = (len < BTC_RSN_MAXLEN) ? len : BTC_RSN_MAXLEN-1; \
@@ -235,6 +257,7 @@ struct btc_t;
 #define _tdma_set_fddt_en() btc->dm.tdma.option_ctrl |= CXOPCTL_FDDT_ENABLE
 #define _tdma_set_fddt_renew() btc->dm.tdma.option_ctrl |= CXOPCTL_FDDT_RENEW
 #define _tdma_set_fddt_dbg() btc->dm.tdma.option_ctrl |= CXOPCTL_FDDT_DEBUG
+#define _tdma_set_le_init_end() btc->dm.tdma.option_ctrl |= CXOPCTL_LE_INIT_EXEC
 
 #define _slot_cmp(dst, src) \
 	hal_mem_cmp(btc->hal, dst, src, sizeof(struct fbtc_slot))
@@ -262,6 +285,13 @@ struct btc_t;
 #define btc_swap4(a, b, c, d) \
 		do { btc_swap2(a, d); btc_swap2(b, c); } while (0)
 
+#define	BTC_RSSI_HIGH(_rssi_) \
+			((_rssi_ == BTC_RSSI_ST_HIGH || _rssi_ == BTC_RSSI_ST_STAY_HIGH)? 1:0)
+#define	BTC_RSSI_LOW(_rssi_) \
+			((_rssi_ == BTC_RSSI_ST_LOW || _rssi_ == BTC_RSSI_ST_STAY_LOW)? 1:0)
+#define	BTC_RSSI_CHANGE(_rssi_) \
+			((_rssi_ == BTC_RSSI_ST_LOW || _rssi_ == BTC_RSSI_ST_HIGH)? 1:0)
+
 #ifdef BTC_AISO_SUPPORT
 #define BT_PSD_RPT_TYPE_QUERY	0x0 /* report when WLAN query */
 #define BT_PSD_RPT_TYPE_CAL	0x1 /* when PSD scan idx~idx+4, idx+5~idx+9 */
@@ -276,7 +306,91 @@ struct btc_t;
 #define BT_PSD_TX_BUSY_CNT_MIN	3    /* data num per frequency point*/
 #define BT_PSD_VALID_CH_MIN	4    /* 1~5, 3/4 is more suitbale */
 #define BT_PSD_PRINT_PERIOD	10
+
+enum btc_aiso_method {
+	/* tx busy raw */
+	BTC_AISO_M0, /* m0: busy avg */
+	BTC_AISO_M1, /* m1: busy max */
+	BTC_AISO_M2, /* m2: busy remove max and min */
+	BTC_AISO_M3, /* m3: busy remove max */
+
+	/* tx busy filter */
+	BTC_AISO_M4, /* m4:filter m1 */
+
+	/* all data */
+	BTC_AISO_M5, /* m5: hold max value */
+	BTC_AISO_M6, /* m6: filter m5 */
+
+	/* avg */
+	BTC_AISO_M01_AVG, /* avg (m0 + m1) */
+	BTC_AISO_M12_AVG, /* avg (m1 + m2) */
+	BTC_AISO_M13_AVG, /* avg (m1 + m3) */
+
+	/* avg */
+	BTC_AISO_M46_AVG, /* avg (m4 + m6) */
+
+	BTC_AISO_M_MAX,
+	BTC_AISO_M_ALL = 0xFF,
+};
+
+struct btc_aiso_val {
+	u16 psd_rec_cnt;
+
+	s8 psd_max[10];
+	s8 psd_min[10];
+
+	s8 txbusy_psd_max[10];
+	s8 txbusy_psd_min[10];
+	s8 txbusy_psd_avg[10];
+	u8 txbusy_psd_cnt[10];
+	s16 txbusy_psd_sum[10];
+
+	s8 txidle_psd_max[10];
+	s8 txidle_psd_min[10];
+	s8 txidle_psd_avg[10];
+	u8 txidle_psd_cnt[10];
+	s16 txidle_psd_sum[10];
+
+	s8 wl_air_psd_avg;   /* Avg(Tx-power) in dBm per MHz */
+	s32 wl_air_psd_sum;  /* Sum(Tx-power) in dBm per MHz */
+
+	u8 last_1st_half[6];
+	u8 last_2nd_half[6];
+
+	s16 aiso_md[BTC_AISO_M_MAX];
+	s8 rx_psd[BTC_AISO_M_MAX];
+};
+
+struct btc_bt_psd_dm {
+	struct btc_aiso_val aiso_val;
+	u8 aiso_data_ok;
+	u8 aiso_db_cnt;
+	u8 aiso_cmd_cnt;
+	u8 aiso_db[16];
+	u8 aiso_sort_db[16];
+	u8 aiso_sort_avg;
+	u8 raw_info[8];
+
+	u8 aiso_method;
+	u8 aiso_method_final;
+	u8 rec_start;
+	u8 wl_tx_ss;
+	u8 wl_ch_last;
+	u16 wl_tx_rate;
+
+	bool en;
+	bool rec_time_out;
+};
 #endif
+
+enum btc_special_ap {
+	BTC_SPAP_UNKNOWN = 0,
+	BTC_SPAP_TPL = 1,
+	BTC_SPAP_VW = 2,
+	BTC_SPAP_SPTN = 3,
+	BTC_SPAP_CMW = 4, /* for tis test */
+	BTC_SPAP_MAX
+};
 
 enum btc_wl_gpio_debug {
 	BTC_DBG_GNT_BT = 0,
@@ -337,12 +451,6 @@ enum btc_coex_dir {
 	BTC_COEX_INPUT = 2
 };
 
-enum btc_cx_run_info {
-	BTC_CXR_WSCBD = 0,
-	BTC_CXR_RESULT,
-	BTC_CXR_MAX
-};
-
 enum btc_bt_rfk_state {
 	BTC_BRFK_STOP = 0,
 	BTC_BRFK_START = 1
@@ -400,7 +508,7 @@ enum btc_branch_type {
 	BTC_BRANCH_HP,
 	BTC_BRANCH_LENOVO,
 	BTC_BRANCH_XBOX,
-	BTC_BRANCH_HW,
+	BTC_BRANCH_WBX,
 	BTC_BRANCH_ROKU,
 	BTC_BRANCH_LG,
 	BTC_BRANCH_SAMSUNG,
@@ -434,10 +542,20 @@ enum btc_dbg_str_type {
 	BTC_STR_FDDT_TYPE,
 	BTC_STR_FDDT_STATE,
 	BTC_STR_FDDT_NORUN,
+	BTC_STR_FDDT_TSTATE,
+	BTC_STR_FDDT_TPHASE,
+	BTC_STR_FDDT_CHKMAP,
 	BTC_STR_DMERROR,
 	BTC_STR_FWERROR,
 	BTC_STR_RPTMATCH,
 	BTC_STR_H2CERROR,
+	BTC_STR_VENDORID,
+	BTC_STR_SPAP,
+	BTC_STR_ESOC,
+	BTC_STR_ESOC_INTF,
+	BTC_STR_ESOC_STATE,
+	BTC_STR_ESOC_FUNC,
+	BTC_STR_PATH,
 	BTC_STR_MAX
 };
 
@@ -475,13 +593,6 @@ enum btc_chip_feature {
 	BTC_FEAT_WLAN_ACT_MUX = BIT(2)
 };
 
-#define	BTC_RSSI_HIGH(_rssi_) \
-	((_rssi_ == BTC_RSSI_ST_HIGH || _rssi_ == BTC_RSSI_ST_STAY_HIGH)? 1:0)
-#define	BTC_RSSI_LOW(_rssi_) \
-	((_rssi_ == BTC_RSSI_ST_LOW || _rssi_ == BTC_RSSI_ST_STAY_LOW)? 1:0)
-#define	BTC_RSSI_CHANGE(_rssi_) \
-	((_rssi_ == BTC_RSSI_ST_LOW || _rssi_ == BTC_RSSI_ST_HIGH)? 1:0)
-
 enum btc_coex_info_map_en {
 	BTC_COEX_INFO_CX = BIT(0),
 	BTC_COEX_INFO_WL = BIT(1),
@@ -490,6 +601,18 @@ enum btc_coex_info_map_en {
 	BTC_COEX_INFO_MREG = BIT(4),
 	BTC_COEX_INFO_SUMMARY = BIT(5),
 	BTC_COEX_INFO_ALL = 0xff
+};
+
+enum btc_vendor_id {
+	BTC_VID_NONE = 0,
+	BTC_VID_HP = 1,
+	BTC_VID_ASUS = 2,
+	BTC_VID_ACER = 3,
+	BTC_VID_LNV = 4,
+	BTC_VID_NEC = 5,
+	BTC_VID_AMD = 6,
+	BTC_VID_FUJITSU = 7,
+	BTC_VID_DELL = 8,
 };
 
 /* list all-chip scoreboard definition, remap at chip file */
@@ -508,6 +631,7 @@ enum btc_w2b_scoreboard {
 	BTC_WSCB_RXSCAN_PRI = BIT(12), /* set BT Rx-Scan PTA pri */
 	BTC_WSCB_BT_HILNA = BIT(13), /* request BT use Hi-LNA table for BTG */
 	BTC_WSCB_BTLOG = BIT(14),  /* open BT log */
+	BTC_WSCB_COUNTRY_CODE = BIT(15), /*ready to send country code*/
 	BTC_WSCB_ALL = 0xffffff /* driver only use bit0~23 */
 };
 
@@ -524,18 +648,10 @@ enum btc_b2w_scoreboard {
 	BTC_BSCB_BT_LNAB1 = BIT(10),
 	BTC_BSCB_WLRFK = BIT(11),
 	BTC_BSCB_BT_HILNA = BIT(13), /* reply if BT use Hi-LNA table for BTG */
+	BTC_BSCB_COUNTRY_CODE = BIT(15), /*ready to receive country code*/
 	BTC_BSCB_BT_CONNECT = BIT(16), /* If any BT connected */
 	BTC_BSCB_PATCH_CODE = BIT(30),  /* BT use 1: patch code 2:ROM code */
 	BTC_BSCB_ALL = 0x7fffffff
-};
-
-enum btc_bt_link_status {
-	BTC_BLINK_CONNECT = BIT(0),
-	BTC_BLINK_BLE_CONNECT = BIT(1),
-	BTC_BLINK_ACL_BUSY = BIT(2),
-	BTC_BLINK_SCO_BUSY = BIT(3),
-	BTC_BLINK_MESH_BUSY = BIT(4),
-	BTC_BLINK_INQ_PAGE = BIT(5)
 };
 
 enum btc_dcnt_type {
@@ -566,26 +682,27 @@ enum btc_dcnt_type {
 	BTC_DCNT_MAX
 };
 
-enum btc_ncnt_type {
-	BTC_NCNT_POWER_ON = 0x0,
-	BTC_NCNT_POWER_OFF,
-	BTC_NCNT_INIT_COEX,
-	BTC_NCNT_SCAN_START,
-	BTC_NCNT_SCAN_FINISH,
-	BTC_NCNT_SPECIAL_PACKET,
-	BTC_NCNT_SWITCH_BAND,
-	BTC_NCNT_RFK_TIMEOUT,
-	BTC_NCNT_SHOW_COEX_INFO,
-	BTC_NCNT_ROLE_INFO,
-	BTC_NCNT_RADIO_STATE,
-	BTC_NCNT_CUSTOMERIZE,
-	BTC_NCNT_WL_RFK,
-	BTC_NCNT_WL_STA,
-	BTC_NCNT_WL_STA_LAST,
-	BTC_NCNT_FWINFO,
-	BTC_NCNT_TIMER,
-	BTC_NCNT_RESUME_DL_FW,
-	BTC_NCNT_MAX
+enum btc_ntfy_type {
+	BTC_NTFY_POWER_ON = 0x0,
+	BTC_NTFY_POWER_OFF,
+	BTC_NTFY_INIT_COEX,
+	BTC_NTFY_SCAN_START,
+	BTC_NTFY_SCAN_FINISH,
+	BTC_NTFY_SPECIAL_PACKET,
+	BTC_NTFY_SWITCH_BAND,
+	BTC_NTFY_RFK_TIMEOUT,
+	BTC_NTFY_SHOW_COEX_INFO,
+	BTC_NTFY_ROLE_INFO,
+	BTC_NTFY_RADIO_STATE,
+	BTC_NTFY_CUSTOMERIZE,
+	BTC_NTFY_WL_RFK,
+	BTC_NTFY_WL_STA,
+	BTC_NTFY_WL_STA_LAST,
+	BTC_NTFY_FWINFO,
+	BTC_NTFY_TIMER,
+	BTC_NTFY_RESUME_DL_FW,
+	BTC_NTFY_COUNTRYCODE,
+	BTC_NTFY_MAX
 };
 
 enum btc_wl_state_cnt {
@@ -622,18 +739,22 @@ enum btc_bt_state_cnt {
 	BTC_BCNT_ROLESW,
 	BTC_BCNT_AFH,
 	BTC_BCNT_INFOUPDATE,
+	BTC_BCNT_LEAUDIO_INFOUPDATE,
 	BTC_BCNT_INFOSAME,
 	BTC_BCNT_SCBDUPDATE,
 	BTC_BCNT_HIPRI_TX,
 	BTC_BCNT_HIPRI_RX,
 	BTC_BCNT_LOPRI_TX,
 	BTC_BCNT_LOPRI_RX,
-	BTC_BCNT_POLUT,
+	BTC_BCNT_POLUT_NOW,
+	BTC_BCNT_POLUT_DIFF,
 	BTC_BCNT_RATECHG,
 	BTC_BCNT_AFH_CONFLICT,
 	BTC_BCNT_AFH_LE_CONFLICT,
 	BTC_BCNT_AFH_UPDATE,
 	BTC_BCNT_AFH_LE_UPDATE,
+	BTC_BCNT_AFH_CHN,
+	BTC_BCNT_AFH_LE_CHN,
 	BTC_BCNT_MAX
 };
 
@@ -704,12 +825,13 @@ enum btc_dm_error {
 	BTC_DMERR_RFE_TYPE0 = BIT(20),
 	BTC_DMERR_H2C_BUF_OVER = BIT(21),
 	BTC_DMERR_BTTX_HANG = BIT(22), /* for SNR too low bug, BT has no Tx req*/
-	BTC_DMERR_WL_NO_STA_NTFY = BIT(23), /*  */
+	BTC_DMERR_WL_NO_STA_NTFY = BIT(23),
 	BTC_DMERR_H2C_BMAP_MISMATCH = BIT(24),
 	BTC_DMERR_C2H_BMAP_MISMATCH = BIT(25),
 	BTC_DMERR_H2C_STRUCT_INVALID = BIT(26),
 	BTC_DMERR_C2H_STRUCT_INVALID = BIT(27),
-	BTC_DMERR_MAX = 28
+	BTC_DMERR_CCODE_BTNORS = BIT(28),
+	BTC_DMERR_MAX = 29
 };
 
 enum btc_fw_btc_error {
@@ -765,71 +887,6 @@ enum btc_fw_data_dir {
 	BTC_FW_C2H = 1
 };
 
-struct btc_byte_map_desc {
-	u16 map_u8;
-	u16 map_u16;
-	u16 map_u32;
-};
-
-struct btc_btinfo_lb2 {
-	u8 connect: 1;
-	u8 sco_busy: 1;
-	u8 inq_pag: 1;
-	u8 acl_busy: 1;
-	u8 hfp: 1;
-	u8 hid: 1;
-	u8 a2dp: 1;
-	u8 pan: 1;
-};
-
-struct btc_btinfo_lb3 {
-	u8 retry: 4;
-	u8 cqddr: 1;
-	u8 inq: 1;
-	u8 mesh_busy: 1;
-	u8 pag: 1;
-};
-
-struct btc_btinfo_hb0 {
-	u8 rssi;
-};
-
-struct btc_btinfo_hb1 {
-	u8 ble_connect: 1;
-	u8 reinit: 1;
-	u8 relink: 1;
-	u8 igno_wl: 1;
-	u8 voice: 1;
-	u8 ble_scan: 1;
-	u8 role_sw: 1;
-	u8 multi_link: 1;
-};
-
-struct btc_btinfo_hb2 {
-	u8 pan_active: 1;
-	u8 afh_update: 1;
-	u8 a2dp_active: 1;
-	u8 slave: 1;
-	u8 hid_slot: 2;
-	u8 hid_cnt: 2;
-};
-
-struct btc_btinfo_hb3 {
-	u8 a2dp_bitpool: 6;
-	u8 tx_3M: 1;
-	u8 a2dp_sink: 1;
-};
-
-union btc_btinfo {
-	u8 val;
-	struct btc_btinfo_lb2 lb2;
-	struct btc_btinfo_lb3 lb3;
-	struct btc_btinfo_hb0 hb0;
-	struct btc_btinfo_hb1 hb1;
-	struct btc_btinfo_hb2 hb2;
-	struct btc_btinfo_hb3 hb3;
-};
-
 enum btc_rinfo_lo_b2 {
 	BTC_RINFO_INQPAG = BIT(2),
 };
@@ -870,7 +927,9 @@ enum btc_bt_profile_map {
 	BTC_BT_HID = BIT(1),
 	BTC_BT_A2DP = BIT(2),
 	BTC_BT_PAN = BIT(3),
-	BTC_PROFILE_MAX = 4,
+	BTC_BT_BIS = BIT(4),
+	BTC_BT_CIS = BIT(5),
+	BTC_PROFILE_MAX = 5,
 	BTC_BT_ALL = 0xf
 };
 
@@ -885,6 +944,23 @@ enum btc_ant_share_type {
 	BTC_ANT_SHARED = 0,
 	BTC_ANT_DEDICATED,
 	BTC_ANTTYPE_MAX
+};
+
+enum btc_extsoc_func { /* cx->other.type */
+	BTC_EXTSOC_FUNC_NONE = 0,
+	BTC_EXTSOC_FUNC_BT = BIT(0),
+	BTC_EXTSOC_FUNC_ZB = BIT(1),
+	BTC_EXTSOC_FUNC_THREAD = BIT(2),
+	BTC_EXTSOC_FUNC_24GPRO = BIT(3),
+	BTC_EXTSOC_FUNC_MAX
+};
+
+enum btc_extsoc_interface { /* cx->other.hw_coex */
+	BTC_EXTSOC_INTF_NONE = 0,
+	BTC_EXTSOC_INTF_PTA = BIT(0),
+	BTC_EXTSOC_INTF_MBX = BIT(1),
+	BTC_EXTSOC_INTF_SWIO = BIT(2),
+	BTC_EXTSOC_INTF_MAX
 };
 
 enum btc_bt_combo_type {
@@ -970,10 +1046,110 @@ enum btc_fddt_result {
 	BTC_FDDT_RESULT_MAX
 };
 
+enum btc_fddt_train_state {
+	CX_FDDT_STATE_STOP = 0,
+	CX_FDDT_STATE_RUN = 1,
+	CX_FDDT_STATE_OK = 2,
+	CX_FDDT_STATE_FAIL = 3,
+	CX_FDDT_STATE_NA = 4,  /* no train, always TDD for low-rssi case */
+	CX_FDDT_STATE_DEBUG = 5,
+	CX_FDDT_STATE_MAX
+};
+
+enum btc_fddt_train_phase {
+	CX_FDDT_PHASE_STOP = 0, /* for train-enable = 0  */
+	CX_FDDT_PHASE_DEBUG = 1,   /* for train-debug = 1 or TDMA-off  */
+	CX_FDDT_PHASE_TDD = 2,      /* TDD-phase  */
+	CX_FDDT_PHASE_FDD_A = 3,    /* FDD-phase, use A/B toggle for different step */
+	CX_FDDT_PHASE_FDD_B = 4,
+	CX_FDDT_PHASE_TDD_STAY = 5, /* always TDD, for TRAINFAIL/TRAINNA or CN/Low-TP */
+	CX_FDDT_PHASE_FDD_STAY = 6, /* for TRAINOK always FDD */
+	CX_FDDT_PHASE_TDD_FAIL = 7,
+	CX_FDDT_PHASE_MAX
+};
+
+enum btc_fddt_check_map {
+	CX_FDDT_CHKMAP_NOEMPTY = 0,
+	CX_FDDT_CHKMAP_TPRATIO = 1,
+	CX_FDDT_CHKMAP_TPLOW = 2,
+	CX_FDDT_CHKMAP_CN = 3,
+	CX_FDDT_CHKMAP_CELLCHG = 4,
+	CX_FDDT_CHKMAP_NHM = 5,
+	CX_FDDT_CHKMAP_MAX
+};
+
 enum btc_wa_type {
 	BTC_WA_5G_HI_CH_RX = BIT(0),
 	BTC_WA_NULL_AP = BIT(1),
-	BTC_WA_HFP_ZB = BIT(2)  /* HFP PTA req bit4 define issue */
+	BTC_WA_HFP_ZB = BIT(2),  /* HFP PTA req bit4 define issue */
+	BTC_WA_HFP_LAG = BIT(3),  /*52BT WL break BT Rx lag issue*/
+	BTC_WA_INIT_SCAN = BIT(4),  /*52A/C/D init scan move to wl slot WA*/
+	BTC_WA_CO_RX = BIT(5)  /* 52B high rate co-rx issue */
+};
+
+struct btc_byte_map_desc {
+	u16 map_u8;
+	u16 map_u16;
+	u16 map_u32;
+};
+
+struct btc_btinfo_lb2 {
+	u8 connect: 1;
+	u8 sco_busy: 1;
+	u8 inq_pag: 1;
+	u8 acl_busy: 1;
+	u8 hfp: 1;
+	u8 hid: 1;
+	u8 a2dp: 1;
+	u8 pan: 1;
+};
+
+struct btc_btinfo_lb3 {
+	u8 retry: 4;
+	u8 cqddr: 1;
+	u8 inq: 1;
+	u8 mesh_busy: 1;
+	u8 pag: 1;
+};
+
+struct btc_btinfo_hb0 {
+	u8 rssi;
+};
+
+struct btc_btinfo_hb1 {
+	u8 ble_connect: 1;
+	u8 reinit: 1;
+	u8 relink: 1;
+	u8 igno_wl: 1;
+	u8 voice: 1;
+	u8 ble_scan: 1;
+	u8 role_sw: 1;
+	u8 multi_link: 1;
+};
+
+struct btc_btinfo_hb2 {
+	u8 pan_active: 1;
+	u8 afh_update: 1;
+	u8 a2dp_active: 1;
+	u8 slave: 1;
+	u8 hid_slot: 2;
+	u8 hid_cnt: 2;
+};
+
+struct btc_btinfo_hb3 {
+	u8 a2dp_bitpool: 6;
+	u8 tx_3M: 1;
+	u8 a2dp_sink: 1;
+};
+
+union btc_btinfo {
+	u8 val;
+	struct btc_btinfo_lb2 lb2;
+	struct btc_btinfo_lb3 lb3;
+	struct btc_btinfo_hb0 hb0;
+	struct btc_btinfo_hb1 hb1;
+	struct btc_btinfo_hb2 hb2;
+	struct btc_btinfo_hb3 hb3;
 };
 
 struct btc_wl_tx_limit_para {
@@ -981,6 +1157,15 @@ struct btc_wl_tx_limit_para {
 	u8 tx_1ss;
 	u32 tx_time;	/* unit: us */
 	u16 tx_retry;
+};
+
+struct btc_wl_trx_nss_para {
+	u8 tx_limit;
+	u8 rx_limit;
+	u8 tx_ss;
+	u8 rx_ss;
+	u8 tx_path;
+	u8 rx_path;
 };
 
 struct btc_rf_trx_para {
@@ -1139,6 +1324,17 @@ struct btc_bt_pan_desc {
 	struct btc_bt_link_pan links[BTC_DEV_LINK_MAX];
 };
 
+struct btc_bt_leaudio_desc {
+	u32 exist: 1;
+	u32 exist_last: 1;
+	u32 bis_cnt: 2;
+	u32 cis_cnt: 2;
+	u32 rssi: 8;
+	u32 bis_cnt_last: 2;
+	u32 cis_cnt_last: 2;
+	u32 rsvd: 14;
+};
+
 struct btc_bt_noprofile_desc {
 	u8 no_profile_cnt;
 	u8 no_profile[BTC_DEV_LINK_MAX];
@@ -1159,40 +1355,6 @@ struct btc_wl_nhm {
 	u8 last_ccx_rpt_stamp;
 	s8 pwr_max;
 	s8 pwr_min;
-};
-
-struct btc_chip_ops {
-	void (*set_rfe)(struct btc_t *btc);
-	void (*init_cfg)(struct btc_t *btc);
-	void (*wl_tx_power)(struct btc_t *btc, u32 level);
-	void (*wl_rx_gain)(struct btc_t *btc, u32 level);
-	void (*wl_btg_standby)(struct btc_t *btc, u32 state);
-	void (*wl_req_mac)(struct btc_t *btc, u8 mac_id);
-	void (*get_reg_status)(struct btc_t *btc, u8 type, void *status);
-	u8 (*bt_rssi)(struct btc_t *btc, u8 val);
-};
-
-struct btc_chip {
-	u32 chip_id;
-	u32 hw;  /* chip HW feature/parameter */
-	u8 btcx_desired; /* bt fw desired coex version */
-	u32 wlcx_desired; /* wl fw desired coex version */
-	u8 scbd; /* scoreboard version, 0: not support*/
-	u8 mailbox; /* mailbox version, 0: not support */
-	u8 pta_mode;
-	u8 pta_direction;
-	u8 afh_guard_ch;
-	const u8 *wl_rssi_thres; /* wl rssi thre level */
-	const u8 *bt_rssi_thres; /* bt rssi thre level */
-	u8 rssi_tol; /* rssi tolerance */
-	struct btc_chip_ops *ops;
-	u8 mon_reg_num;
-	struct fbtc_mreg *mon_reg;
-	u8 rf_para_ulink_num;
-	struct btc_rf_trx_para *rf_para_ulink;
-	u8 rf_para_dlink_num;
-	struct btc_rf_trx_para *rf_para_dlink;
-
 };
 
 struct btc_bt_rfk_info {
@@ -1258,45 +1420,11 @@ struct btc_wl_dbcc_info {
 	u16 role[HW_PHY_MAX]; /* role in each phy */
 };
 
-struct btc_wl_active_role { /* struct size must be n*4 bytes */
-	u8 connected;
-	u8 pid;
-	u8 phy;
-	u8 noa;
-
-	u8 band; /* enum band_type RF band: 2.4G/5G/6G */
-	u8 client_ps;
-	u8 bw; /* enum channel_width */
-	u8 role; /*enum role_type */
-
-	u8 ch;
-	u8 noa_dur; /* ms */
-	u8 rsvd1;
-	u8 rsvd2;
-};
-
 struct btc_wl_scc_ctrl {
 	u8 null_role1;
 	u8 null_role2;
 	u8 e2g_null; /* if tx null at E2G-slot before entering EBT-slot */
 	u8 rsvd;
-};
-
-#define FCX_VER_ROLE 7
-struct btc_wl_role_info { /* struct size must be n*4 bytes */
-	u8 connect_cnt;
-	u8 link_mode;
-	u8 link_mode_chg;
-	u8 p2p_2g;
-
-	struct btc_wl_active_role active_role[BTC_WL_MAX_ROLE_NUMBER];
-
-	u32 role_map;
-	u32 mrole_type; /* btc_wl_mrole_type */
-	u32 mrole_noa_duration; /* ms */
-	u32 dbcc_en;
-	u32 dbcc_chg;
-	u32 dbcc_2g_phy; /* which phy operate in 2G, HW_PHY_0 or HW_PHY_1 */
 };
 
 struct btc_wl_link_info {
@@ -1366,28 +1494,6 @@ struct btc_rf_cfg {
 	u32 val;
 };
 
-struct btc_ops {
-	void (*ntfy_power_on)(struct btc_t *btc);
-	void (*ntfy_power_off)(struct btc_t *btc);
-	void (*ntfy_init_coex)(struct btc_t *btc, u8 mode);
-	void (*ntfy_scan_start)(struct btc_t *btc, u8 band_idx, u8 band);
-	void (*ntfy_scan_finish)(struct btc_t *btc, u8 band_idx);
-	void (*ntfy_switch_band)(struct btc_t *btc, u8 band_idx, u8 band);
-	void (*ntfy_specific_packet)(struct btc_t *btc, u8 pkt_type);
-	void (*ntfy_role_info)(struct btc_t *btc, u8 rid,
-			      struct btc_wl_link_info *info,
-			      enum link_state reason);
-	void (*ntfy_radio_state)(struct btc_t *btc, u8 rf_state);
-	void (*ntfy_customerize)(struct btc_t *btc, u8 type, u16 len, u8 *buf);
-	u8  (*ntfy_wl_rfk)(struct btc_t *btc, u8 phy, u8 type, u8 state);
-	void (*ntfy_wl_sta)(struct btc_t *btc, struct rtw_stats *phl_stats,
-			   u8 ntfy_num, struct rtw_phl_stainfo_t *sta[],
-			   u8 reason);
-	void (*ntfy_fwinfo)(struct btc_t *btc, u8 *buf, u32 len, u8 cls,
-			   u8 func);
-	void (*ntfy_timer)(struct btc_t *btc, u16 tmr_id);
-};
-
 struct btc_bt_smap {
 	u32 connect: 1;
 	u32 ble_connect: 1;
@@ -1410,6 +1516,7 @@ struct btc_bt_link_info {
 	struct btc_bt_hid_desc hid_desc;
 	struct btc_bt_a2dp_desc a2dp_desc;
 	struct btc_bt_pan_desc pan_desc;
+	struct btc_bt_leaudio_desc leaudio_desc;
 	struct btc_bt_noprofile_desc noprofile_desc;
 	union btc_bt_state_map status;
 
@@ -1429,9 +1536,24 @@ struct btc_bt_link_info {
 };
 
 struct btc_3rdcx_info {
-	u8 type;   /* 0: none, 1:zigbee, 2:LTE  */
-	u8 hw_coex;
-	u16 rsvd;
+	u8 type;
+	u8 hw_coex; /* Hard-Wire coex interface support */
+	u8 ext_pta_type; /* 0: RTK 4-wire mode, 1: 3-wire mode */
+	u8 ext_pta_req_exist;
+
+#if 0
+	u8 esoc_state;
+	u8 esoc_ch;
+	u8 esoc_bw;
+	u8 esoc_rssi;
+	u8 esoc_co_ch;
+	u8 esoc_type;
+#endif
+
+	u32 ext_hpta_cfg;
+	u32 ext_hmbx_cfg;
+	u32 ext_swout_cfg;
+	u32 ext_swin_cfg;
 };
 
 struct btc_rf_para {
@@ -1471,8 +1593,7 @@ struct btc_bt_info {
 	u32 lna_constrain: 3;
 	u32 scan_info_update: 1;
 	u32 fw_ver_mismatch: 1;
-
-	u32 rsvd: 16;
+	u32 rsvd: 24;
 };
 
 struct btc_bt_mb_devinfo {
@@ -1480,6 +1601,17 @@ struct btc_bt_mb_devinfo {
 	u8 len;
 	u8 sub_id;
 	u8 data[5];
+};
+
+struct btc_bt_mb_leaudio_info {
+	u8 cmd;
+	u8 len;
+	u8 exist: 1;
+	u8 bis: 1;
+	u8 cis: 1;
+	u8 lb2rsvd: 5;
+	u8 rssi;
+	u32 hbrsvd;
 };
 
 struct btc_wl_smap {
@@ -1538,147 +1670,22 @@ struct btc_wl_info {
 	u8 is_5g_hi_channel: 1;
 	u8 busy_to_idle: 1;
 	u8 legacy_mode: 1;
-	u8 rsvd: 2;
+	u8 he_mode: 1;
+	u8 client_cnt_inc_2g: 1; /* client count increase for 2G AP/P2P */
 
 	u8 coex_mode;
 
+	u8 country_code[2];
+	u8 ap_type;
+
 	u32 scbd;
-	u32 rx_err_ratio_2s;
 	u32 busy_t; /* busy start time */
-};
-
-struct btc_ant_info {
-	u8 type;  /* shared, dedicated(non-shared) */
-	u8 num;   /* antenna count  */
-	u8 isolation;
-	u8 single_pos;/* wifi 1ss-1ant at 0:S0 or 1:S1 */
-
-	u8 diversity; /* only for wifi use 1-antenna */
-	u8 btg_pos; /* btg-circuit at 0:S0/1:S1/others:all */
-	u8 stream_cnt;  /* spatial_stream count */
-	u8 rsvd;
-};
-
-struct btc_module {
-	u8 rfe_type;
-	u8 kt_ver;
-	u8 bt_solo;
-	u8 bt_pos; /* wl-end view: get from efuse, must compare bt.btg_type*/
-
-	u8 switch_type; /* WL/BT switch type: 0: internal, 1: external */
-	u8 wa_type; /* WA type: 0:none, 1: 51B 5G_Hi-Ch_Rx */
-	u8 kt_ver_adie;
-	u8 rsvd;
-
-	struct btc_ant_info ant;
-};
-
-#define FCX_VER_INIT 7
-struct btc_init_info {
-	u8 wl_guard_ch;
-	u8 wl_only;
-	u8 wl_init_ok;
-	u8 dbcc_en;
-
-	u8 cx_other;
-	u8 bt_only;
-	u8 rsvd1;
-	u8 rsvd2;
-
-	struct btc_module module;
 };
 
 /* record the last 20 reason/action */
 struct btc_dm_step {
 	char step[BTC_DM_MAXSTEP][BTC_RSN_MAXLEN];
 	u32 cnt;
-};
-
-struct btc_fddt_bt_stat {
-	struct btc_rpt_ctrl_a2dp_empty a2dp_last;
-	u32 retry_last;
-};
-
-struct btc_fddt_cell {
-	s8 wl_pwr_min;
-	s8 wl_pwr_max;
-	s8 bt_pwr_dec_max;
-	s8 bt_rx_gain;
-};
-
-struct btc_fddt_fail_check { /* for cell stay in training */
-	u8 check_map;         /* check pass condition if bit-map = 1 */
-	u8 bt_no_empty_cnt;   /* 0-fail if no bt-empty >= th in train_cycle */
-	u8 wl_tp_ratio;       /* 1-fail if wl tp rise ratio < th */
-	u8 wl_kpibtr_ratio;   /* 2-fail if phase_now_tp < phase_last_tp * kpibtr_ratio*/
-};
-
-struct btc_fddt_break_check { /* for cell stay in training or train-ok */
-	u8 check_map;            /* check break condition if bit-map = 1 */
-	u8 bt_no_empty_cnt;  /* 0-break if no empty count >= th  */
-	u8 wl_tp_ratio;      /* 1-break if wl tp ratio < th (%)*/
-	u8 wl_tp_low_bound;  /* 2-break if wl tp (in Mbps) < th */
-
-	u8 cn;               /* 3-break if (cn >= cn_limit) >= th cycle */
-	u8 cell_chg;         /* 4-break if non-matched-RSSI >= th cycle */
-	s8 nhm_limit;        /* 5-break if nhm >= th --> ill-condition*/
-	u8 cn_limit;         /* if condition number >= th --> ill-condition  */
-};
-
-struct btc_fddt_time_ctrl {
-	/* 1 TDD cycle = w1 + b1, FDD 1cycle = w1fdd-slot + b1fdd-slot */
-	u8 m_cycle; /* KPI Moving-Average-Cycle: 1~32 cycles */
-	u8 w_cycle; /* Start to calcul WKPI after this if train-phase change */
-	u8 k_cycle; /* Total kpi-estimate cycles for each training-step */
-	u8 rsvd;
-};
-
-#define FCX_VER_FDDT 7
-struct btc_fddt_train_info {
-	struct btc_fddt_time_ctrl t_ctrl;
-	struct btc_fddt_break_check b_chk;
-	struct btc_fddt_fail_check f_chk;
-	struct btc_fddt_cell cell_ul[5][5];
-	struct btc_fddt_cell cell_dl[5][5];
-};
-
-struct btc_fddt_info {
-	u8 type;         /* refer to enum btc_fddt_type */
-	u8 result;       /* fw send fdd-training status by c2h  */
-	u8 state;        /* refer to enum btc_fddt_state */
-
-	u8 wl_iot[6];    /* wl bssid  */
-	u16 bt_iot;      /* bt vendor-id */
-
-	u32 nrsn_map;    /* the reason map for no-run fdd-traing */
-	struct btc_fddt_bt_stat bt_stat;  /* bt statistics */
-	struct btc_fddt_train_info train;
-	struct btc_fddt_train_info train_now;
-};
-
-#define FCX_VER_TRX 7
-struct btc_trx_info {
-	u8 tx_lvl;
-	u8 rx_lvl;
-	u8 wl_rssi;
-	u8 bt_rssi;
-
-	s8 tx_power; /* absolute Tx power (dBm), 0xff-> no BTC control */
-	s8 rx_gain;  /* rx gain table index (TBD.) */
-	s8 bt_tx_power; /* decrease Tx power (dB) */
-	s8 bt_rx_gain;  /* LNA constrain level */
-
-	u8 cn; /* condition_num */
-	s8 nhm;
-	u8 bt_profile;
-	u8 rsvd2;
-
-	u16 tx_rate;
-	u16 rx_rate;
-
-	u32 tx_tp;
-	u32 rx_tp;
-	u32 rx_err_ratio;
 };
 
 /* dynamic coex mechanism  */
@@ -1693,6 +1700,7 @@ struct btc_dm {
 	struct btc_init_info init_info; /* pass to wl_fw if offload */
 	struct btc_rf_trx_para rf_trx_para;
 	struct btc_wl_tx_limit_para wl_tx_limit;
+	struct btc_wl_trx_nss_para wl_trx_nss;
 	struct btc_wl_scc_ctrl wl_scc;
 	struct btc_dm_step dm_step;
 
@@ -1709,7 +1717,7 @@ struct btc_dm {
 
 	u32 set_ant_path;
 	u32 cnt_dm[BTC_DCNT_MAX];
-	u32 cnt_notify[BTC_NCNT_MAX];
+	u32 cnt_notify[BTC_NTFY_MAX];
 
 	u32 wl_only: 1; /* drv->Fw if offload  */
 	u32 wl_fw_cx_offload: 1; /* BTC_CX_FW_OFFLOAD from FW code  */
@@ -1732,7 +1740,8 @@ struct btc_dm {
 	u32 client_ps_tdma_on: 1;
 	u32 rx_err_rpt_en: 1;
 	u32 wl_btg_rx_rb: 2;  /* 0x10980 reg state from reg-moniter read-back */
-	u32 rsvd2: 4;
+	u32 wl_trx_nss_en: 1; /* xTxR switch to 1T1R */
+	u32 rsvd2: 3;
 
 	u8 wl_pre_agc: 2;
 	u8 wl_lna2: 1;
@@ -1743,7 +1752,16 @@ struct btc_dm {
 
 	u8 bt_select: 2; /* 0:s0, 1:s1, 2:s0 & s1, refer to enum btc_bt_index */
 	u8 btc_initing: 1;
-	u8 rsvd3: 5;
+	u8 le_init_en: 1;
+	u8 country_code_proc: 1;
+	u8 country_code_retry: 2;
+	u8 cmw_ap: 1;
+
+	u8 vid;
+
+	u8 ntfy_type;
+
+	u8 rssi_offset2;
 
 	u32 e2g_slot_limit;
 	u32 e2g_slot_nulltx_time;
@@ -1758,15 +1776,6 @@ struct btc_cx {
 	u32 state_map; /* wl/bt combined state map  */
 	u32 cnt_bt[BTC_BCNT_MAX];
 	u32 cnt_wl[BTC_WCNT_MAX];
-};
-
-
-#define FCX_VER_CTRL 7
-struct btc_ctrl {
-	u8 manual;
-	u8 igno_bt;
-	u8 always_freerun;
-	u8 rsvd;
 };
 
 struct btc_dbg {
@@ -1795,7 +1804,10 @@ struct btc_t {
 	struct btc_module mdinfo;
 	struct btf_fwinfo fwinfo;
 	struct btc_dbg dbg;
+
+#ifdef BTC_AISO_SUPPORT
 	struct btc_bt_psd_dm bt_psd_dm;
+#endif
 
 	/* btc timers */
 	bool tmr_init;
@@ -1815,6 +1827,63 @@ struct btc_t {
 	u32 bt_req_len[HW_PHY_MAX]; /* request bt-slot in WL SCC/MCC +BT coex */
 	u8 bt_req_stbc; /*STBC flag*/
 	bool bt_req_en;
+
+	bool wlcli_h2c_cmd;  /* the H2C cmd is triggered by wlcli cmd */
+};
+
+struct btc_chip_ops {
+	void (*set_rfe)(struct btc_t *btc);
+	void (*init_cfg)(struct btc_t *btc);
+	void (*wl_tx_power)(struct btc_t *btc, u32 level);
+	void (*wl_rx_gain)(struct btc_t *btc, u32 level);
+	void (*wl_btg_standby)(struct btc_t *btc, u32 state);
+	void (*wl_req_mac)(struct btc_t *btc, u8 mac_id);
+	void (*get_reg_status)(struct btc_t *btc, u8 type, void *status);
+	u8 (*bt_rssi)(struct btc_t *btc, u8 val);
+};
+
+struct btc_ops {
+	void (*ntfy_power_on)(struct btc_t *btc);
+	void (*ntfy_power_off)(struct btc_t *btc);
+	void (*ntfy_init_coex)(struct btc_t *btc, u8 mode);
+	void (*ntfy_scan_start)(struct btc_t *btc, u8 band_idx, u8 band);
+	void (*ntfy_scan_finish)(struct btc_t *btc, u8 band_idx);
+	void (*ntfy_switch_band)(struct btc_t *btc, u8 band_idx, u8 band);
+	void (*ntfy_specific_packet)(struct btc_t *btc, u8 pkt_type);
+	void (*ntfy_role_info)(struct btc_t *btc, u8 rid,
+			      struct btc_wl_link_info *info,
+			      enum link_state reason);
+	void (*ntfy_radio_state)(struct btc_t *btc, u8 rf_state);
+	void (*ntfy_customerize)(struct btc_t *btc, u8 type, u16 len, u8 *buf);
+	u8  (*ntfy_wl_rfk)(struct btc_t *btc, u8 phy, u8 type, u8 state);
+	void (*ntfy_wl_sta)(struct btc_t *btc, struct rtw_stats *phl_stats,
+			   u8 ntfy_num, struct rtw_phl_stainfo_t *sta[],
+			   u8 reason);
+	void (*ntfy_fwinfo)(struct btc_t *btc, u8 *buf, u32 len, u8 cls,
+			   u8 func);
+	void (*ntfy_timer)(struct btc_t *btc, u16 tmr_id);
+};
+
+struct btc_chip {
+	u32 chip_id;
+	u32 hw;  /* chip HW feature/parameter */
+	u8 btcx_desired; /* bt fw desired coex version */
+	u32 wlcx_desired; /* wl fw desired coex version */
+	u8 scbd; /* scoreboard version, 0: not support*/
+	u8 mailbox; /* mailbox version, 0: not support */
+	u8 pta_mode;
+	u8 pta_direction;
+	u8 afh_guard_ch;
+	u8 *wl_rssi_thres; /* wl rssi thre level */
+	u8 *bt_rssi_thres; /* bt rssi thre level */
+	u8 rssi_tol; /* rssi tolerance */
+	struct btc_chip_ops *ops;
+	u8 mon_reg_num;
+	struct fbtc_mreg *mon_reg;
+	u8 rf_para_ulink_num;
+	struct btc_rf_trx_para *rf_para_ulink;
+	u8 rf_para_dlink_num;
+	struct btc_rf_trx_para *rf_para_dlink;
 };
 
 static void _ntfy_power_on(struct btc_t *btc);
@@ -1844,21 +1913,29 @@ extern const struct btc_chip chip_8852b;
 extern const struct btc_chip chip_8852bp;
 extern const struct btc_chip chip_8851b;
 extern const struct btc_chip chip_8852bt;
+extern const struct btc_chip chip_8852bpt;
 #endif
 #ifdef BTC_8852C_SUPPORT
 extern const struct btc_chip chip_8852c;
 #endif
+#ifdef BTC_8842A_SUPPORT
+extern const struct btc_chip chip_8842a;
+#endif
 #ifdef BTC_8852D_SUPPORT
 extern const struct btc_chip chip_8852d;
 #endif
+
 extern const u32 coex_ver;
+
+#ifdef BTC_FDDT_TRAIN_SUPPORT
+extern const struct btc_fddt_cell cell_ul_def[5][5];
+extern const struct btc_fddt_cell cell_dl_def[5][5];
+#endif
 
 u8 _send_fw_cmd(struct btc_t *btc, u8 h2c_func, u8 *param, u16 len);
 void _update_bt_scbd(struct btc_t *btc, bool only_update);
 bool hal_btc_init(struct btc_t *btc);
 void hal_btc_deinit(struct btc_t *btc);
-void _write_bt_reg(struct btc_t *btc, u8 reg_type, u16 addr, u32 val);
-void _read_bt_reg(struct btc_t *btc, u8 reg_type, u16 addr);
 u32 _read_scbd(struct btc_t *btc);
 void _write_scbd(struct btc_t *btc, u32 val, bool state);
 void _run_coex(struct btc_t *btc, const char *reason);
@@ -1866,10 +1943,7 @@ void _set_init_info(struct btc_t *btc);
 void _update_dm_step(struct btc_t *btc, const char *strin);
 void hal_btc_send_event(struct btc_t *btc, enum phl_band_idx hw_band, u8 *buf,
 			u32 len, u16 ev_id);
-u8 _get_wl_role_idx(struct btc_t *btc, u8 role);
-void _update_btc_state_map(struct btc_t *btc);
 void _set_fddt_cell_by_antiso(struct btc_t *btc);
-
 bool hal_btc_check_io_ofld(struct btc_t *btc);
 void _btc_io_w (struct btc_t *btc, u32 type, u32 addr, u32 mask,
 		u32 value, bool trigger);

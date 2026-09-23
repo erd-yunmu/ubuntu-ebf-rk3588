@@ -99,6 +99,11 @@ static void _ps_ntfy_before_pwr_cfg(struct phl_info_t *phl_info, u8 ps_mode,
 	PHL_TRACE(COMP_PHL_PS, _PHL_DEBUG_, "[PS], %s(): \n", __func__);
 
 	if (cur_pwr_lvl == PS_PWR_LVL_PWRON) { /* enter ps */
+
+#ifdef RTW_WKARD_DYNAMIC_PCIE_GEN
+		rtw_hal_pcie_gen_set(phl_info->hal, RTW_PCIE_GEN_2);
+#endif
+
 		if (req_pwr_lvl == PS_PWR_LVL_PWROFF) {
 			#ifdef CONFIG_BTCOEX
 			rtw_hal_btc_radio_state_ntfy(phl_info->hal, BTC_RFCTRL_WL_OFF);
@@ -216,11 +221,7 @@ _ps_ps_cfg_int(struct phl_info_t *phl_info, u8 ps_mode, enum phl_ps_ps_int_cfg_s
 		 * 1. disable imr
 		 * 2. stop datapath
 		 */
-		#ifdef CONFIG_SYNC_INTERRUPT
-		evt_ops->set_interrupt_caps(phlcom_to_drvpriv(phl_info->phl_com), false);
-		#else
-		rtw_hal_disable_interrupt(phl_info->phl_com, phl_info->hal);
-		#endif /* CONFIG_SYNC_INTERRUPT */
+		rtw_phl_disable_interrupt_sync(phl_info->phl_com);
 
 		_phl_ps_ctrl_datapath(phl_info, true);
 		break;
@@ -232,28 +233,18 @@ _ps_ps_cfg_int(struct phl_info_t *phl_info, u8 ps_mode, enum phl_ps_ps_int_cfg_s
 		 */
 		rtw_hal_init_int_default_value(phl_info->phl_com, phl_info->hal, INT_SET_OPT_PS_START);
 
-		if (ps_mode == PS_MODE_LPS)
-			_phl_ps_ctrl_datapath(phl_info, false);
+		_phl_ps_ctrl_datapath(phl_info, false);
 
-		#ifdef CONFIG_SYNC_INTERRUPT
-		evt_ops->set_interrupt_caps(phlcom_to_drvpriv(phl_info->phl_com), true);
-		#else
-		rtw_hal_enable_interrupt(phl_info->phl_com, phl_info->hal);
-		#endif /* CONFIG_SYNC_INTERRUPT */
+		rtw_phl_enable_interrupt_sync(phl_info->phl_com);
 		break;
 	case PS_LEAVE_CFG_INT_PRE_PHASE:
 		/**
 		 * 1. disable imr
 		 * 2. stop datapath
 		 */
-		#ifdef CONFIG_SYNC_INTERRUPT
-		evt_ops->set_interrupt_caps(phlcom_to_drvpriv(phl_info->phl_com), false);
-		#else
-		rtw_hal_disable_interrupt(phl_info->phl_com, phl_info->hal);
-		#endif /* CONFIG_SYNC_INTERRUPT */
+		rtw_phl_disable_interrupt_sync(phl_info->phl_com);
 
-		if (ps_mode == PS_MODE_LPS)
-			_phl_ps_ctrl_datapath(phl_info, true);
+		_phl_ps_ctrl_datapath(phl_info, true);
 		break;
 	case PS_LEAVE_CFG_INT_POST_PHASE:
 		/**
@@ -265,11 +256,7 @@ _ps_ps_cfg_int(struct phl_info_t *phl_info, u8 ps_mode, enum phl_ps_ps_int_cfg_s
 
 		_phl_ps_ctrl_datapath(phl_info, false);
 
-		#ifdef CONFIG_SYNC_INTERRUPT
-		evt_ops->set_interrupt_caps(phlcom_to_drvpriv(phl_info->phl_com), true);
-		#else
-		rtw_hal_enable_interrupt(phl_info->phl_com, phl_info->hal);
-		#endif /* CONFIG_SYNC_INTERRUPT */
+		rtw_phl_enable_interrupt_sync(phl_info->phl_com);
 		break;
 	default:
 		PHL_ERR("%s(): unknown step!\n", __func__);
@@ -319,7 +306,7 @@ phl_ps_cfg_pwr_lvl(struct phl_info_t *phl_info, u8 ps_mode, u8 cur_pwr_lvl, u8 r
 	hstatus = rtw_hal_ps_pwr_lvl_cfg(phl_info->phl_com, phl_info->hal,
 				req_pwr_lvl);
 
-	if (cur_pwr_lvl == PS_PWR_LVL_PWR_GATED)
+	if (cur_pwr_lvl == PS_PWR_LVL_PWR_GATED && hstatus == RTW_HAL_STATUS_SUCCESS)
 		hstatus = rtw_hal_pg_redownload_fw(phl_info->phl_com, phl_info->hal);
 
 	_ps_ps_cfg_int(phl_info, ps_mode, _judge_ps_cfg_int_step(cur_pwr_lvl, req_pwr_lvl, false));
@@ -350,12 +337,15 @@ static enum rtw_phl_status _ps_ntfy_before_lps_proto_cfg(
 }
 
 static void
-_ps_ntfy_after_lps_proto_cfg(struct phl_info_t *phl_info, u8 lps_en, u8 cfg_ok)
+_ps_ntfy_after_lps_proto_cfg(struct phl_info_t *phl_info,
+                   u8 lps_en, u8 hw_band, u8 cfg_ok)
 {
 	PHL_TRACE(COMP_PHL_PS, _PHL_INFO_, "[PS], %s(): \n", __func__);
 
 	if (lps_en) { /* enter lps */
-		if (!cfg_ok) { /* fail */
+		if (cfg_ok) { /* success */
+			rtw_hal_notification(phl_info->hal, MSG_EVT_PS_LPS_ENTER, hw_band);
+		} else { /* fail */
 			#ifdef CONFIG_BTCOEX
 			rtw_hal_btc_radio_state_ntfy(phl_info->hal, BTC_RFCTRL_WL_ON);
 			#endif
@@ -365,6 +355,7 @@ _ps_ntfy_after_lps_proto_cfg(struct phl_info_t *phl_info, u8 lps_en, u8 cfg_ok)
 			#ifdef CONFIG_BTCOEX
 			rtw_hal_btc_radio_state_ntfy(phl_info->hal, BTC_RFCTRL_WL_ON);
 			#endif
+			rtw_hal_notification(phl_info->hal, MSG_EVT_PS_LPS_LEAVE, hw_band);
 		}
 	}
 }
@@ -451,6 +442,8 @@ phl_ps_lps_cfg(struct phl_info_t *phl_info, struct ps_cfg *cfg, u8 en)
 		wrole = sta->wrole;
 	} else {
 		PHL_TRACE(COMP_PHL_PS, _PHL_WARNING_, "[PS], %s(): cannot get sta!\n", __func__);
+		status = RTW_PHL_STATUS_FAILURE;
+		return status;
 	}
 
 	if (cfg->wow == false) {
@@ -493,7 +486,8 @@ phl_ps_lps_cfg(struct phl_info_t *phl_info, struct ps_cfg *cfg, u8 en)
 		status = RTW_PHL_STATUS_FAILURE;
 	}
 exit:
-	_ps_ntfy_after_lps_proto_cfg(phl_info, en, (status == RTW_PHL_STATUS_SUCCESS ? true : false));
+	_ps_ntfy_after_lps_proto_cfg(phl_info, en, sta->rlink->hw_band,
+	                            (status == RTW_PHL_STATUS_SUCCESS ? true : false));
 
 	return status;
 }
@@ -508,7 +502,7 @@ static enum rtw_phl_status _lps_enter_proto_cfg(struct phl_info_t *phl_info, str
 	PHL_TRACE(COMP_PHL_PS, _PHL_INFO_, "[PS], %s(): \n", __func__);
 
 #ifdef CONFIG_PHL_PS_FW_DBG
-	rtw_hal_en_fw_log(phl_info->hal, FL_COMP_PS, true);
+	rtw_hal_en_fw_log_comp(phl_info->hal, FL_COMP_PS, true);
 #endif
 
 	phl_sta = rtw_phl_get_stainfo_by_macid(phl_info, cfg->macid);
@@ -523,14 +517,14 @@ static enum rtw_phl_status _lps_enter_proto_cfg(struct phl_info_t *phl_info, str
 
 	_os_mem_cpy(d, &(null_info.a3[0]), &(phl_sta->mac_addr[0]),
 			MAC_ADDRESS_LENGTH);
-
+#ifdef CONFIG_PHL_PKTOFLD
 	status = rtw_phl_pkt_ofld_request(phl_info, cfg->macid,
-				PKT_TYPE_NULL_DATA, cfg->token, &null_info, __func__);
+				PKT_TYPE_NULL_DATA, cfg->token, &null_info, __func__, 0);
 	if (status != RTW_PHL_STATUS_SUCCESS) {
 		PHL_TRACE(COMP_PHL_PS, _PHL_ERR_, "[PS], %s(): add null pkt ofld fail!\n", __func__);
 		return status;
 	}
-
+#endif
 	status = phl_ps_lps_cfg(phl_info, cfg, true);
 	if (status != RTW_PHL_STATUS_SUCCESS) {
 		PHL_TRACE(COMP_PHL_PS, _PHL_ERR_, "[PS], %s(): config lps fail!\n", __func__);
@@ -551,13 +545,14 @@ static enum rtw_phl_status _lps_leave_proto_cfg(struct phl_info_t *phl_info, str
 		PHL_TRACE(COMP_PHL_PS, _PHL_ERR_, "[PS], %s(): config lps fail!\n", __func__);
 		return status;
 	}
-
+#ifdef CONFIG_PHL_PKTOFLD
 	status = rtw_phl_pkt_ofld_cancel(phl_info, cfg->macid,
-					PKT_TYPE_NULL_DATA, cfg->token);
+					PKT_TYPE_NULL_DATA, cfg->token, 0);
 	if (status != RTW_PHL_STATUS_SUCCESS) {
 		PHL_TRACE(COMP_PHL_PS, _PHL_ERR_, "[PS], %s(): del null pkt ofld fail!\n", __func__);
 		return status;
 	}
+#endif
 
 	return RTW_PHL_STATUS_SUCCESS;
 }
@@ -622,7 +617,7 @@ enum rtw_phl_status phl_ps_ips_proto_cfg(struct phl_info_t *phl_info, struct ps_
 	PHL_TRACE(COMP_PHL_PS, _PHL_INFO_, "[PS], %s(): \n", __func__);
 
 #ifdef CONFIG_PHL_PS_FW_DBG
-	rtw_hal_en_fw_log(phl_info->hal, FL_COMP_PS, (ips_en ? true : false));
+	rtw_hal_en_fw_log_comp(phl_info->hal, FL_COMP_PS, (ips_en ? true : false));
 #endif
 
 	return phl_ps_ips_cfg(phl_info, cfg, ips_en);
@@ -674,21 +669,6 @@ enum rtw_phl_status phl_ps_ips_leave(struct phl_info_t *phl_info, struct ps_cfg 
 	return status;
 }
 
-static void _ps_ntfy(struct phl_info_t *phl_info, struct ps_cfg *cfg, enum phl_msg_evt_id event)
-{
-	struct rtw_wifi_role_link_t *rlink = NULL;
-	struct rtw_phl_stainfo_t *sta = NULL;
-
-	sta = rtw_phl_get_stainfo_by_macid(phl_info, cfg->macid);
-	if (sta != NULL)
-		rlink = sta->rlink;
-	else
-		PHL_TRACE(COMP_PHL_PS, _PHL_WARNING_, "[PS], %s(): cannot get sta!\n", __func__);
-
-	if (rlink != NULL)
-		rtw_hal_notification(phl_info->hal, event, rlink->hw_band);
-}
-
 enum rtw_phl_status
 phl_ps_enter_ps(struct phl_info_t *phl_info, struct ps_cfg *cfg)
 {
@@ -700,8 +680,6 @@ phl_ps_enter_ps(struct phl_info_t *phl_info, struct ps_cfg *cfg)
 
 	if (cfg->ps_mode == PS_MODE_LPS) {
 		status = phl_ps_lps_enter(phl_info, cfg);
-		if (status == RTW_PHL_STATUS_SUCCESS)
-			_ps_ntfy(phl_info, cfg, MSG_EVT_PS_LPS_ENTER);
 	} else if (cfg->ps_mode == PS_MODE_IPS) {
 		status = phl_ps_ips_enter(phl_info, cfg);
 	}
@@ -720,8 +698,6 @@ phl_ps_leave_ps(struct phl_info_t *phl_info, struct ps_cfg *cfg)
 
 	if (cfg->ps_mode == PS_MODE_LPS) {
 		status = phl_ps_lps_leave(phl_info, cfg);
-		if (status == RTW_PHL_STATUS_SUCCESS)
-			_ps_ntfy(phl_info, cfg, MSG_EVT_PS_LPS_LEAVE);
 	} else if (cfg->ps_mode == PS_MODE_IPS) {
 		status = phl_ps_ips_leave(phl_info, cfg);
 	}

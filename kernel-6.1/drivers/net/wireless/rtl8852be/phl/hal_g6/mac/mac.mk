@@ -16,6 +16,7 @@ endif
 # Base directory
 path_hm := $(phl_path)/mac
 # Level 1 directory
+path_auto_gen_d1 := $(path_hm)/include/AutoGen_Func
 path_hm_d1 := $(path_hm)/mac_ax
 path_fw_d1 := $(path_hm)/fw_ax
 
@@ -43,10 +44,13 @@ halmac-y +=		$(path_hm_d1)/addr_cam.o \
 			$(path_hm_d1)/dbgpkg.o \
 			$(path_hm_d1)/dbgport_hw.o \
 			$(path_hm_d1)/dbg_cmd.o \
+			$(path_hm_d1)/diagnosis.o \
 			$(path_hm_d1)/dle.o \
 			$(path_hm_d1)/efuse.o \
+			$(path_hm_d1)/err_flag.o \
 			$(path_hm_d1)/fwcmd.o \
 			$(path_hm_d1)/fwdl.o \
+			$(path_hm_d1)/fwdx.o \
 			$(path_hm_d1)/fwofld.o \
 			$(path_hm_d1)/gpio.o \
 			$(path_hm_d1)/hci_fc.o \
@@ -54,6 +58,7 @@ halmac-y +=		$(path_hm_d1)/addr_cam.o \
 			$(path_hm_d1)/hw_seq.o \
 			$(path_hm_d1)/h2c_agg.o \
 			$(path_hm_d1)/hw.o \
+			$(path_hm_d1)/outsrc.o \
 			$(path_hm_d1)/hwamsdu.o \
 			$(path_hm_d1)/init.o \
 			$(path_hm_d1)/la_mode.o \
@@ -66,6 +71,7 @@ halmac-y +=		$(path_hm_d1)/addr_cam.o \
 			$(path_hm_d1)/role.o \
 			$(path_hm_d1)/rx_filter.o \
 			$(path_hm_d1)/rx_forwarding.o \
+			$(path_hm_d1)/rx.o \
 			$(path_hm_d1)/ser.o \
 			$(path_hm_d1)/security_cam.o \
 			$(path_hm_d1)/sounding.o \
@@ -85,8 +91,12 @@ halmac-y +=		$(path_hm_d1)/addr_cam.o \
 			$(path_hm_d1)/secure_boot.o \
 			$(path_hm_d1)/eco_patch_check.o \
 			$(path_hm_d1)/common.o \
+			$(path_hm_d1)/ftm.o \
 			$(path_hm_d1)/nan.o \
 			$(path_hm_d1)/otpkeysinfo.o \
+			$(path_hm_d1)/tx_statistic.o \
+			$(path_hm_d1)/sta_diag.o \
+			$(path_hm_d1)/ver_chk.o \
 
 halmac-$(pci) += 	$(path_hm_d1)/_pcie.o
 halmac-$(usb) += 	$(path_hm_d1)/_usb.o
@@ -96,6 +106,7 @@ ifeq ($(CONFIG_RTL8852A), y)
 mac_ic := 8852a
 # Level 2 directory
 path_hm2 := $(path_hm_d1)/mac_$(mac_ic)
+path_auto_gen2 :=  $(path_auto_gen_d1)/g6/$(mac_ic)
 
 halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/fwcmd_$(mac_ic).o \
@@ -106,6 +117,7 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/rrsr_$(mac_ic).o \
 				$(path_hm2)/trx_desc_$(mac_ic).o \
 				$(path_hm2)/tblupd_$(mac_ic).o \
+				$(path_hm2)/ser_$(mac_ic).o \
 				$(path_hm2)/phy_rpt_$(mac_ic).o \
 				$(path_hm2)/coex_$(mac_ic).o \
 				$(path_hm2)/dbgpkg_$(mac_ic).o \
@@ -115,6 +127,9 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/hci_fc_$(mac_ic).o \
 				$(path_hm2)/dle_$(mac_ic).o \
 				$(path_hm2)/wowlan_$(mac_ic).o \
+				$(path_hm2)/dbg_cmd_$(mac_ic).o \
+				$(path_auto_gen2)/err_flag_auto_gen_$(mac_ic).o \
+				$(path_auto_gen2)/ser_auto_gen_$(mac_ic).o \
 
 halmac-$(usb) += 	$(path_hm2)/_usb_$(mac_ic).o
 halmac-$(pci) += 	$(path_hm2)/_pcie_$(mac_ic).o
@@ -131,6 +146,7 @@ ifneq ($(filter y,$(CONFIG_RTL8852B) $(CONFIG_RTL8852BP)),)
 mac_ic := 8852b
 # Level 2 directory
 path_hm2 := $(path_hm_d1)/mac_$(mac_ic)
+path_auto_gen2 :=  $(path_auto_gen_d1)/g6/$(mac_ic)
 
 halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/fwcmd_$(mac_ic).o \
@@ -141,6 +157,7 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/pwr_seq_func_$(mac_ic).o \
 				$(path_hm2)/trx_desc_$(mac_ic).o \
 				$(path_hm2)/tblupd_$(mac_ic).o \
+				$(path_hm2)/ser_$(mac_ic).o \
 				$(path_hm2)/rrsr_$(mac_ic).o \
 				$(path_hm2)/coex_$(mac_ic).o \
 				$(path_hm2)/phy_rpt_$(mac_ic).o \
@@ -151,6 +168,9 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/hci_fc_$(mac_ic).o \
 				$(path_hm2)/dle_$(mac_ic).o \
 				$(path_hm2)/wowlan_$(mac_ic).o \
+				$(path_hm2)/dbg_cmd_$(mac_ic).o \
+				$(path_auto_gen2)/err_flag_auto_gen_$(mac_ic).o \
+				$(path_auto_gen2)/ser_auto_gen_$(mac_ic).o \
 
 halmac-$(usb) += 	$(path_hm2)/_usb_$(mac_ic).o
 halmac-$(pci) += 	$(path_hm2)/_pcie_$(mac_ic).o
@@ -162,10 +182,11 @@ halmac-y	+=	$(path_fw)/hal$(mac_ic)_fw.o \
 				$(path_fw)/hal$(mac_ic)_fw_log.o
 endif
 
-ifneq ($(filter y,$(CONFIG_RTL8852C) $(CONFIG_RTL8832BRH)),)
+ifneq ($(filter y,$(CONFIG_RTL8852C) $(CONFIG_RTL8832BRH) $(CONFIG_RTL8842A)),)
 mac_ic := 8852c
 # Level 2 directory
 path_hm2 := $(path_hm_d1)/mac_$(mac_ic)
+path_auto_gen2 :=  $(path_auto_gen_d1)/g6/$(mac_ic)
 
 halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/fwcmd_$(mac_ic).o \
@@ -188,6 +209,9 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/hci_fc_$(mac_ic).o \
 				$(path_hm2)/dle_$(mac_ic).o \
 				$(path_hm2)/wowlan_$(mac_ic).o \
+				$(path_hm2)/dbg_cmd_$(mac_ic).o \
+				$(path_auto_gen2)/err_flag_auto_gen_$(mac_ic).o \
+				$(path_auto_gen2)/ser_auto_gen_$(mac_ic).o \
 
 halmac-$(usb) += 	$(path_hm2)/_usb_$(mac_ic).o
 halmac-$(pci) += 	$(path_hm2)/_pcie_$(mac_ic).o
@@ -204,6 +228,7 @@ ifneq ($(filter y,$(CONFIG_RTL8832BR) $(CONFIG_RTL8192XB)),)
 mac_ic_92xb := 8192xb
 # Level 2 directory
 path_hm2_92xb := $(path_hm_d1)/mac_$(mac_ic_92xb)
+path_auto_gen2_92xb :=  $(path_auto_gen_d1)/g6/$(mac_ic_92xb)
 
 halmac-y	+=	$(path_hm2_92xb)/pwr_seq_func_$(mac_ic_92xb).o \
 			$(path_hm2_92xb)/trx_desc_$(mac_ic_92xb).o \
@@ -226,6 +251,9 @@ halmac-y	+=	$(path_hm2_92xb)/pwr_seq_func_$(mac_ic_92xb).o \
 			$(path_hm2_92xb)/hci_fc_$(mac_ic_92xb).o \
 			$(path_hm2_92xb)/dle_$(mac_ic_92xb).o \
 			$(path_hm2_92xb)/wowlan_$(mac_ic_92xb).o \
+			$(path_hm2_92xb)/dbg_cmd_$(mac_ic_92xb).o \
+			$(path_auto_gen2_92xb)/err_flag_auto_gen_$(mac_ic_92xb).o \
+			$(path_auto_gen2_92xb)/ser_auto_gen_$(mac_ic_92xb).o \
 
 halmac-$(usb) += 	$(path_hm2_92xb)/_usb_$(mac_ic_92xb).o
 halmac-$(pci) += 	$(path_hm2_92xb)/_pcie_$(mac_ic_92xb).o
@@ -244,6 +272,7 @@ ifeq ($(CONFIG_RTL8851B), y)
 mac_ic := 8851b
 # Level 2 directory
 path_hm2 := $(path_hm_d1)/mac_$(mac_ic)
+path_auto_gen2 :=  $(path_auto_gen_d1)/g6/$(mac_ic)
 
 halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/fwcmd_$(mac_ic).o \
@@ -254,6 +283,7 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/pwr_seq_func_$(mac_ic).o \
 				$(path_hm2)/trx_desc_$(mac_ic).o \
 				$(path_hm2)/tblupd_$(mac_ic).o \
+				$(path_hm2)/ser_$(mac_ic).o \
 				$(path_hm2)/rrsr_$(mac_ic).o \
 				$(path_hm2)/coex_$(mac_ic).o \
 				$(path_hm2)/phy_rpt_$(mac_ic).o \
@@ -264,6 +294,9 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/hci_fc_$(mac_ic).o \
 				$(path_hm2)/dle_$(mac_ic).o \
 				$(path_hm2)/wowlan_$(mac_ic).o \
+				$(path_hm2)/dbg_cmd_$(mac_ic).o \
+				$(path_auto_gen2)/err_flag_auto_gen_$(mac_ic).o \
+				$(path_auto_gen2)/ser_auto_gen_$(mac_ic).o \
 
 halmac-$(usb) += 	$(path_hm2)/_usb_$(mac_ic).o
 halmac-$(pci) += 	$(path_hm2)/_pcie_$(mac_ic).o
@@ -301,6 +334,7 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/hci_fc_$(mac_ic).o \
 				$(path_hm2)/dle_$(mac_ic).o \
 				$(path_hm2)/wowlan_$(mac_ic).o \
+				$(path_hm2)/dbg_cmd_$(mac_ic).o \
 
 halmac-$(usb) += 	$(path_hm2)/_usb_$(mac_ic).o
 halmac-$(pci) += 	$(path_hm2)/_pcie_$(mac_ic).o
@@ -316,6 +350,7 @@ ifeq ($(CONFIG_RTL8852D), y)
 mac_ic := 8852d
 # Level 2 directory
 path_hm2 := $(path_hm_d1)/mac_$(mac_ic)
+path_auto_gen2 :=  $(path_auto_gen_d1)/g6/$(mac_ic)
 
 halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/fwcmd_$(mac_ic).o \
@@ -338,6 +373,9 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/hci_fc_$(mac_ic).o \
 				$(path_hm2)/dle_$(mac_ic).o \
 				$(path_hm2)/wowlan_$(mac_ic).o \
+				$(path_hm2)/dbg_cmd_$(mac_ic).o \
+				$(path_auto_gen2)/err_flag_auto_gen_$(mac_ic).o \
+				$(path_auto_gen2)/ser_auto_gen_$(mac_ic).o \
 
 halmac-$(usb) += 	$(path_hm2)/_usb_$(mac_ic).o
 halmac-$(pci) += 	$(path_hm2)/_pcie_$(mac_ic).o
@@ -350,10 +388,11 @@ halmac-y	+=	$(path_fw)/hal$(mac_ic)_fw.o \
 endif
 
 # 8852bt Support
-ifeq ($(CONFIG_RTL8852BT), y)
+ifneq ($(filter y,$(CONFIG_RTL8852BT) $(CONFIG_RTL8852BPT)),)
 mac_ic := 8852bt
 # Level 2 directory
 path_hm2 := $(path_hm_d1)/mac_$(mac_ic)
+path_auto_gen2 :=  $(path_auto_gen_d1)/g6/$(mac_ic)
 
 halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/fwcmd_$(mac_ic).o \
@@ -364,6 +403,7 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/pwr_seq_func_$(mac_ic).o \
 				$(path_hm2)/trx_desc_$(mac_ic).o \
 				$(path_hm2)/tblupd_$(mac_ic).o \
+				$(path_hm2)/ser_$(mac_ic).o \
 				$(path_hm2)/rrsr_$(mac_ic).o \
 				$(path_hm2)/coex_$(mac_ic).o \
 				$(path_hm2)/phy_rpt_$(mac_ic).o \
@@ -373,6 +413,10 @@ halmac-y	+=	$(path_hm2)/cmac_tx_$(mac_ic).o \
 				$(path_hm2)/hdr_conv_rx_$(mac_ic).o \
 				$(path_hm2)/hci_fc_$(mac_ic).o \
 				$(path_hm2)/dle_$(mac_ic).o \
+				$(path_hm2)/wowlan_$(mac_ic).o \
+				$(path_hm2)/dbg_cmd_$(mac_ic).o \
+				$(path_auto_gen2)/err_flag_auto_gen_$(mac_ic).o \
+				$(path_auto_gen2)/ser_auto_gen_$(mac_ic).o \
 
 halmac-$(usb) += 	$(path_hm2)/_usb_$(mac_ic).o
 halmac-$(pci) += 	$(path_hm2)/_pcie_$(mac_ic).o

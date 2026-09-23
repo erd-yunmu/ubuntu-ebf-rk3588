@@ -122,6 +122,8 @@ static REGULATION_TXPWR_LMT phl_tpo_to_txpwr_lmt(enum TP_OVERWRITE tpo)
 		return TXPWR_LMT_UKRAINE;
 	case TPO_CN:
 		return TXPWR_LMT_CN;
+	case TPO_THAILAND:
+		return TXPWR_LMT_THAILAND;
 	case TPO_NA:
 		return TXPWR_LMT_DEF;
 	default:
@@ -146,21 +148,28 @@ static bool phl_regdb_get_chplan_from_alpha2(const char *alpha2, struct country_
 		#if CONFIG_IEEE80211_BAND_6GHZ
 		ent->domain_code_6g = plan.domain_code_6g;
 		#endif
-		ent->edcca_mode_2g_override = RTW_EDCCA_DEF;
+
+		#if CONFIG_COUNTRY_CHPLAN_EDCCA_OVERRIDE
+		ent->edcca_2g_override = RTW_EDCCA_DEF;
 		#if CONFIG_IEEE80211_BAND_5GHZ
-		ent->edcca_mode_5g_override = RTW_EDCCA_DEF;
+		ent->edcca_5g_override = RTW_EDCCA_DEF;
 		#endif
 		#if CONFIG_IEEE80211_BAND_6GHZ
-		ent->edcca_mode_6g_override = RTW_EDCCA_DEF;
+		ent->edcca_6g_override = RTW_EDCCA_DEF;
 		#endif
+		#endif
+
 		ent->txpwr_lmt_override = phl_tpo_to_txpwr_lmt(plan.tpo);
-		#if defined(CONFIG_80211AX_HE) || defined(CONFIG_80211AC_VHT) || CONFIG_IEEE80211_BAND_5GHZ
+		#ifdef CONFIG_CHPLAN_PROTO_EN
 		ent->proto_en = 0
+			/* TODO: SUPPORT_11BE, wait PHL ready */
 			| ((plan.support_mode & SUPPORT_11AC) ? CHPLAN_PROTO_EN_AC : 0)
 			| ((plan.support_mode & SUPPORT_11AX) ? CHPLAN_PROTO_EN_AX : 0)
 			| ((plan.support_mode & SUPPORT_11A) ? CHPLAN_PROTO_EN_A : 0)
 			;
 		#endif
+
+		/* TODO: cate_6g_map, wait PHL ready */
 	}
 
 	return true;

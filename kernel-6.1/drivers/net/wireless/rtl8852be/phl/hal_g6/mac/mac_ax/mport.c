@@ -14,6 +14,7 @@
  ******************************************************************************/
 
 #include "mport.h"
+#include "beacon.h"
 #include "../mac_ax.h"
 
 #define MAX_TSF_SOURCE_PORT 7
@@ -311,8 +312,6 @@ static u32 mbid_idx_l[MAC_AX_P0_MBID_MAX] = {
 	MAC_AX_P0_MBID12, MAC_AX_P0_MBID13, MAC_AX_P0_MBID14, MAC_AX_P0_MBID15
 };
 
-static u32 t32_togl_rpt_size =
-	sizeof(struct mac_ax_t32_togl_rpt) * MAC_AX_BAND_NUM * MAC_AX_PORT_NUM;
 static u32 port_info_size =
 	sizeof(struct mac_ax_port_info) * MAC_AX_BAND_NUM * MAC_AX_PORT_NUM;
 static u32 bcn_rpt_stats_size =
@@ -864,7 +863,7 @@ static u32 _set_max_mbid_num(struct mac_ax_adapter *adapter,
 	u32 mbid_num = para->mbssid_idx;
 	u32 ret;
 	u32 bcn_erly;
-	u32 hold_time;
+	u32 ori_hold_time, new_hold_time;
 	u32 subspc;
 	u32 val32, w_val32;
 
@@ -889,13 +888,24 @@ static u32 _set_max_mbid_num(struct mac_ax_adapter *adapter,
 			      band, port, ret);
 		return ret;
 	}
-	hold_time = cfg_para.val;
+	ori_hold_time = cfg_para.val;
 
 	subspc = para->val / (mbid_num + 1);
-	if (bcn_erly + hold_time > subspc * TU_TO_BCN_SET) {
-		PLTFM_MSG_ERR("[ERR] BcnSubspc not enough for erly and hold time\n");
-		para->val = (bcn_erly + hold_time) / TU_TO_BCN_SET * (mbid_num + 1);
+	new_hold_time = subspc * TU_TO_BCN_SET - bcn_erly;
+	if (new_hold_time > ori_hold_time)
+		new_hold_time = ori_hold_time;
+	if (subspc * TU_TO_BCN_SET < bcn_erly)
 		return MACSUBSPCERR;
+
+	cfg_para.val = new_hold_time;
+	ret = mac_port_cfg(adapter, MAC_AX_PCFG_BCN_HOLD_TIME, &cfg_para);
+	if (ret == MACSETVALERR)
+		ret = mac_port_cfg(adapter, MAC_AX_PCFG_BCN_HOLD_TIME,
+				   &cfg_para);
+	if (ret != MACSUCCESS) {
+		PLTFM_MSG_ERR("[ERR]B%dP%d cfg hold time fail %d\n",
+			      band, port, ret);
+		return ret;
 	}
 
 	//set interval
@@ -925,6 +935,7 @@ static u32 _set_max_mbid_num(struct mac_ax_adapter *adapter,
 	return MACSUCCESS;
 }
 
+#if MAC_FEAT_MBSSID
 static u32 port0_mbid_set(struct mac_ax_adapter *adapter, u8 band, u8 mbid_num,
 			  u8 mbid_max)
 {
@@ -948,6 +959,7 @@ static u32 port0_mbid_set(struct mac_ax_adapter *adapter, u8 band, u8 mbid_num,
 
 	return MACSUCCESS;
 }
+#endif
 
 static u32 port0_subspc_set(struct mac_ax_adapter *adapter, u8 band,
 			    u8 mbid_num, u32 *bcn_erly, u32 *hold_time)
@@ -1165,6 +1177,7 @@ static u32 fast_bcn_drop(struct mac_ax_adapter *adapter, u8 band, u8 port,
 	val32 = MAC_REG_R32(bcndrp_regl[band]) | port_drp_sel;
 	MAC_REG_W32(bcndrp_regl[band], val32);
 
+#if MAC_FEAT_MBSSID
 	if (port == MAC_AX_PORT_0 && pinfo->mbssid_en_stat == MAC_AX_MBSSID_ENABLED) {
 		if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852B) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851B) ||
@@ -1191,6 +1204,7 @@ static u32 fast_bcn_drop(struct mac_ax_adapter *adapter, u8 band, u8 port,
 		val32 = MAC_REG_R32(mbssid_drp_regl[band]) | mbid_drp_sel;
 		MAC_REG_W32(mbssid_drp_regl[band], val32);
 	}
+#endif
 
 	cfg_para.val = 1;
 	ret = mac_port_cfg(adapter, MAC_AX_PCFG_BCN_SETUP_TIME, &cfg_para);
@@ -1243,7 +1257,6 @@ static u32 fast_bcn_drop(struct mac_ax_adapter *adapter, u8 band, u8 port,
 		for (i = 0; i < mbid_num; i++)
 			val32 |= b_mbid_en_l[i];
 		MAC_REG_W32(mbid_ctrl_regl[band], val32);
-
 	} else {
 		bcn_spc = BCN_FAST_DRP_TBTT;
 		cfg_para.val = bcn_spc;
@@ -1271,10 +1284,12 @@ static u32 fast_bcn_drop(struct mac_ax_adapter *adapter, u8 band, u8 port,
 	val32 = MAC_REG_R32(bcndrp_regl[band]) & ~port_drp_sel;
 	MAC_REG_W32(bcndrp_regl[band], val32);
 
+#if MAC_FEAT_MBSSID
 	if (port == MAC_AX_PORT_0 && pinfo->mbssid_en_stat == MAC_AX_MBSSID_ENABLED) {
 		val32 = MAC_REG_R32(mbssid_drp_regl[band]) & ~mbid_drp_sel;
 		MAC_REG_W32(mbssid_drp_regl[band], val32);
 	}
+#endif
 
 	val32 = MAC_REG_R32(cfg_regl[band][port]) & ~b_phben_l[port];
 	MAC_REG_W32(cfg_regl[band][port], val32);
@@ -1301,7 +1316,7 @@ u32 _patch_port_dis_flow(struct mac_ax_adapter *adapter, u8 band, u8 port,
 	u16 val16;
 	u8 patch_flag, phb_bkp_flag;
 
-	patch_flag = chk_patch_port_dis_flow(adapter) ? 1 : 0;
+	patch_flag = chk_patch_port_dis_flow(adapter) == PATCH_ENABLE ? 1 : 0;
 	phb_bkp_flag = patch_flag && port != MAC_AX_PORT_0 ? 1 : 0;
 
 	if (phb_bkp_flag)
@@ -1350,6 +1365,7 @@ u32 _patch_port_dis_flow(struct mac_ax_adapter *adapter, u8 band, u8 port,
 		}
 	}
 
+#if MAC_FEAT_MBSSID
 	if (port == MAC_AX_PORT_0 && pinfo->mbssid_en_stat == MAC_AX_MBSSID_ENABLED) {
 		ret = port0_mbid_set(adapter, band, 0, adapter->hw_info->mbssid_num - 1);
 		if (ret != MACSUCCESS) {
@@ -1358,6 +1374,7 @@ u32 _patch_port_dis_flow(struct mac_ax_adapter *adapter, u8 band, u8 port,
 			return ret;
 		}
 	}
+#endif
 
 	val32 = MAC_REG_R32(cfg_regl[band][port]) &
 		~(b_en_l[port] | b_brken_l[port]);
@@ -1418,7 +1435,9 @@ u32 mac_port_cfg(struct mac_ax_adapter *adapter,
 	u8 mbid_max;
 	u8 i = 0, j = 0;
 	u32 ret = MACSUCCESS;
+#if MAC_FEAT_TX_BCN_DM_TBTT_SHIFT
 	struct mac_ax_bcn_dynamic_mech bcn_dynamic_mech;
+#endif
 
 	if (!is_curr_dbcc(adapter) && band == MAC_AX_BAND_1) {
 		PLTFM_MSG_ERR("%s invalid band idx %d\n", __func__, band);
@@ -1450,6 +1469,7 @@ u32 mac_port_cfg(struct mac_ax_adapter *adapter,
 				       band, port);
 			break;
 		}
+#if MAC_FEAT_TX_BCN_DM_TBTT_SHIFT
 		if (pinfo->stat == PORT_ST_AP && adapter->sm.fwdl == MAC_AX_FWDL_INIT_RDY) {
 			bcn_dynamic_mech.bcn_dm_tbtt_shft_en = 0;
 			ret = mac_set_bcn_dynamic_mech(adapter, &bcn_dynamic_mech);
@@ -1459,6 +1479,7 @@ u32 mac_port_cfg(struct mac_ax_adapter *adapter,
 				return ret;
 			}
 		}
+#endif
 		ret = _patch_port_dis_flow(adapter, band, port, pinfo);
 
 		if (ret == MACSUCCESS) {
@@ -1733,6 +1754,7 @@ u32 mac_port_cfg(struct mac_ax_adapter *adapter,
 			MAC_REG_W32(phb_regl[band][port], w_val32);
 		break;
 
+#if MAC_FEAT_MBSSID
 	case MAC_AX_PCFG_MBSSID_EN:
 		if (port != MAC_AX_PORT_0 || !mbssid_idx) {
 			PLTFM_MSG_ERR("[ERR] mbssid en invalid for P%d MB%d\n",
@@ -1766,6 +1788,7 @@ u32 mac_port_cfg(struct mac_ax_adapter *adapter,
 		}
 		pinfo->mbssid_en_stat = MAC_AX_MBSSID_ENABLED;
 		break;
+#endif
 
 	case MAC_AX_PCFG_BCN_ERLY:
 		ret = _bcn_erly_chk(adapter, band, port, &para->val);
@@ -1994,7 +2017,6 @@ u32 mac_port_init(struct mac_ax_adapter *adapter,
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 	struct mac_ax_port_cfg_para cfg_para;
 	struct mac_ax_pkt_drop_info info;
-	struct mac_ax_bcn_dynamic_mech bcn_dynamic_mech;
 	u8 mbid_num;
 	u8 mbid_max;
 	u8 i = 0;
@@ -2002,6 +2024,9 @@ u32 mac_port_init(struct mac_ax_adapter *adapter,
 	u32 val32;
 	u32 bcn_erly = BCN_ERLY_DEF;
 	u32 hold_time = BCN_HOLD_DEF;
+#if MAC_FEAT_TX_BCN_DM_TBTT_SHIFT
+        struct mac_ax_bcn_dynamic_mech bcn_dynamic_mech;
+#endif
 
 	if (!is_curr_dbcc(adapter) && band == MAC_AX_BAND_1) {
 		PLTFM_MSG_ERR("%s invalid band idx %d\n", __func__, band);
@@ -2251,6 +2276,7 @@ u32 mac_port_init(struct mac_ax_adapter *adapter,
 		return ret;
 	}
 
+#if MAC_FEAT_MBSSID
 	if (port == MAC_AX_PORT_0) {
 		ret = port0_mbid_set(adapter, band, mbid_num, mbid_max);
 		if (ret != MACSUCCESS) {
@@ -2259,15 +2285,19 @@ u32 mac_port_init(struct mac_ax_adapter *adapter,
 			return ret;
 		}
 	}
+#endif
 
+#if MAC_FEAT_TX_BCN_DM_TBTT_SHIFT
 	if (pinfo->stat == PORT_ST_AP && adapter->sm.fwdl == MAC_AX_FWDL_INIT_RDY) {
 		bcn_dynamic_mech.bcn_dm_tbtt_shft_en = 1;
 		ret = mac_set_bcn_dynamic_mech(adapter, &bcn_dynamic_mech);
-		if (ret != MACSUCCESS)
+		if (ret != MACSUCCESS) {
 			PLTFM_MSG_ERR("[ERR]B%dP%d ap beacon dynamic mech set fail %d\n",
 				      band, port, ret);
 			return ret;
+		}
 	}
+#endif
 
 	return ret;
 }
@@ -2490,86 +2520,10 @@ u32 get_bcn_stats_event(struct mac_ax_adapter *adapter,
 	return MACSUCCESS;
 }
 
-u32 mac_tsf32_togl_h2c(struct mac_ax_adapter *adapter,
-		       struct mac_ax_t32_togl_info *info)
-{
-	struct h2c_info h2c_info = {0};
-	struct fwcmd_tsf32_togl hdr;
-	u32 ret = MACSUCCESS;
-	u8 band = info->band;
-	u8 port = info->port;
-
-	if (!is_curr_dbcc(adapter) && band == MAC_AX_BAND_1) {
-		PLTFM_MSG_ERR("%s invalid band idx %d\n", __func__, band);
-		return MACFUNCINPUT;
-	}
-
-	if (port >= adapter->hw_info->port_num) {
-		PLTFM_MSG_ERR("%s invalid port idx %d\n", __func__, port);
-		return MACPORTERR;
-	}
-
-	if (adapter->sm.fwdl != MAC_AX_FWDL_INIT_RDY) {
-		PLTFM_MSG_WARN("%s fw not ready\n", __func__);
-		return MACFWNONRDY;
-	}
-
-	hdr.dword0 =
-		cpu_to_le32(SET_WORD(port, FWCMD_H2C_TSF32_TOGL_PORT) |
-			    SET_WORD(info->early, FWCMD_H2C_TSF32_TOGL_EARLY) |
-			    (band ? FWCMD_H2C_TSF32_TOGL_BAND : 0) |
-			    (info->en ? FWCMD_H2C_TSF32_TOGL_EN : 0));
-
-	h2c_info.agg_en = 0;
-	h2c_info.content_len = sizeof(struct fwcmd_tsf32_togl);
-	h2c_info.h2c_cat = FWCMD_H2C_CAT_MAC;
-	h2c_info.h2c_class = FWCMD_H2C_CL_FW_OFLD;
-	h2c_info.h2c_func = FWCMD_H2C_FUNC_TSF32_TOGL;
-	h2c_info.rec_ack = 0;
-	h2c_info.done_ack = 0;
-
-	ret = mac_h2c_common(adapter, &h2c_info, (u32 *)&hdr);
-	if (ret != MACSUCCESS) {
-		PLTFM_MSG_ERR("%s send h2c fail %d\n", __func__, ret);
-		return ret;
-	}
-
-	return ret;
-}
-
-u32 mac_get_t32_togl_rpt(struct mac_ax_adapter *adapter,
-			 struct mac_ax_t32_togl_rpt *ret_rpt)
-{
-	struct mac_ax_t32_togl_rpt *rpt;
-	u8 b_idx, p_idx;
-
-	for (b_idx = MAC_AX_BAND_0; b_idx < MAC_AX_BAND_NUM; b_idx++) {
-		for (p_idx = MAC_AX_PORT_0; p_idx < MAC_AX_PORT_NUM; p_idx++) {
-			rpt = &adapter->t32_togl_rpt[get_bp_idx(b_idx, p_idx)];
-			if (!rpt->valid)
-				continue;
-			PLTFM_MEMCPY(ret_rpt, rpt,
-				     sizeof(struct mac_ax_t32_togl_rpt));
-			rpt->valid = 0;
-			return MACSUCCESS;
-		}
-	}
-
-	PLTFM_MSG_WARN("[WARN]no tsf32 togl rpt find\n");
-	return MACNOITEM;
-}
-
 u32 mport_info_init(struct mac_ax_adapter *adapter)
 {
 	u8 b_idx, p_idx;
 	u32 idx;
-
-	adapter->t32_togl_rpt =
-		(struct mac_ax_t32_togl_rpt *)PLTFM_MALLOC(t32_togl_rpt_size);
-	if (!adapter->t32_togl_rpt) {
-		PLTFM_MSG_ERR("%s malloc t32_togl_rpt fail\n", __func__);
-		return MACNOBUF;
-	}
 
 	adapter->port_info =
 		(struct mac_ax_port_info *)PLTFM_MALLOC(port_info_size);
@@ -2588,8 +2542,6 @@ u32 mport_info_init(struct mac_ax_adapter *adapter)
 	for (b_idx = MAC_AX_BAND_0; b_idx < MAC_AX_BAND_NUM; b_idx++) {
 		for (p_idx = MAC_AX_PORT_0; p_idx < MAC_AX_PORT_NUM; p_idx++) {
 			idx = get_bp_idx(b_idx, p_idx);
-			PLTFM_MEMSET(&adapter->t32_togl_rpt[idx], 0,
-				     sizeof(struct mac_ax_t32_togl_rpt));
 			PLTFM_MEMSET(&adapter->port_info[idx], 0,
 				     sizeof(struct mac_ax_port_info));
 		}
@@ -2606,7 +2558,6 @@ u32 mport_info_init(struct mac_ax_adapter *adapter)
 
 u32 mport_info_exit(struct mac_ax_adapter *adapter)
 {
-	PLTFM_FREE(adapter->t32_togl_rpt, t32_togl_rpt_size);
 	PLTFM_FREE(adapter->port_info, port_info_size);
 	PLTFM_FREE(adapter->bcn_rpt_stats, bcn_rpt_stats_size);
 

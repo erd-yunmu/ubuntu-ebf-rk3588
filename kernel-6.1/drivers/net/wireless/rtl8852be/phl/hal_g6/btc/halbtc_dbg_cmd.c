@@ -112,6 +112,40 @@ struct halbtc_cmd_info halbtc_cmd_i[] = {
 #define _limit_val(val, max, min) \
 	val = (val > max ? max: (val < min ? min : val))
 
+static void _write_bt_reg(struct btc_t *btc, u8 reg_type, u16 addr, u32 val)
+{
+	u8 buf[4] = {0};
+
+	/* set write address */
+	buf[0] = reg_type;
+	buf[1] = addr & bMASKB0;
+	buf[2] = (addr & bMASKB1) >> 8;
+	_send_fw_cmd(btc, SET_BT_WREG_ADDR, buf, 3);
+
+	/* set write value */
+	buf[0] = val & bMASKB0;
+	buf[1] = (val & bMASKB1) >> 8;
+	buf[2] = (val & bMASKB2) >> 16;
+	buf[3] = (val & bMASKB3) >> 24;
+	_send_fw_cmd(btc, SET_BT_WREG_VAL, buf, 4);
+}
+
+static void _read_bt_reg(struct btc_t *btc, u8 reg_type, u16 addr)
+{
+	/* this function is only for API call.
+	 * If BTC should use hal_btc_fw_set_monreg to read bt reg.
+	 */
+	u8 buf[3] = {0};
+
+	/* set write address */
+	buf[0] = reg_type;
+	buf[1] = addr & bMASKB0;
+	buf[2] = (addr & bMASKB1) >> 8;
+	_send_fw_cmd(btc, SET_BT_RREG_ADDR, buf, 3);
+
+	/* To do wait FW event -> BTF_EVNT_BT_REG*/
+}
+
 static void _cmd_rb(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 		    u32 input_num, char *output, u32 out_len)
 {
@@ -150,18 +184,17 @@ static void _show_cx_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 			   u32 input_num, char *output, u32 out_len)
 {
 	struct btc_dm *dm = &btc->dm;
-	struct btc_bt_info *bt = &btc->cx.bt;
+	struct btc_cx *cx = &btc->cx;
+	struct btc_bt_info *bt = &cx->bt;
 	struct btc_wl_info *wl = &btc->cx.wl;
 	struct rtw_phl_com_t *p = btc->phl;
-	struct btc_bt_psd_dm *bt_psd_dm = &btc->bt_psd_dm;
 	struct btc_module *md = &btc->mdinfo;
 	u32 ver_main = 0, ver_sub = 0, ver_hotfix = 0, id_branch = 0;
-	u32 name_branch = BTC_BRANCH_FORMAL;
 
 	if (!(dm->coex_info_map & BTC_COEX_INFO_CX))
 		return;
 
-	dm->cnt_notify[BTC_NCNT_SHOW_COEX_INFO]++;
+	dm->cnt_notify[BTC_NTFY_SHOW_COEX_INFO]++;
 
 	CLI_PRT("\n\r========== [BTC COEX INFO (%s%s%s%s%s)] ==========",
 		id_to_str(BTC_STR_CHIPID, (u32)btc->hal->chip_id),
@@ -177,7 +210,7 @@ static void _show_cx_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 	id_branch = coex_ver & bMASKB0;
 	CLI_PRT("\n\r %-15s : Coex:%d.%d.%d(branch:%s_%d), ", "[coex_version]",
 		ver_main, ver_sub, ver_hotfix,
-		id_to_str(BTC_STR_BRANCH, name_branch), id_branch);
+		id_to_str(BTC_STR_BRANCH, BTC_BRANCH), id_branch);
 
 	ver_main = (wl->ver_info.fw_coex & bMASKB3) >> 24;
 	ver_sub = (wl->ver_info.fw_coex & bMASKB2) >> 16;
@@ -208,21 +241,30 @@ static void _show_cx_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 		(bt->run_patch_code ? "patch" : "ROM"));
 
 	CLI_PRT("\n\r %-15s : kt_ver:%x,"
-		" rfe_type:0x%x(ant_cnt:%d/ext_sw:%d/ant_div:%d), hw_id:0x%x,"
-		 " 3rd_coex:%d,"
-		 " Endian:%s", "[hw_info]",
-		md->kt_ver, md->rfe_type, md->ant.num,
-		md->switch_type, md->ant.diversity,
-		((btc->phl->id.id & 0xff00) >> 8), btc->cx.other.type,
-		BTC_PLATFORM_BIG_ENDIAN ? "Big" : "Little");
+		" rfe_type:0x%x(ant_cnt:%d/ext_sw:%d/ant_div:%d), vendor:%s,"
+		 " hw_feat:0x%x, 3rd_coex:%d,"
+		 " endian:%s", "[hw_info]", md->kt_ver,
+		 md->rfe_type, md->ant.num, md->switch_type, md->ant.diversity,
+		id_to_str(BTC_STR_VENDORID, (u32)dm->vid),
+		btc->chip->hw, cx->other.type,
+		BTC_PLATFORM_BIG_ENDIAN ? "big" : "little");
 
 	if (md->ant.type == BTC_ANT_SHARED)
 		return;
 
-	if (bt_psd_dm->aiso_db_cnt > 0)
-		CLI_PRT(" ,ant_iso:%ddB(cal)", md->ant.isolation);
-	else
+#ifdef BTC_AISO_SUPPORT
+		if (btc->bt_psd_dm.aiso_db_cnt > 0)
+			CLI_PRT(" ,ant_iso:%ddB(cal)", md->ant.isolation);
+		else
+#endif
 		CLI_PRT(" ,ant_iso:%ddB(def)", md->ant.isolation);
+
+	CLI_PRT("\n\r %-15s : soc:%s, func:%s, intf:%s, trx_req:%s",
+		"[ext_bt]",
+		id_to_str(BTC_STR_ESOC, md->bt_solo),
+		id_to_str(BTC_STR_ESOC_FUNC, cx->other.type),
+		id_to_str(BTC_STR_ESOC_INTF, cx->other.hw_coex),
+		(cx->other.ext_pta_req_exist? "Y" : "N"));
 }
 
 static void _show_wl_role_info(struct btc_t *btc, u32 *used,
@@ -233,8 +275,8 @@ static void _show_wl_role_info(struct btc_t *btc, u32 *used,
 	struct btc_wl_info *wl = &btc->cx.wl;
 	struct btc_wl_role_info *wl_rinfo = &wl->role_info;
 	struct btc_wl_dbcc_info *wd = &wl->dbcc_info;
-	struct btc_dm *dm = &btc->dm;
 	u8 i;
+	u32 sp_ap = wl->ap_type;
 
 	if (wl_rinfo->dbcc_en) {
 		CLI_PRT("\n\r %-15s : 2G_PHY:%s, chg_cnt:%d, all_2G_cnt:%d",
@@ -254,49 +296,59 @@ static void _show_wl_role_info(struct btc_t *btc, u32 *used,
 	}
 
 	for (i = 0; i < BTC_WL_MAX_ROLE_NUMBER; i++) {
-		plink = &btc->cx.wl.link_info[i];
+		plink = &wl->link_info[i];
 
-		if (!plink->active)
+		if (!plink->active && plink->connected == MLME_NO_LINK)
 			continue;
 
-		CLI_PRT("\n\r [band%d-port%d]   : %s(rID:%d/mID:%d), %s-%s",
-			plink->phy, plink->pid,
+		CLI_PRT("\n\r [Role%d-HwB%d-p%d]  : %s(%s/%s/%s)",
+			i, plink->phy, plink->pid,
 			id_to_str(BTC_STR_ROLE, (u32)plink->role),
-			i, plink->mac_id,
-			id_to_str(BTC_STR_WLMODE, (u32)plink->mode),
-			id_to_str(BTC_STR_MSTATE, (u32)plink->connected));
+			(plink->active? "Active" : "Doze"), 
+			id_to_str(BTC_STR_MSTATE, plink->connected),
+			id_to_str(BTC_STR_WLMODE, (u32)plink->mode));
 
 		if (plink->connected == MLME_NO_LINK)
 			continue;
 
+		CLI_PRT(", %s(ct:%d/pr:%d/bw:%s), ",
+			id_to_str(BTC_STR_BAND, plink->chdef.band),
+			plink->chdef.center_ch, plink->chdef.chan,
+			id_to_str(BTC_STR_WLBW, (u32)plink->chdef.bw));
+
+		if (plink->role == PHL_RTYPE_STATION && sp_ap)
+			CLI_PRT("AP:%s, ",
+				id_to_str(BTC_STR_SPAP, sp_ap));
+
+		if (!plink->active)
+			continue;
+
+		CLI_PRT("rssi:-%ddBm(%dp), rate(tx:%s/rx:%s), ",
+			110-plink->rssi, plink->rssi,
+			id_to_str(BTC_STR_RATE, (u32)plink->tx_rate),
+			id_to_str(BTC_STR_RATE, (u32)plink->rx_rate));
+
 		if (plink->role == PHL_RTYPE_AP ||
 		    plink->role == PHL_RTYPE_P2P_GO)
-			CLI_PRT("(clients:%d/Lps:%d/Tdma:%d)",
+			CLI_PRT("client(cnt:%d/Lps:%d/Tdma:%d)",
 				plink->client_cnt-1,
 				plink->client_ps,
-				dm ->client_ps_tdma_on);
+				btc->dm.client_ps_tdma_on);
 		else if (plink->role == PHL_RTYPE_STATION ||
 			 plink->role == PHL_RTYPE_P2P_GC)
-			CLI_PRT("(bID:0x%02x%02x%02x%02x%02x%02x)",
+			CLI_PRT("mID:%d, bID:0x%02x%02x%02x%02x%02x%02x",
+				plink->mac_id,
 				plink->mac_addr[0], plink->mac_addr[1],
 				plink->mac_addr[2], plink->mac_addr[3],
 				plink->mac_addr[4], plink->mac_addr[5]);
-
-		CLI_PRT(", rssi:-%ddBm(%dp), rate(tx:%s/rx:%s),"
-			" ch(ct:%d/pr:%d/bw:%s)",
-			110-plink->rssi, plink->rssi,
-			id_to_str(BTC_STR_RATE, (u32)plink->tx_rate),
-			id_to_str(BTC_STR_RATE, (u32)plink->rx_rate),
-			plink->chdef.center_ch, plink->chdef.chan,
-			id_to_str(BTC_STR_WLBW, (u32)plink->chdef.bw));
 
 		if (plink->role == PHL_RTYPE_AP ||
 		    plink->role == PHL_RTYPE_P2P_GO ||
 		    plink->role == PHL_RTYPE_P2P_GC)
 			CLI_PRT(", noa(%s):%d.%03dms",
 				(plink->noa ? "on" : "off"),
-				plink->noa_duration/1000,
-				plink->noa_duration%1000);
+				plink->noa_duration / 1000,
+				plink->noa_duration % 1000);
 	}
 }
 
@@ -330,23 +382,16 @@ static void _show_wl_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 		id_to_str(BTC_STR_MROLE, wl_rinfo->mrole_type),
 		wl->role_info.dbcc_en);
 
-#ifdef BTC_CONFIG_FW_IO_OFLD_SUPPORT
-	CLI_PRT("IO-offload:%d, ", hal_btc_check_io_ofld(btc));
-#else
-	CLI_PRT("IO-offload:0, ");
-#endif
-
 	CLI_PRT("rf_off:%d, LPS:%s, nhm:%d(max:%d/min:%d), cn:%d",
 		wl_smap->rf_off,
 		(wl_smap->lps == BTC_LPS_OFF? "0":
 		(wl_smap->lps == BTC_LPS_RF_OFF? "1(RF-Off)":"1(RF-on)")),
 		wl->nhm.pwr, wl->nhm.pwr_max, wl->nhm.pwr_min, wl->cn_report);
 
-	CLI_PRT("\n\r %-15s : scan:%d(band:%s/phy_map:0x%x/offload:%d),"
+	CLI_PRT("\n\r %-15s : scan:%d(phy_map:0x%x),"
 		" connecting:%d, roam:%d, _4way:%d, dbccing:%d, cx_state:%s",
 		"[scan]", wl_smap->scan,
-		id_to_str(BTC_STR_BAND, (u32)wl->scan_info.band[HW_PHY_0]),
-		wl->scan_info.phy_map, btc->hal->scanofld_en,
+		wl->scan_info.phy_map,
 		wl_smap->connecting, wl_smap->roaming, wl_smap->_4way,
 		wl_smap->dbccing, id_to_str(BTC_STR_CXSTATE, cx->state_map));
 
@@ -360,23 +405,23 @@ static void _show_wl_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 
 	s_1ant = md->ant.single_pos? "(s1)" : "(s0)";
 
-	CLI_PRT("\n\r %-15s : tx[num:%d/ss:%d%s%s], rx[num:%d/ss:%d%s%s]",
+	CLI_PRT("\n\r %-15s : tx[num:%d/ss:%d%s%s/path:%s], rx[num:%d/ss:%d%s%s/path:%s]",
 		"[ant_stream]",
 		p->phy_cap[0].tx_path_num, p->phy_cap[0].txss,
 		(p->phy_cap[0].txss != 1? "" : s_1ant), s_tx,
+		id_to_str(BTC_STR_PATH, (u32)(md->ant.path_pos & 0xf0)>> 4),
 		p->phy_cap[0].rx_path_num, p->phy_cap[0].rxss,
-		(p->phy_cap[0].rxss != 1? "" : s_1ant), s_rx);
+		(p->phy_cap[0].rxss != 1? "" : s_1ant), s_rx,
+		id_to_str(BTC_STR_PATH, (u32)md->ant.path_pos & 0xf));
 
 	if (wl->role_info.dbcc_en)
 		CLI_PRT(", tx1[num:%d/ss:%d], rx1[num:%d/ss:%d]",
 			p->phy_cap[1].tx_path_num, p->phy_cap[1].txss,
 			p->phy_cap[1].rx_path_num, p->phy_cap[1].rxss);
 
-	CLI_PRT("\n\r %-15s : tx[tp:%dMbps/lvl:%d],"
-		" rx[tp:%dMbps/lvl:%d/err_ratio:%dp(all-pkts:%d)/"
+	CLI_PRT("\n\r %-15s : tx[tp:%dMbps/lvl:%d], rx[tp:%dMbps/lvl:%d], "
 		"evm(1ss:%d/2ss_max:%d/2ss_min:%d)]", "[trx_stat]",
 		wl_tra->tx_tp, wl_tra->tx_lvl, wl_tra->rx_tp, wl_tra->rx_lvl,
-		wl->rx_err_ratio_2s, cx->cnt_wl[BTC_WCNT_RX_LAST],
 		wl->evm_1ss_rpt, wl->evm_2ss_max_rpt, wl->evm_2ss_min_rpt);
 
 	_show_wl_role_info(btc, used, input, input_num, output, out_len);
@@ -415,11 +460,13 @@ static void _show_bt_profile_info(struct btc_t *btc, u32 *used,
 				  char input[][MAX_ARGV], u32 input_num,
 				  char *output, u32 out_len)
 {
+	struct btc_cx *cx = &btc->cx;
 	struct btc_bt_link_info *bt_linfo = &btc->cx.bt.link_info;
 	struct btc_bt_hfp_desc *hfp = &bt_linfo->hfp_desc;
 	struct btc_bt_hid_desc *hid = &bt_linfo->hid_desc;
 	struct btc_bt_a2dp_desc *a2dp = &bt_linfo->a2dp_desc;
 	struct btc_bt_pan_desc *pan = &bt_linfo->pan_desc;
+	struct btc_bt_leaudio_desc *leaudio = &bt_linfo->leaudio_desc;
 	u8 i;
 
 	if (hfp->exist) {
@@ -473,6 +520,13 @@ static void _show_bt_profile_info(struct btc_t *btc, u32 *used,
 				(pan->links[i].direct? "Tx" : "Rx"));
 		}
 	}
+
+	if (leaudio->exist) {
+		CLI_PRT("\n\r %-15s : rssi:%d, BIS:%d, CIS:%d (Update:%d)",
+			"[LEAUDIO]", leaudio->rssi - 100,
+			leaudio->bis_cnt, leaudio->cis_cnt,
+			cx->cnt_bt[BTC_BCNT_LEAUDIO_INFOUPDATE]);
+	}
 }
 
 static void _show_bt_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
@@ -503,13 +557,14 @@ static void _show_bt_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 	CLI_PRT("igno_wl:%d, mailbox_avl:%d, rfk_state:0x%x",
 		bt->igno_wl, bt->mbx_avl, bt->rfk_info.val);
 
-	CLI_PRT("\n\r %-15s : profile:%s%s%s%s%s", "[profile]",
+	CLI_PRT("\n\r %-15s : profile:%s%s%s%s%s%s", "[profile]",
 		((bt_linfo->profile_cnt.now == 0) ? "None," : ""),
 		(bt_linfo->hfp_desc.exist? "HFP," : ""),
 		(bt_linfo->hid_desc.exist? "HID," : ""),
 		(bt_linfo->a2dp_desc.exist?
 		(bt_linfo->a2dp_desc.sink ? "A2DP_sink," :"A2DP,") : ""),
-		(bt_linfo->pan_desc.exist? "PAN," : ""));
+		(bt_linfo->pan_desc.exist? "PAN," : ""),
+		(bt_linfo->leaudio_desc.exist? "LEAUDIO," : ""));
 
 	CLI_PRT(" multi-link:%d, role:%s, ble-connect:%d, CQDDR:%d,"
 		" A2DP_active:%d, PAN_active:%d",
@@ -524,17 +579,19 @@ static void _show_bt_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 		wl->afh_info.en, wl->afh_info.ch, wl->afh_info.bw);
 
 	CLI_PRT(", Legacy[%02x%02x_%02x%02x_%02x%02x_%02x%02x_%02x%02x]"
-		"(cnt:%d/co_ch:%d)",
+		"(chs:%d/co_ch:%d/cnt:%d)",
 		afh[0], afh[1], afh[2], afh[3], afh[4],
 		afh[5], afh[6], afh[7], afh[8], afh[9],
-		cx->cnt_bt[BTC_BCNT_AFH_UPDATE],
-		cx->cnt_bt[BTC_BCNT_AFH_CONFLICT]);
+		cx->cnt_bt[BTC_BCNT_AFH_CHN],
+		cx->cnt_bt[BTC_BCNT_AFH_CONFLICT],
+		cx->cnt_bt[BTC_BCNT_AFH_UPDATE]);
 
-	if (bt_linfo->status.map.ble_connect) {
-		CLI_PRT(", LE[%02x%02x_%02x_%02x%02x](cnt:%d/co_ch:%d)",
+	if (bt_linfo->status.map.ble_connect || bt_linfo->leaudio_desc.exist) {
+		CLI_PRT(", LE[%02x%02x_%02x_%02x%02x](chs:%d/co_ch:%d/cnt:%d)",
 			afh_le[0], afh_le[1], afh_le[2], afh_le[3], afh_le[4],
-			cx->cnt_bt[BTC_BCNT_AFH_LE_UPDATE],
-			cx->cnt_bt[BTC_BCNT_AFH_LE_CONFLICT]);
+			cx->cnt_bt[BTC_BCNT_AFH_LE_CHN],
+			cx->cnt_bt[BTC_BCNT_AFH_LE_CONFLICT],
+			cx->cnt_bt[BTC_BCNT_AFH_LE_UPDATE]);
 	}
 
 	CLI_PRT("\n\r %-15s : retry:%d, relink:%d, rate_chg:%d,"
@@ -564,32 +621,32 @@ static void _show_bt_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 		cx->cnt_bt[BTC_BCNT_INFOSAME]);
 
 	CLI_PRT("\n\r %-15s : Hi-rx=%d, Hi-tx=%d, Lo-rx=%d, Lo-tx=%d"
-		" (polut_wl_tx:%d/rx_scan_LP:%d)", "[trx_req_cnt]",
+		" (pollut_wl_tx_diff:%d/rx_scan_LP:%d), ", "[trx_req_cnt]",
 		cx->cnt_bt[BTC_BCNT_HIPRI_RX],
 		cx->cnt_bt[BTC_BCNT_HIPRI_TX],
 		cx->cnt_bt[BTC_BCNT_LOPRI_RX],
 		cx->cnt_bt[BTC_BCNT_LOPRI_TX],
-		cx->cnt_bt[BTC_BCNT_POLUT],
+		cx->cnt_bt[BTC_BCNT_POLUT_DIFF],
 		bt->scan_rx_low_pri);
 
-	if (!bt->scan_info_update) {
+	if (bt->run_patch_code && bt->enable.now)
 		rpt_map |= RPT_EN_BT_SCAN_INFO;
-	} else {
+	else
 		rpt_map &= ~RPT_EN_BT_SCAN_INFO;
-		CLI_PRT("(BG:%d-%d", bt->scan_info[CXSCAN_BG].win,
-			bt->scan_info[CXSCAN_BG].intvl);
-		CLI_PRT("/INIT:%d-%d", bt->scan_info[CXSCAN_INIT].win,
-			bt->scan_info[CXSCAN_INIT].intvl);
-		CLI_PRT("/LE:%d-%d)", bt->scan_info[CXSCAN_LE].win,
-			bt->scan_info[CXSCAN_LE].intvl);
-	}
+
+	CLI_PRT("(BG:%d-%d", bt->scan_info[CXSCAN_BG].win,
+		bt->scan_info[CXSCAN_BG].intvl);
+	CLI_PRT("/INIT:%d-%d", bt->scan_info[CXSCAN_INIT].win,
+		bt->scan_info[CXSCAN_INIT].intvl);
+	CLI_PRT("/LE:%d-%d)", bt->scan_info[CXSCAN_LE].win,
+		bt->scan_info[CXSCAN_LE].intvl);
 
 	if (bt_linfo->profile_cnt.now)
 		rpt_map |= RPT_EN_BT_AFH_MAP;
 	else
 		rpt_map &= ~RPT_EN_BT_AFH_MAP;
 
-	if (bt_linfo->status.map.ble_connect)
+	if (bt_linfo->status.map.ble_connect || bt_linfo->leaudio_desc.exist)
 		rpt_map |= RPT_EN_BT_AFH_MAP_LE;
 	else
 		rpt_map &= ~RPT_EN_BT_AFH_MAP_LE;
@@ -635,10 +692,13 @@ static void _show_dm_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 	struct btc_dm *dm = &btc->dm;
 	struct btc_wl_info *wl = &btc->cx.wl;
 	struct btc_bt_info *bt = &btc->cx.bt;
-	struct btc_bt_psd_dm *bp = &btc->bt_psd_dm;
-	struct btc_aiso_val *av = &bp->aiso_val;
 	struct btc_ant_info *ant = &btc->mdinfo.ant;
-	u8 cnt, aiso_cur, aiso_ori = ant->isolation;
+	struct btc_module *md = &btc->mdinfo;
+#ifdef BTC_AISO_SUPPORT
+		struct btc_bt_psd_dm *bp = &btc->bt_psd_dm;
+		struct btc_aiso_val *av = &bp->aiso_val;
+		u8 cnt, aiso_cur, aiso_ori = ant->isolation;
+#endif
 
 	if (!(dm->coex_info_map & BTC_COEX_INFO_DM))
 		return;
@@ -666,12 +726,30 @@ static void _show_dm_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 	CLI_PRT("leak_ap:%d, fddt_train:No-Support", dm->leak_ap);
 #endif
 
-	CLI_PRT("\n\r %-15s : wl_tx_limit[en:%d/max_t:%dus/max_retry:%d],"
-		" bt_slot_req:[%d/%d], bt_stbc_req:%d", "[dm_drv_ctrl]",
-		dm->wl_tx_limit.en,
-		dm->wl_tx_limit.tx_time, dm->wl_tx_limit.tx_retry,
+	CLI_PRT("\n\r %-15s : wl_tx_limit[en:%d/max_t:%dus],"
+		" wl_trx_1ss[tx:%d/path:%s/rx:%d/path:%s],"
+		" bt_slot_req:[%d/%d], bt_stbc_req:%d, wa_type:0x%x,"
+		" ofld[scan:%d/",
+		"[dm_drv_ctrl]",
+		dm->wl_tx_limit.en, dm->wl_tx_limit.tx_time,
+		dm->wl_trx_nss.tx_ss,
+		id_to_str(BTC_STR_PATH, (u32)dm->wl_trx_nss.tx_path),
+		dm->wl_trx_nss.rx_ss,
+		id_to_str(BTC_STR_PATH, (u32)dm->wl_trx_nss.rx_path),
 		btc->bt_req_len[HW_PHY_0], btc->bt_req_len[HW_PHY_1],
-		btc->bt_req_stbc);
+		btc->bt_req_stbc, md->wa_type, btc->hal->scanofld_en);
+
+#ifdef BTC_CONFIG_FW_IO_OFLD_SUPPORT
+	CLI_PRT("/io:%d", hal_btc_check_io_ofld(btc));
+#else
+	CLI_PRT("/io:0");
+#endif
+
+#ifdef BTC_OUTSRC_API_OFLD
+	CLI_PRT("/outsrc_api:1]");
+#else
+	CLI_PRT("/outsrc_api:0]");
+#endif
 
 	CLI_PRT("\n\r %-15s : wl[rssi_lvl:%d/para:%d/tx_pwr:%d/rx_lvl:%d"
 		"(pre_agc:%d/lna2:%d)/"
@@ -685,6 +763,7 @@ static void _show_dm_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 		dm->rf_trx_para.bt_tx_power, dm->rf_trx_para.bt_rx_gain,
 		(bt->hi_lna_rx? "Hi" : "Ori"));
 
+#ifdef BTC_AISO_SUPPORT
 	if (bp->en || bp->aiso_data_ok || bp->rec_time_out || bp->aiso_db_cnt) {
 		cnt = bp->aiso_db_cnt;
 		aiso_cur = (cnt > 0 ? bp->aiso_db[(cnt-1) & 0xf] : aiso_ori);
@@ -694,6 +773,7 @@ static void _show_dm_info(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 			bp->rec_time_out, bp->aiso_data_ok, av->psd_rec_cnt,
 			bp->aiso_cmd_cnt);
 	}
+#endif
 	_show_dm_step(btc, used, input, input_num, output, out_len);
 }
 
@@ -724,28 +804,27 @@ static void _show_mreg(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 		bt->scbd, cx->cnt_bt[BTC_BCNT_SCBDREAD],
 		cx->cnt_bt[BTC_BCNT_SCBDUPDATE]);
 
-	/* To avoid I/O if WL LPS or power-off  */
-	_read_cx_ctrl(btc, &val);
-	dm->pta_owner = val;
 
-	CLI_PRT("\n\r %-15s : pta_owner:%s, pta_req_mac:MAC%d", "[gnt_status]",
+	CLI_PRT("\n\r %-15s : pta_owner:%s, pta_req_mac:MAC%d, ss_trxmask:0x%s,"
+		" polut_type:%s",
+		"[gnt_status]",
 		(btc->chip->hw & BTC_FEAT_PTA_ONOFF_CTRL ? "HW" :
 		(dm->pta_owner == BTC_CTRL_BY_WL? "WL" : "BT")),
-		wl->pta_req_mac);
+		wl->pta_req_mac,
+		(cx->other.type != BTC_EXTSOC_FUNC_NONE? "5DF" : "5FF"),
+		id_to_str(BTC_STR_POLUT, wl->bt_polut_type[wl->pta_req_mac]));
 
 	gnt = &dm->gnt_val[HW_PHY_0];
 
-	CLI_PRT(", phy-0[gnt_wl:%s-%d/gnt_bt:%s-%d/polut_type:%s]",
+	CLI_PRT(", phy-0[gnt_wl:%s-%d/gnt_bt:%s-%d]",
 		(gnt->gnt_wl_sw_en? "SW" : "HW"), gnt->gnt_wl,
-		(gnt->gnt_bt_sw_en? "SW" : "HW"), gnt->gnt_bt,
-		id_to_str(BTC_STR_POLUT, wl->bt_polut_type[HW_PHY_0]));
+		(gnt->gnt_bt_sw_en? "SW" : "HW"), gnt->gnt_bt);
 
 	if (wl_rinfo->dbcc_en) {
 		gnt = &dm->gnt_val[HW_PHY_1];
-		CLI_PRT(", phy-1[gnt_wl:%s-%d/gnt_bt:%s-%d/polut_type:%s]",
+		CLI_PRT(", phy-1[gnt_wl:%s-%d/gnt_bt:%s-%d]",
 			(gnt->gnt_wl_sw_en? "SW" : "HW"), gnt->gnt_wl,
-			(gnt->gnt_bt_sw_en? "SW" : "HW"), gnt->gnt_bt,
-			id_to_str(BTC_STR_POLUT, wl->bt_polut_type[HW_PHY_1]));
+			(gnt->gnt_bt_sw_en? "SW" : "HW"), gnt->gnt_bt);
 	}
 
 	pcinfo = &pfwinfo->rpt_fbtc_mregval.cinfo;
@@ -801,7 +880,6 @@ static void _show_summary(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 
 	if (!(dm->coex_info_map & BTC_COEX_INFO_SUMMARY))
 		return;
-
 	CLI_PRT("%s", "\n\r========== [Statistics] ==========");
 
 	pcinfo = &pfwinfo->rpt_ctrl.cinfo;
@@ -836,7 +914,7 @@ static void _show_summary(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 			prptctrl->bt_mbx_info.a2dp.cnt_nack);
 
 		CLI_PRT("\n\r %-15s :"
-			" wl_rfk[req:%d/go:%d/reject:%d/tout:%d/time = %dms]",
+			" wl_rfk[req:%d/go:%d/reject:%d/tout:%d/time:%dms]",
 			"[RFK/LPS]", cx->cnt_wl[BTC_WCNT_RFK_REQ],
 			cx->cnt_wl[BTC_WCNT_RFK_GO],
 			cx->cnt_wl[BTC_WCNT_RFK_REJECT],
@@ -856,28 +934,29 @@ static void _show_summary(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 			wl->status.map.lps, wl->status.map.rf_off);
 	}
 
-	for (i = 0; i < BTC_NCNT_MAX; i++)
+	for (i = 0; i < BTC_NTFY_MAX; i++)
 		cnt_sum += dm->cnt_notify[i];
 
 	CLI_PRT("\n\r %-15s : total=%d, show_coex_info=%d,"
 		" power_on=%d, init_coex=%d, ", "[notify_cnt]",
-		cnt_sum, cnt[BTC_NCNT_SHOW_COEX_INFO],
-		cnt[BTC_NCNT_POWER_ON], cnt[BTC_NCNT_INIT_COEX]);
+		cnt_sum, cnt[BTC_NTFY_SHOW_COEX_INFO],
+		cnt[BTC_NTFY_POWER_ON], cnt[BTC_NTFY_INIT_COEX]);
 
 	CLI_PRT("power_off=%d, radio_state=%d, role_info=%d,"
 		" wl_rfk=%d, wl_sta=%d",
-		cnt[BTC_NCNT_POWER_OFF], cnt[BTC_NCNT_RADIO_STATE],
-		cnt[BTC_NCNT_ROLE_INFO], cnt[BTC_NCNT_WL_RFK],
-		cnt[BTC_NCNT_WL_STA]);
+		cnt[BTC_NTFY_POWER_OFF], cnt[BTC_NTFY_RADIO_STATE],
+		cnt[BTC_NTFY_ROLE_INFO], cnt[BTC_NTFY_WL_RFK],
+		cnt[BTC_NTFY_WL_STA]);
 
 	CLI_PRT("\n\r %-15s : scan_start=%d, scan_finish=%d,"
-		" switch_band=%d, special_pkt=%d, ", "[notify_cnt]",
-		cnt[BTC_NCNT_SCAN_START], cnt[BTC_NCNT_SCAN_FINISH],
-		cnt[BTC_NCNT_SWITCH_BAND], cnt[BTC_NCNT_SPECIAL_PACKET]);
+		" sw_band=%d, special_pkt=%d, ", "[notify_cnt]",
+		cnt[BTC_NTFY_SCAN_START], cnt[BTC_NTFY_SCAN_FINISH],
+		cnt[BTC_NTFY_SWITCH_BAND], cnt[BTC_NTFY_SPECIAL_PACKET]);
 
-	CLI_PRT("timer=%d, customerize=%d, hub_msg=%d, chg_fw=%d",
-		cnt[BTC_NCNT_TIMER], cnt[BTC_NCNT_CUSTOMERIZE],
-		btc->hubmsg_cnt, cnt[BTC_NCNT_RESUME_DL_FW]);
+	CLI_PRT("timer=%d, custm=%d, hub_msg=%d, chg_fw=%d, ctry_code=%d",
+		cnt[BTC_NTFY_TIMER], cnt[BTC_NTFY_CUSTOMERIZE],
+		btc->hubmsg_cnt, cnt[BTC_NTFY_RESUME_DL_FW],
+		cnt[BTC_NTFY_COUNTRYCODE]);
 }
 
 static void _show_fbtc_slots(struct btc_t *btc, u32 *used,
@@ -990,6 +1069,8 @@ static void _show_fbtc_cysta(struct btc_t *btc, u32 *used,
 		s_id = ((cycle-1) % slot_pair)*2;
 
 		if (cnt % divide_cnt == 1) {
+			if (dm->fddt_train == BTC_FDDT_ENABLE)
+				CLI_PRT("\n\r %-15s : ", "[slotT_permtan]");
 			if (a2dp->exist)
 				CLI_PRT("\n\r %-15s : ", "[slotT_wermtan]");
 			else
@@ -1075,7 +1156,7 @@ static void _show_error(struct btc_t *btc, u32 *used,
 	if (!(dm->error || fw_except_map || fw_except_cnt ||
 	    pfwinfo->len_mismch || pfwinfo->fver_mismch ||
 	    pfwinfo->err[BTFRE_EXCEPTION]))
-	    return;
+		return;
 
 	CLI_PRT("\n\r %-15s : dm_err:0x%x, fw_except:0x%x(cnt:%d), "
 		"fw_rpt[len_err:0x%x/ver_err:0x%x/except_cnt:%d]", "[ERROR]",
@@ -1205,7 +1286,7 @@ static void _cmd_dbg(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 		CLI_PRT(" dbg 6: fw exception map decode\n");
 		CLI_PRT(" dbg 7: fw report length mismatch map decode\n");
 		CLI_PRT(" dbg 8: fw report version mismatch map decode\n");
-		CLI_PRT(" dbg 9: fddt no-run reason map decode\n");
+		CLI_PRT(" dbg 9: fddt enum map decode\n");
 		CLI_PRT(" dbg 10: MAC crc error report <para1: enable>\n");
 		CLI_PRT(" dbg 11: BB btg_rx_ctrl <para1: enable>\n");
 		CLI_PRT(" dbg 12: BB pre_agc_ctrl <para1: enable>\n");
@@ -1364,17 +1445,25 @@ static void _cmd_dbg(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 			CLI_PRT(" %s\n", id_to_str(BTC_STR_RPTMATCH, i));
 		}
 		break;
-	case 9: /* fddt no-run reason */
-		if (!dm->fddt_info.nrsn_map) {
-			CLI_PRT(" no fddt no-run reason!!\n");
-			return;
+	case 9: /* fddt enum map */
+		CLI_PRT(" ==== fddt no-run reason enum ====\n");
+		for (i = 0; i < BTC_NFRSN_MAX; i++) {
+			CLI_PRT("%d:%s\n", i, id_to_str(BTC_STR_FDDT_NORUN, i));
 		}
 
-		CLI_PRT(" fddt no-run reason includes:\n");
-		for (i = 0; i < BTC_NFRSN_MAX; i++) {
-			if (!(dm->fddt_info.nrsn_map & BIT(i)))
-				continue;
-			CLI_PRT(" %s\n", id_to_str(BTC_STR_FDDT_NORUN, i));
+		CLI_PRT(" ==== fddt train state enum ====\n");
+		for (i = 0; i < CX_FDDT_STATE_MAX; i++) {
+			CLI_PRT("%d:%s\n", i, id_to_str(BTC_STR_FDDT_TSTATE, i));
+		}
+
+		CLI_PRT(" ==== fddt train phase enum ====\n");
+		for (i = 0; i < CX_FDDT_PHASE_MAX; i++) {
+			CLI_PRT("%d:%s\n", i, id_to_str(BTC_STR_FDDT_TPHASE, i));
+		}
+
+		CLI_PRT(" ==== fddt check map (train_result) enum ====\n");
+		for (i = 0; i < CX_FDDT_CHKMAP_MAX; i++) {
+			CLI_PRT("BIT%d:%s\n", i, id_to_str(BTC_STR_FDDT_CHKMAP, i));
 		}
 		break;
 	case 10:
@@ -1582,7 +1671,7 @@ static void _cmd_sig_gdbg_en(struct btc_t *btc, u32 *used,
 	if (input_num >= 2) {
 		_os_sscanf(input[1], "%x", &map);
 
-		hal_btc_fw_set_gpio_dbg(btc, CXDGPIO_EN_MAP, map);
+		hal_btc_fw_set_gpio(btc, CXDGPIO_EN_MAP, map);
 
 		CLI_PRT(" signal to gpio debug map = 0x%08x!!\n", map);
 		return;
@@ -1606,7 +1695,8 @@ static void _cmd_sig_gdbg_en(struct btc_t *btc, u32 *used,
 static void _cmd_sgpio_map(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 			   u32 input_num, char *output, u32 out_len)
 {
-	u32 sig = 0, gpio = 0;
+	struct btc_cx *cx = &btc->cx;
+	u32 sig = 0, gpio = 0, used_gpio_map = 0;
 
 	if (input_num >= 3) {
 		_os_sscanf(input[1], "%d", &sig);
@@ -1618,7 +1708,15 @@ static void _cmd_sgpio_map(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 		return;
 	}
 
-	hal_btc_fw_set_gpio_dbg(btc, CXDGPIO_MUX_MAP, ((gpio << 8) + sig));
+	used_gpio_map = cx->other.ext_hpta_cfg | cx->other.ext_hmbx_cfg |
+			cx->other.ext_swout_cfg |
+			(cx->other.ext_swin_cfg & bMASKLW);
+	if (BIT(gpio) & used_gpio_map) {
+		CLI_PRT(" gpio setup conflict with ext-SOC interface!!\n");
+		return;
+	}
+
+	hal_btc_fw_set_gpio(btc, CXDGPIO_MUX_MAP, ((gpio << 8) + sig));
 
 	CLI_PRT(" signal-%s -> gpio-%d\n", id_to_str(BTC_STR_GDBG, sig), gpio);
 }
@@ -1627,6 +1725,7 @@ static void _cmd_wl_tx_power(struct btc_t *btc, u32 *used,
 			     char input[][MAX_ARGV], u32 input_num,
 			     char *output, u32 out_len)
 {
+	struct btc_wl_info *wl = &btc->cx.wl;
 	u32 pwr = 0;
 	u8 is_negative = 0;
 
@@ -1648,6 +1747,7 @@ static void _cmd_wl_tx_power(struct btc_t *btc, u32 *used,
 	if (is_negative)
 		pwr |= BIT(7);
 
+	wl->rf_para.tx_pwr_freerun = pwr;
 	_set_wl_tx_power(btc, pwr); /* pwr --> 1's complement */
 
 	if (pwr == 0xff)
@@ -1661,6 +1761,7 @@ static void _cmd_wl_tx_power(struct btc_t *btc, u32 *used,
 static void _cmd_wl_rx_lna(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 			   u32 input_num, char *output, u32 out_len)
 {
+	struct btc_wl_info *wl = &btc->cx.wl;
 	u32 lna = 0;
 
 	if (input_num < 2) {
@@ -1670,6 +1771,7 @@ static void _cmd_wl_rx_lna(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 
 	_os_sscanf(input[1], "%d", &lna);
 
+	wl->rf_para.rx_gain_freerun = lna;
 	_set_wl_rx_gain(btc, lna);
 	CLI_PRT(" set wl rx level = %d!!\n", lna);
 }
@@ -1709,6 +1811,7 @@ static void _cmd_bt_tx_power(struct btc_t *btc, u32 *used,
 			     char input[][MAX_ARGV], u32 input_num,
 			     char *output, u32 out_len)
 {
+	struct btc_bt_info *bt = &btc->cx.bt;
 	s32 pwr = 0;
 	u32 pwr2;
 
@@ -1721,6 +1824,7 @@ static void _cmd_bt_tx_power(struct btc_t *btc, u32 *used,
 
 	pwr2 = pwr & bMASKB0;
 
+	bt->rf_para.tx_pwr_freerun = pwr2;
 	_set_bt_tx_power(btc, pwr2);
 	CLI_PRT(" decrease bt tx power level = %d!!\n", pwr2);
 }
@@ -1736,14 +1840,14 @@ static void _cmd_bt_rx_lna(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 	if (input_num >= 2)
 		_os_sscanf(input[1], "%d", &lna);
 
-	if (input_num < 2 || lna > 7) {
+	if (input_num < 2 || lna > BTC_BT_RX_NORMAL_LVL) {
 		CLI_PRT(" blna <lna_constrain: 0~7> \n");
 		return;
 	}
 
 	buf = (u8)(lna & bMASKB0);
 
-	if (_send_fw_cmd(btc, SET_BT_LNA_CONSTRAIN, &buf, 1)) {
+	if (!_send_fw_cmd(btc, SET_BT_LNA_CONSTRAIN, &buf, 1)) {
 		CLI_PRT(" set bt rx lna constrain level fail!!\n");
 		return;
 	}
@@ -1751,7 +1855,7 @@ static void _cmd_bt_rx_lna(struct btc_t *btc, u32 *used, char input[][MAX_ARGV],
 	bt->rf_para.rx_gain_freerun = lna;
 	btc->dm.rf_trx_para.bt_rx_gain = lna;
 
-	_os_delay_us(btc->hal, BTC_SCBD_REWRITE_DELAY*2);
+	_os_delay_us(btc->hal, BTC_SCBD_REWRITE_DELAY);
 
 	if (buf == BTC_BT_RX_NORMAL_LVL)
 		_write_scbd(btc, BTC_WSCB_RXGAIN, false);
@@ -2211,7 +2315,7 @@ static void _show_fddt_cycle(struct btc_t *btc, u32 *used,
 
 		CLI_PRT("([W%d/B%d/CN%d]-[Cy%d/St%d->S%d/P%d/R0x%x]-"
 			"[WT%d/WR%d/BT%d/BR%d]-[TP:%d]-[ne:%d])-->",
-			c.rssi & 0xf, c.rssi & 0xf0) >> 4, c.cn,
+			c.rssi & 0xf, (c.rssi & 0xf0) >> 4, c.cn,
 			c.phase_cycle, c.train_step,
 			(c.train_status & 0xf0) >> 4, c.train_status & 0xf,
 			c.train_result,
@@ -2400,12 +2504,14 @@ static void _cmd_fddt_ctrl(struct btc_t *btc, u32 *used,
 	struct btc_fddt_train_info *t = &dm->fddt_info.train;
 	u32 type = 0, para = 0, para1 = 0;
 	u8 buf[7] = {0};
+	s8 wl_rssi_th, bt_rssi_th, rssi_tol;
 
 	_os_sscanf(input[1], "%d", &type);
 
-	if (input_num <= 1 || type > 4) {
+	if (input_num <= 1 || type > 6) {
 		CLI_PRT(" ftctrl <val--- 0:time_cycle, 1:break_check,"
-			" 2:fail_check, 3:cell_para, 4:cell_update>\n");
+			" 2:fail_check, 3:cell_para, 4:cell_update, 5:cell_wl_rssi_update,"
+			" 6:cell_bt_rssi_update>\n");
 		return;
 	} else if (input_num <= 3) {
 		switch (type) {
@@ -2417,7 +2523,7 @@ static void _cmd_fddt_ctrl(struct btc_t *btc, u32 *used,
 			CLI_PRT(" break_check: ftctrl 1 "
 				"<1:bt_no_ept_cnt, 2:wl_tp_ratio,"
 				" 3:wl_tp_low_bound, 4:cn, 5:cell_chg,"
-				" 6: cn_limit, 7: nhm_limit> \n");
+				" 6: cn_limit, 7: nhm_limit, 8: rssi_tol> \n");
 			return;
 		case 2:
 			CLI_PRT(" fail_check: ftctrl 2 "
@@ -2440,6 +2546,16 @@ static void _cmd_fddt_ctrl(struct btc_t *btc, u32 *used,
 		case 4:
 			CLI_PRT(" cell_update: ftctrl 4 "
 				 "<0:reset to default, 1:update by abt_iso>\n");
+			return;
+		case 5:
+			CLI_PRT(" cell_wl_rssi_update: ftctrl 5 "
+					"<0:wl_rssi_thres[0], 1:wl_rssi_thres[1],"
+					"2:wl_rssi_thres[2], 3:wl_rssi_thres[3]>\n");
+			return;
+		case 6:
+			CLI_PRT(" cell_bt_rssi_update: ftctrl 6 "
+					"<0:bt_rssi_thres[0], 1:bt_rssi_thres[1],"
+					"2:bt_rssi_thres[2], 3:bt_rssi_thres[3]>\n");
 			return;
 		}
 	}
@@ -2499,10 +2615,14 @@ static void _cmd_fddt_ctrl(struct btc_t *btc, u32 *used,
 		} else if (para == 6) {
 			t->b_chk.cn_limit = (u8) para1;
 			CLI_PRT(" cn_limit=%d\n", para1);
-		} else {
+		} else if (para == 7) {
 			t->b_chk.nhm_limit = (s8) para1;
 			CLI_PRT(" nhm_limit=%d\n", para1);
-	 }
+		} else {
+			dm->rssi_offset2 = (u8) para1;
+			rssi_tol = btc->chip->rssi_tol + dm->rssi_offset2;
+			CLI_PRT(" rssi_tol=%d\n", rssi_tol);
+		}
 		break;
 	case 2:
 		CLI_PRT(" FDDT Fail_check setup\n");
@@ -2549,6 +2669,46 @@ static void _cmd_fddt_ctrl(struct btc_t *btc, u32 *used,
 			hal_mem_cpy(h, t->cell_dl, cell_dl_def,
 				    sizeof(cell_dl_def));
 			CLI_PRT(" FDDT Cell reset to default!\n");
+		}
+		break;
+	case 5:
+		CLI_PRT(" FDDT cell_wl_rssi setup\n");
+		if (para == 0) {
+			btc->chip->wl_rssi_thres[0] = (u8) para1;
+			wl_rssi_th = btc->chip->wl_rssi_thres[0] - 110;
+			CLI_PRT(" rssi_thres[0]=%d, rssi_thres0=%ddBm\n", para1, wl_rssi_th);
+		} else if (para == 1) {
+			btc->chip->wl_rssi_thres[1] = (u8) para1;
+			wl_rssi_th = btc->chip->wl_rssi_thres[1] - 110;
+			CLI_PRT(" rssi_thres[1]=%d, rssi_thres1=%ddBm\n", para1, wl_rssi_th);
+		} else if (para == 2) {
+			btc->chip->wl_rssi_thres[2] = (u8) para1;
+			wl_rssi_th = btc->chip->wl_rssi_thres[2] - 110;
+			CLI_PRT(" rssi_thres[2]=%d, rssi_thres2=%ddBm\n", para1, wl_rssi_th);
+		} else {
+			btc->chip->wl_rssi_thres[3] = (u8) para1;
+			wl_rssi_th = btc->chip->wl_rssi_thres[3] - 110;
+			CLI_PRT(" rssi_thres[3]=%d, rssi_thres3=%ddBm\n", para1, wl_rssi_th);
+		}
+		break;
+	case 6:
+		CLI_PRT(" FDDT cell_bt_rssi setup\n");
+		if (para == 0) {
+			btc->chip->bt_rssi_thres[0] = (u8) para1;
+			bt_rssi_th = btc->chip->bt_rssi_thres[0] - 100;
+			CLI_PRT(" rssi_thres[0]=%d, rssi_thres0=%ddBm\n", para1, bt_rssi_th);
+		} else if (para == 1) {
+			btc->chip->bt_rssi_thres[1] = (u8) para1;
+			bt_rssi_th = btc->chip->bt_rssi_thres[1] - 100;
+			CLI_PRT(" rssi_thres[1]=%d, rssi_thres1=%ddBm\n", para1, bt_rssi_th);
+		} else if (para == 2) {
+			btc->chip->bt_rssi_thres[2] = (u8) para1;
+			bt_rssi_th = btc->chip->bt_rssi_thres[2] - 100;
+			CLI_PRT(" rssi_thres[2]=%d, rssi_thres2=%ddBm\n", para1, bt_rssi_th);
+		} else {
+			btc->chip->bt_rssi_thres[3] = (u8) para1;
+			bt_rssi_th = btc->chip->bt_rssi_thres[3] - 100;
+			CLI_PRT(" rssi_thres[3]=%d, rssi_thres3=%ddBm\n", para1, bt_rssi_th);
 		}
 		break;
 	default:
@@ -3318,21 +3478,25 @@ static void _bt_psd_aiso_sort(struct btc_t *btc, u32 *used,
 {
 	struct btc_bt_psd_dm *bp = &btc->bt_psd_dm;
 	struct btc_module *module = &btc->mdinfo;
-	u8 i, rec_idx, cnt = bp->aiso_db_cnt;
+	u8 i, rec_idx, cnt = bp->aiso_db_cnt, cnt1;
 	u8 max_aiso = 0, mid_cnt = 0, th = 3, min_lim = 0, max_lim = 0,
 	   avg_sort_cnt = 0;
 	u32 aiso_sort_tol = 0;
 
-	if (cnt > 16)
+	if (cnt > 16 || cnt == 0)
 		return;
 
 	mid_cnt = cnt % 2 ? cnt : cnt + 1;
+
+	if ((mid_cnt / 2) == 0)
+		return;
 
 	hal_mem_cpy(btc->hal, bp->aiso_sort_db, bp->aiso_db, 16);
 
 	//sort raw data of antenna-isolation results
 	for (i = 0; i < cnt-1; i++) {
-		for (rec_idx = 0; rec_idx <(u8)(cnt-1-i); rec_idx++) {
+		cnt1 = (u8)(cnt - i - 1);
+		for (rec_idx = 0; rec_idx < cnt1; rec_idx++) {
 			if (bp->aiso_sort_db[rec_idx] <=
 			    bp->aiso_sort_db[rec_idx+1])
 			    continue;
@@ -3577,6 +3741,8 @@ void halbtc_cmd_parser(struct btc_t *btc, char input[][MAX_ARGV],
 		}
 	}
 
+	btc->wlcli_h2c_cmd = true;
+
 	switch (id) {
 	case HALBTC_DBG:
 		_cmd_dbg(btc, used, input, input_num, output, out_len);
@@ -3661,6 +3827,8 @@ void halbtc_cmd_parser(struct btc_t *btc, char input[][MAX_ARGV],
 			CLI_PRT(" %s\n", halbtc_cmd_i[i + 1].name);
 		break;
 	}
+
+	btc->wlcli_h2c_cmd = false;
 }
 
 s32 halbtc_cmd(struct btc_t *btc, char *input, char *output, u32 out_len)

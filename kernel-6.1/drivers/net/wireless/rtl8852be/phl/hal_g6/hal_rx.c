@@ -934,6 +934,44 @@ rtw_hal_sdio_lps_flg(void *hal)
 }
 #endif /* CONFIG_SDIO_HCI */
 
+#ifdef CONFIG_PHL_CHANNEL_INFO
+static void
+hal_rx_ppdu_sts_normal_data_csi_chk(struct rtw_phl_com_t *phl_com,
+	struct rtw_phl_ppdu_sts_ent *ppdu_sts_ent, void *hdr, struct rtw_r_meta_data *meta)
+{
+	struct rtw_chinfo_cur_parm *cur_parm = phl_com->cur_parm;
+	bool bypass_csi = true;
+
+	if (!cur_parm->action_parm.enable)
+		goto exit;
+
+	switch (cur_parm->action_parm.mode) {
+#ifdef CONFIG_PHL_WKARD_CHANNEL_INFO_ACK
+	case CHINFO_MODE_ACK:
+		if (!rtw_hal_ch_info_process_ack(meta, ppdu_sts_ent, cur_parm, meta->macid))
+			goto exit;
+
+		if (meta->macid != 0xff) {
+			struct rtw_phl_stainfo_t *sta = rtw_phl_get_stainfo_by_macid(phl_com->phl_priv, meta->macid);
+
+			_os_mem_cpy(phl_com->drv_priv, ppdu_sts_ent->src_mac_addr,
+				sta->mac_addr, MAC_ADDRESS_LENGTH);
+			ppdu_sts_ent->freerun_cnt = meta->freerun_cnt;
+		}
+
+		break;
+#endif
+	default:
+		break;
+	}
+
+	bypass_csi = false;
+
+exit:
+	ppdu_sts_ent->bypass_csi = bypass_csi;
+}
+#endif /* CONFIG_PHL_CHANNEL_INFO */
+
 void
 hal_rx_ppdu_sts_normal_data(struct rtw_phl_com_t *phl_com,
 			    void *hdr,
@@ -941,12 +979,9 @@ hal_rx_ppdu_sts_normal_data(struct rtw_phl_com_t *phl_com,
 {
 	struct rtw_phl_ppdu_sts_info *ppdu_info = NULL;
 	enum phl_band_idx band = HW_BAND_0;
-#ifdef CONFIG_PHL_WKARD_CHANNEL_INFO_ACK
-	struct rtw_chinfo_cur_parm *cur_parm = phl_com->cur_parm;
-#endif
 
 	do {
-		if ((NULL == phl_com) || (NULL == meta))
+		if (NULL == meta)
 			break;
 		ppdu_info = &phl_com->ppdu_sts_info;
 		band = (meta->bb_sel > 0) ? HW_BAND_1 : HW_BAND_0;
@@ -1001,18 +1036,12 @@ hal_rx_ppdu_sts_normal_data(struct rtw_phl_com_t *phl_com,
 			_os_mem_cpy(phl_com->drv_priv,
 				ppdu_info->sts_ent[band][meta->ppdu_cnt].src_mac_addr,
 				meta->ta, MAC_ADDRESS_LENGTH);
-			#ifdef CONFIG_PHL_WKARD_CHANNEL_INFO_ACK
-			if (rtw_hal_ch_info_process_ack(meta, ppdu_info, cur_parm, meta->macid)) {
-				if (meta->macid != 0xff) {
-					struct rtw_phl_stainfo_t *sta = rtw_phl_get_stainfo_by_macid(phl_com->phl_priv, meta->macid);
-
-					_os_mem_cpy(phl_com->drv_priv, ppdu_info->sts_ent[band][meta->ppdu_cnt].src_mac_addr,
-						sta->mac_addr, MAC_ADDRESS_LENGTH);
-					ppdu_info->sts_ent[band][meta->ppdu_cnt].freerun_cnt = meta->freerun_cnt;
-				}
-			}
-			#endif
 		}
+
+#ifdef CONFIG_PHL_CHANNEL_INFO
+		hal_rx_ppdu_sts_normal_data_csi_chk(phl_com, &ppdu_info->sts_ent[band][meta->ppdu_cnt], hdr, meta);
+#endif
+
 		ppdu_info->sts_ent[band][meta->ppdu_cnt].valid = false;
 		ppdu_info->cur_rx_ppdu_cnt[band] = meta->ppdu_cnt;
 		PHL_TRACE(COMP_PHL_PSTS, _PHL_INFO_,

@@ -166,12 +166,14 @@ void halbb_7_physts_detail_dump(struct bb_info *bb, u32 bitmap, u32 bitmap_mask)
 			 psts_1->grant_bt, psts_1->is_awgn, psts_1->is_bf);
 
 		if (bb->ic_type == BB_RTL8852C) {
-			BB_TRACE("[01][OFDM] pwr_to_cca=%d ns, cca_to_agc=%d ns, cca_to_sbd=%dns\n",
-				 (BYTE_2_WORD((u32)ie_1_type1->pwr_to_cca_m, (u32)ie_1_type1->pwr_to_cca_l) * 25),
-				 ie_1_type1->cca_to_agc * 25, ie_1_type1->cca_to_sbd * 25);
-			BB_TRACE("[01][OFDM] bt_gnt_tx_at_cca=%d, bt_gnt_tx_cnt=%d, bt_gnt_rx_at_cca=%d, bt_gnt_rx_cnt=%d\n",
-				 ie_1_type1->bt_gnt_tx_at_cca, ie_1_type1->bt_gnt_tx_cnt,
-				 ie_1_type1->bt_gnt_rx_at_cca, ie_1_type1->bt_gnt_rx_cnt);
+			if (ie_1_type1) {
+				BB_TRACE("[01][OFDM] pwr_to_cca=%d ns, cca_to_agc=%d ns, cca_to_sbd=%dns\n",
+					 (BYTE_2_WORD((u32)ie_1_type1->pwr_to_cca_m, (u32)ie_1_type1->pwr_to_cca_l) * 25),
+					 ie_1_type1->cca_to_agc * 25, ie_1_type1->cca_to_sbd * 25);
+				BB_TRACE("[01][OFDM] bt_gnt_tx_at_cca=%d, bt_gnt_tx_cnt=%d, bt_gnt_rx_at_cca=%d, bt_gnt_rx_cnt=%d\n",
+					 ie_1_type1->bt_gnt_tx_at_cca, ie_1_type1->bt_gnt_tx_cnt,
+					 ie_1_type1->bt_gnt_rx_at_cca, ie_1_type1->bt_gnt_rx_cnt);
+			}
 		} else {
 			BB_TRACE("[01][OFDM] pwr_to_cca=%d ns, cca_to_agc=%d ns, cca_to_sbd=%dns\n",
 				 (BYTE_2_WORD((u32)ie_1->pwr_to_cca_m, (u32)ie_1->pwr_to_cca_l) * 25),
@@ -1783,9 +1785,6 @@ void halbb_7_physts_print(struct bb_info *bb, struct physts_rxd *desc,
 		BB_TRACE("Rate= %s (0x%x-%x), macid_su=%d\n",
 		         bb->dbg_buf, desc->data_rate, desc->gi_ltf, desc->macid_su);
 
-		if (desc->user_num >= 4)
-			return;
-
 		for (i = 0; i < desc->user_num; i++) {
 			BB_TRACE("[%d]bcn=%d, ctrl=%d, data=%d, mgnt=%d\n", i,
 			         desc->user_i[i].is_bcn, desc->user_i[i].is_ctrl,
@@ -1965,7 +1964,8 @@ bool halbb_7_physts_parsing(struct bb_info *bb_0,
 		}
 
 		if (curr_ie == IE00_CMN_CCK) {
-			halbb_7_physts_ie_00(bb, addr, ie_len, desc);
+			if (ie_map_type == CCK_PKT)
+				halbb_7_physts_ie_00(bb, addr, ie_len, desc);
 		} else if (curr_ie == IE01_CMN_OFDM) {
 			halbb_7_physts_ie_01(bb, addr, ie_len, desc);
 		} else if (curr_ie == IE02_CMN_EXT_AX) {
@@ -2047,7 +2047,10 @@ bool halbb_7_physts_parsing(struct bb_info *bb_0,
 		if (acc_ie_len == total_ie_len) {
 			is_valid = true;
 			physts->bb_physts_cnt_i.ok_ie_cnt++;
-			physts->physts_rpt_len_byte[physts->bb_physts_rslt_hdr_i.ie_map_type] = physts_total_length;
+
+			if (physts->bb_physts_rslt_hdr_i.ie_map_type < PHYSTS_BITMAP_NUM)
+				physts->physts_rpt_len_byte[physts->bb_physts_rslt_hdr_i.ie_map_type] = physts_total_length;
+
 			break;
 		} else if (acc_ie_len > total_ie_len) {
 			is_valid = false;
@@ -2114,10 +2117,6 @@ PARSING_END:
 		#endif
 		BB_DBG(bb, DBG_SNIFFER, "snif_rpt_valid=%d\n", bb_rpt->snif_rpt_valid);
 	}
-
-	#ifdef HALBB_DFS_SUPPORT
-	halbb_parsing_aci2sig(bb, physts_bitmap);
-	#endif
 
 	halbb_7_physts_print(bb, desc, physts_total_length, addr_in_bkp, physts_bitmap);
 

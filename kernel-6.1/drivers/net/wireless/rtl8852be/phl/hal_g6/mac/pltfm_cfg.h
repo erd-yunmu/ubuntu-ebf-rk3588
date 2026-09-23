@@ -32,6 +32,7 @@
 /*[Driver] provide the type mutex*/
 /* Mutex type */
 #define mac_ax_mutex _os_mutex
+#define mac_ax_raw_time _os_raw_time
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(arr)		(sizeof(arr) / sizeof((arr)[0]))
@@ -44,11 +45,11 @@
 #define MAC_AX_DBG_MSG_EN	1
 
 /* Set debug message level */
-#define MAC_AX_MSG_LEVEL_TRACE		3
-#define MAC_AX_MSG_LEVEL_WARNING	2
-#define MAC_AX_MSG_LEVEL_ERR		1
-#define MAC_AX_MSG_LEVEL_ALWAYS		0
-#define MAC_AX_MSG_LEVEL		MAC_AX_MSG_LEVEL_TRACE
+#define MAC_AX_MSG_LEVEL_TRACE		5
+#define MAC_AX_MSG_LEVEL_WARNING	3
+#define MAC_AX_MSG_LEVEL_ERR		2
+#define MAC_AX_MSG_LEVEL_ALWAYS		1
+#define MAC_AX_MSG_LEVEL		PHL_LOG_LEVEL
 
 #define SET_CLR_WORD(_w, _v, _f)                                               \
 				(((_w) & ~((_f##_MSK) << (_f##_SH))) |         \
@@ -94,6 +95,7 @@ typedef u16 __be16;
 typedef u32 __be32;
 
 typedef	CRITICAL_SECTION	mac_ax_mutex;
+#define mac_ax_raw_time u32
 
 #define ARRAY_SIZE(arr)		(sizeof(arr) / sizeof((arr)[0]))
 

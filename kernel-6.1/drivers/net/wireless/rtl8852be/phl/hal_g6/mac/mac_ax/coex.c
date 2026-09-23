@@ -17,6 +17,8 @@
 #include "hw.h"
 #include "power_saving.h"
 
+#if MAC_FEAT_COEX
+
 #define MAC_AX_RTK_RATE 5
 
 #define MAC_AX_BT_MODE_0_3 0
@@ -88,7 +90,11 @@ void mac_cfg_sb(struct mac_ax_adapter *adapter, u32 val)
 	fw_sb = MAC_REG_R32(R_AX_SCOREBOARD);
 	fw_sb = GET_FIELD(fw_sb, MAC_AX_SB_FW);
 	fw_sb = fw_sb & ~MAC_AX_BTGS1_NOTIFY;
+#if MAC_FEAT_LPS
 	if (adapter->sm.pwr == MAC_AX_PWR_OFF || _is_in_lps(adapter))
+#else
+	if (adapter->sm.pwr == MAC_AX_PWR_OFF)
+#endif
 		fw_sb = fw_sb | MAC_AX_NOTIFY_PWR_MAJOR;
 	else
 		fw_sb = fw_sb | MAC_AX_NOTIFY_TP_MAJOR;
@@ -113,3 +119,5 @@ u32 mac_get_bt_polt_cnt(struct mac_ax_adapter *adapter,
 
 	return MACSUCCESS;
 }
+
+#endif /* MAC_FEAT_DBCC */

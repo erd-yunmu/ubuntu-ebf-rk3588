@@ -367,14 +367,6 @@ u8 get_led_gpio(u8 led_id)
 u32 mac_set_led_mode(struct mac_ax_adapter *adapter,
 		     enum mac_ax_led_mode mode, u8 led_id)
 {
-#define LED_MODE_SW_CTRL 0
-#define LED_MODE_AON 1
-#define LED_MODE_TRX_ON 2
-#define LED_MODE_TRX_OFF 3
-#define LED_MODE_TX_ON 4
-#define LED_MODE_TX_OFF 5
-#define LED_MODE_RX_ON 6
-#define LED_MODE_RX_OFF 7
 	struct mac_ax_intf_ops *ops = adapter->ops->intf_ops;
 	struct mac_ax_ops *mac_ops = adapter->ops;
 	u32 val, ret;
@@ -467,11 +459,10 @@ u32 _mac_set_sw_gpio_mode(struct mac_ax_adapter *adapter,
 	} else if (gpio >= 8 && gpio <= 15) {
 		reg = R_AX_GPIO_EXT_CTRL + 2;
 		gpio = gpio - 8;
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 	} else if (gpio >= 16 && gpio <= 18 &&
 		   (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D))) {
 		reg = R_AX_GPIO_16_TO_18_EXT_CTRL + 2;
 		gpio = gpio - 16;
@@ -552,11 +543,10 @@ u32 mac_sw_gpio_ctrl(struct mac_ax_adapter *adapter,
 		} else if (gpio >= 8 && gpio <= 15) {
 			reg = R_AX_GPIO_EXT_CTRL + 1;
 			gpio = gpio - 8;
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 		} else if (gpio >= 16 && gpio <= 18 &&
 			   (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 			    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-			    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 			    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D))) {
 			reg = R_AX_GPIO_16_TO_18_EXT_CTRL + 1;
 			gpio = gpio - 16;
@@ -657,11 +647,10 @@ u32 mac_get_gpio_val(struct mac_ax_adapter *adapter, u8 gpio, u8 *val)
 	} else if (gpio >= 8 && gpio <= 15) {
 		reg = R_AX_GPIO_EXT_CTRL;
 		gpio = gpio - 8;
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8192XB_SUPPORT || MAC_AX_8852D_SUPPORT
 	} else if (gpio >= 16 && gpio <= 18 &&
 		   (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8192XB) ||
-		    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 		    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D))) {
 		reg = R_AX_GPIO_16_TO_18_EXT_CTRL;
 		gpio = gpio - 16;
@@ -678,14 +667,6 @@ u32 mac_get_gpio_val(struct mac_ax_adapter *adapter, u8 gpio, u8 *val)
 
 u32 mac_get_wl_dis_gpio(struct mac_ax_adapter *adapter, u8 *gpio)
 {
-#define MAC_AX_HCI_SEL_SDIO_UART 0
-#define MAC_AX_HCI_SEL_USB_MULT 1
-#define MAC_AX_HCI_SEL_PCIE_UART 2
-#define MAC_AX_HCI_SEL_PCIE_USB 3
-#define MAC_AX_HCI_SEL_SDIO_MULT 4
-#define MAC_AX_HCI_SEL_RSVD 5
-#define MAC_AX_HCI_SEL_PCIE_GEN1_UART 6
-#define MAC_AX_HCI_SEL_PCIE_GEN1_USB 7
 	struct mac_ax_intf_ops *ops = adapter_to_intf_ops(adapter);
 	u32 val;
 
@@ -743,12 +724,12 @@ u32 mac_get_wl_dis_gpio(struct mac_ax_adapter *adapter, u8 *gpio)
 	}
 #endif
 
-#if MAC_AX_8852C_SUPPORT || MAC_AX_8851E_SUPPORT || MAC_AX_8852D_SUPPORT
+#if MAC_AX_8852C_SUPPORT || MAC_AX_8852D_SUPPORT
 	if (is_chip_id(adapter, MAC_AX_CHIP_ID_8852C) ||
-	    is_chip_id(adapter, MAC_AX_CHIP_ID_8851E) ||
 	    is_chip_id(adapter, MAC_AX_CHIP_ID_8852D)) {
 		switch (val) {
 		case MAC_AX_HCI_SEL_PCIE_USB:
+		case MAC_AX_HCI_SEL_PCIE_UART:
 		case MAC_AX_HCI_SEL_PCIE_GEN1_UART:
 		case MAC_AX_HCI_SEL_PCIE_GEN1_USB:
 			*gpio = 9;
@@ -819,3 +800,61 @@ u32 mac_get_uart_fw_dbg_gpio(struct mac_ax_adapter *adapter, u8 *uart_tx_gpio, u
 	return MACSUCCESS;
 }
 
+#if	MAC_FEAT_BCN_CNT
+
+u32 mac_bcn_cnt_gpio(struct mac_ax_adapter *adapter,
+		     struct rtw_hal_mac_bcn_cnt_gpio_info *bcn_cnt_gpio)
+{
+	struct fwcmd_bcn_cnt_gpio *ptr;
+	struct h2c_info h2c_info = {0};
+	u32 ret;
+
+	if (adapter->sm.fwdl != MAC_AX_FWDL_INIT_RDY) {
+		PLTFM_MSG_WARN("%s fw not ready\n", __func__);
+		return MACFWNONRDY;
+	}
+
+	if (bcn_cnt_gpio->rx_bcn_en == 0 && bcn_cnt_gpio->tx_bcn_en == 0) {
+		PLTFM_MSG_ERR("%s: Disable TRX becaon GPIO\n", __func__);
+		return MACFWNOSUPPORT;
+	}
+
+	h2c_info.agg_en = 0;
+	h2c_info.content_len = sizeof(struct fwcmd_bcn_cnt_gpio);
+	h2c_info.h2c_cat = FWCMD_H2C_CAT_MAC;
+	h2c_info.h2c_class = FWCMD_H2C_CL_FW_OFLD;
+	h2c_info.h2c_func = FWCMD_H2C_FUNC_BCN_CNT_GPIO;
+	h2c_info.rec_ack = 0;
+	h2c_info.done_ack = 0;
+
+	ptr = (struct fwcmd_bcn_cnt_gpio *)PLTFM_MALLOC(h2c_info.content_len);
+	if (!ptr)
+		return MACBUFALLOC;
+	PLTFM_MEMSET(ptr, 0, sizeof(struct fwcmd_bcn_cnt_gpio));
+
+	PLTFM_MEMCPY(ptr, bcn_cnt_gpio, sizeof(struct fwcmd_bcn_cnt_gpio));
+
+	ret = mac_h2c_common(adapter, &h2c_info, (u32 *)ptr);
+	PLTFM_FREE(ptr, h2c_info.content_len);
+	if (ret != MACSUCCESS)
+		return ret;
+
+	return MACSUCCESS;
+}
+
+u32 mac_bcn_sync_rpt(struct mac_ax_adapter *adapter,
+		     struct rtw_hal_mac_bcn_sync_rpt *ret_rpt, void *timestamp)
+{
+	struct rtw_hal_mac_bcn_sync_rpt *rpt;
+	struct mac_bcn_sync_info *info;
+
+	rpt = &adapter->bcn_sync_rpt;
+	info = &adapter->bcn_sync_info;
+	PLTFM_MUTEX_LOCK(&adapter->bcn_sync_info.lock);
+	PLTFM_MEMCPY(ret_rpt, rpt, sizeof(struct rtw_hal_mac_bcn_sync_rpt));
+	PLTFM_MEMCPY(timestamp, &info->raw_time, sizeof(mac_ax_raw_time));
+	rpt->valid = 0;
+	PLTFM_MUTEX_UNLOCK(&adapter->bcn_sync_info.lock);
+	return MACSUCCESS;
+}
+#endif

@@ -20,7 +20,7 @@
 #include "../hwamsdu.h"
 #include "../../type.h"
 #include "../../mac_ax.h"
-
+#if MAC_FEAT_HWAMSDU
 /**
  * @brief mac_enable_cut_hwamsdu
  *
@@ -49,4 +49,5 @@ u32 mac_cut_hwamsdu_chk_mpdu_len_en_8852b(struct mac_ax_adapter *adapter,
 					  u8 low_th,
 					  u16 high_th);
 
+#endif
 #endif

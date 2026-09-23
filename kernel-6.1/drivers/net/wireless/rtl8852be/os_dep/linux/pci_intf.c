@@ -65,6 +65,7 @@ struct pci_device_id rtw_pci_id_tbl[] = {
 #ifdef CONFIG_RTL8852B
 	{PCI_DEVICE(PCI_VENDER_ID_REALTEK, 0xB852), .driver_data = RTL8852B},
 	{PCI_DEVICE(PCI_VENDER_ID_REALTEK, 0xB85B), .driver_data = RTL8852B},
+	{PCI_DEVICE(PCI_VENDER_ID_REALTEK, 0xB853), .driver_data = RTL8852B},
 #endif
 #ifdef CONFIG_RTL8852BP
 	{PCI_DEVICE(PCI_VENDER_ID_REALTEK, 0xA85C), .driver_data = RTL8852BP},/*FPGA*/
@@ -80,6 +81,7 @@ struct pci_device_id rtw_pci_id_tbl[] = {
 #endif
 #ifdef CONFIG_RTL8852D
 	{PCI_DEVICE(PCI_VENDER_ID_REALTEK, 0x885D), .driver_data = RTL8852D},
+	{PCI_DEVICE(PCI_VENDER_ID_REALTEK, 0x885E), .driver_data = RTL8852D},
 #endif
 	{},
 };
@@ -365,19 +367,9 @@ static irqreturn_t rtw_pci_interrupt(int irq, void *priv, struct pt_regs *regs)
 	struct dvobj_priv *dvobj = (struct dvobj_priv *)priv;
 	PPCI_DATA pci_data = dvobj_to_pci(dvobj);
 	enum rtw_phl_status pstatus =  RTW_PHL_STATUS_SUCCESS;
-	unsigned long sp_flags;
-	/*_adapter *padapter = dvobj_get_primary_adapter(dvobj);*/
 
-	/*padapter->int_logs.all++;*/
-	_rtw_spinlock_irq(&dvobj->phl_com->imr_lock, &sp_flags);
-	if (rtw_phl_recognize_interrupt(dvobj->phl)) {
-		/*padapter->int_logs.known++;*/
-		pstatus = rtw_phl_interrupt_handler(dvobj->phl);
-	}
-	_rtw_spinunlock_irq(&dvobj->phl_com->imr_lock, &sp_flags);
-
+	pstatus = rtw_phl_interrupt_request_handler(dvobj->phl);
 	if (pstatus == RTW_PHL_STATUS_FAILURE) {
-		/*padapter->int_logs.err++;*/
 		return IRQ_HANDLED;
 	}
 	/* return IRQ_NONE; */
@@ -394,35 +386,15 @@ int pci_alloc_irq(struct dvobj_priv *dvobj)
 	int err;
 	PPCI_DATA pci_data = dvobj_to_pci(dvobj);
 	struct pci_dev	*pdev = pci_data->ppcidev;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)) || !defined(CONFIG_RTW_PCI_MSI_DISABLE)
+#ifndef CONFIG_RTW_PCI_MSI_DISABLE
 	int ret;
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0))
-/* Rename PCI_IRQ_LEGACY to PCI_IRQ_INTX when kernel >= 6.8 */
-	unsigned int flags = PCI_IRQ_INTX;
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0))
-	unsigned int flags = PCI_IRQ_LEGACY;
-#endif
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0))
 #ifndef CONFIG_RTW_PCI_MSI_DISABLE
-	if (pci_data->msi_en)
-		flags |= PCI_IRQ_MSI;
-#endif
-	ret = pci_alloc_irq_vectors(pdev, 1, 1, flags);
-	if (ret < 0) {
-		RTW_ERR("Failed to alloc PCI irq vectors, flags=%d ret=%d\n", flags, ret);
-		return _FAIL;
-	}
-#else
-#ifndef CONFIG_RTW_PCI_MSI_DISABLE
-/* The old API to enable MSI should not be used in new code */
 	if (pci_data->msi_en) {
 		ret = pci_enable_msi(pdev);
 		RTW_INFO("pci_enable_msi ret=%d\n", ret);
 	}
-#endif
 #endif
 
 #if defined(IRQF_SHARED)
@@ -636,14 +608,9 @@ static void pci_dvobj_deinit(struct pci_dev *pdev)
 	if (dvobj) {
 		if (pci_data->irq_alloc) {
 			free_irq(pdev->irq, dvobj);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0))
-			pci_free_irq_vectors(pdev);
-#else
 #ifndef CONFIG_RTW_PCI_MSI_DISABLE
-/* The old API to disable MSI should not be used in new code */
 			if (pci_data->msi_en)
 				pci_disable_msi(pdev);
-#endif
 #endif
 			pci_data->irq_alloc = 0;
 		}
@@ -1026,10 +993,6 @@ static void rtw_dev_remove(struct pci_dev *pdev)
 		RTW_INFO("Surprise removed, PCI device unplug\n");
 		dev_set_surprise_removed(dvobj);
 	}
-
-#ifdef RTW_WKARD_PCI_DEVRM_DIS_INT
-	rtw_phl_disable_interrupt(GET_PHL_INFO(dvobj));
-#endif
 
 #ifdef CONFIG_CSI_TIMER_POLLING
 	rtw_csi_poll_timer_cancel(dvobj);

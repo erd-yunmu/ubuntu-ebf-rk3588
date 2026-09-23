@@ -54,6 +54,23 @@ enum wd_info_pkt_type {
 	WD_INFO_PKT_MAX = WD_INFO_PKT_LAST,
 };
 
+static struct txd_proc_type txdes_proc_mac_8852b[] = {
+	{RTW_PHL_PKT_TYPE_H2C, txdes_proc_h2c_fwdl_8852b},
+	{RTW_PHL_PKT_TYPE_FWDL, txdes_proc_h2c_fwdl_8852b},
+	{RTW_PHL_PKT_TYPE_DATA, txdes_proc_data_8852b},
+	{RTW_PHL_PKT_TYPE_MGNT, txdes_proc_mgnt_8852b},
+	{RTW_PHL_PKT_TYPE_MAX, NULL},
+};
+
+static struct rxd_parse_type rxdes_parse_mac_8852b[] = {
+	{rxdes_parse_wifi_8852b, RXD_S_RPKT_TYPE_WIFI},
+	{rxdes_parse_c2h_8852b, RXD_S_RPKT_TYPE_C2H},
+	{rxdes_parse_ppdu_8852b, RXD_S_RPKT_TYPE_PPDU},
+	{rxdes_parse_ch_info_8852b, RXD_S_RPKT_TYPE_CH_INFO},
+	{rxdes_parse_dfs_8852b, RXD_S_RPKT_TYPE_DFS_RPT},
+	{NULL, RXD_RPKT_TYPE_INVALID},
+};
+
 static u8 qsel_l[TID_MAX_NUM] = {
 	TID_0_QSEL, TID_1_QSEL, TID_2_QSEL, TID_3_QSEL,
 	TID_4_QSEL, TID_5_QSEL, TID_6_QSEL, TID_7_QSEL
@@ -147,6 +164,7 @@ static u32 txdes_proc_data_8852b(struct mac_ax_adapter *adapter,
 	u8 wd_info_tmpl[WD_INFO_PKT_MAX][24] = {{0}};
 	u32 ret;
 	u8 qsel, dbcc_wmm;
+	u8 header_with_llc, smh_en, upd_wlan_hdr;
 
 	if (len != mac_txdesc_len_8852b(adapter, info)) {
 		PLTFM_MSG_ERR("[ERR] illegal len %d\n", len);
@@ -164,15 +182,15 @@ static u32 txdes_proc_data_8852b(struct mac_ax_adapter *adapter,
 	}
 
 	wdb = (struct wd_body_t *)buf;
-	if (adapter->hw_info->intf == MAC_AX_INTF_SDIO) {
+	if (adapter->env_info.intf == MAC_AX_INTF_SDIO) {
 		wdb->dword0 =
 			cpu_to_le32(AX_TXD_STF_MODE);
-	} else if (adapter->hw_info->intf == MAC_AX_INTF_USB) {
+	} else if (adapter->env_info.intf == MAC_AX_INTF_USB) {
 		wdb->dword0 =
 			cpu_to_le32(AX_TXD_STF_MODE |
 				    (info->usb_pkt_ofst ?
 				     AX_TXD_PKT_OFFSET : 0));
-	} else if (adapter->hw_info->intf == MAC_AX_INTF_PCIE) {
+	} else if (adapter->env_info.intf == MAC_AX_INTF_PCIE) {
 		wdb->dword0 =
 			cpu_to_le32((info->wd_page_size ? AX_TXD_WD_PAGE : 0) |
 				    (adapter->dle_info.qta_mode ==
@@ -182,20 +200,27 @@ static u32 txdes_proc_data_8852b(struct mac_ax_adapter *adapter,
 				     AX_TXD_STF_MODE : 0));
 	} else {
 		PLTFM_MSG_ERR("[ERR] unknown intf %d\n",
-			      adapter->hw_info->intf);
+			      adapter->env_info.intf);
 		return MACINTF;
 	}
+
+	ret = get_hdr_with_llc(adapter, info, &header_with_llc);
+	if (ret != MACSUCCESS)
+		return ret;
+	ret = get_hw_hdr_conv(adapter, info, &smh_en, &upd_wlan_hdr);
+	if (ret != MACSUCCESS)
+		return ret;
 
 	wdb->dword0 |=
 		cpu_to_le32(SET_WORD(info->hw_seq_mode,
 				     AX_TXD_EN_HWSEQ_MODE) |
 			    SET_WORD(info->hw_ssn_sel,
 				     AX_TXD_HW_SSN_SEL) |
-			    SET_WORD(info->hdr_len,
+			    SET_WORD(header_with_llc,
 				     AX_TXD_HDR_LLC_LEN) |
 			    SET_WORD(info->dma_ch, AX_TXD_CH_DMA) |
 			    (info->hw_amsdu ? AX_TXD_HWAMSDU : 0) |
-			    (info->smh_en ? AX_TXD_SMH_EN : 0) |
+			    (smh_en ? AX_TXD_SMH_EN : 0) |
 			    (info->hw_sec_iv ? AX_TXD_HW_AES_IV : 0) |
 			    (info->wdinfo_en ? AX_TXD_WDINFO_EN : 0) |
 			    (info->chk_en ? AX_TXD_CHK_EN : 0) |
@@ -204,9 +229,11 @@ static u32 txdes_proc_data_8852b(struct mac_ax_adapter *adapter,
 	wdb->dword1 =
 		cpu_to_le32(SET_WORD(info->shcut_camid, AX_TXD_SHCUT_CAMID));
 	/* Get bb and qsel from qsel by according MAC ID */
+#if MAC_FEAT_DBCC
 	if (info->macid < DBCC_WMM_LIST_SIZE)
 		dbcc_wmm = *(adapter->dbcc_info->dbcc_wmm_list + info->macid);
 	else
+#endif
 		dbcc_wmm = MAC_AX_DBCC_WMM_INVALID;
 
 	if (info->dma_ch == MAC_AX_DATA_CH9 || info->dma_ch == MAC_AX_DATA_CH11)
@@ -311,6 +338,7 @@ static u32 txdes_proc_mgnt_8852b(struct mac_ax_adapter *adapter,
 	struct wd_info_t *wdi;
 	u8 wd_info_tmpl[WD_INFO_PKT_MAX][24] = {{0}};
 	u32 ret;
+	u8 header_with_llc;
 
 	if (len != mac_txdesc_len_8852b(adapter, info)) {
 		PLTFM_MSG_ERR("[ERR] illegal len %d\n", len);
@@ -323,15 +351,15 @@ static u32 txdes_proc_mgnt_8852b(struct mac_ax_adapter *adapter,
 	}
 
 	wdb = (struct wd_body_t *)buf;
-	if (adapter->hw_info->intf == MAC_AX_INTF_SDIO) {
+	if (adapter->env_info.intf == MAC_AX_INTF_SDIO) {
 		wdb->dword0 =
 			cpu_to_le32(AX_TXD_STF_MODE);
-	} else if (adapter->hw_info->intf == MAC_AX_INTF_USB) {
+	} else if (adapter->env_info.intf == MAC_AX_INTF_USB) {
 		wdb->dword0 =
 			cpu_to_le32(AX_TXD_STF_MODE |
 				    (info->usb_pkt_ofst ?
 				     AX_TXD_PKT_OFFSET : 0));
-	} else if (adapter->hw_info->intf == MAC_AX_INTF_PCIE) {
+	} else if (adapter->env_info.intf == MAC_AX_INTF_PCIE) {
 		wdb->dword0 =
 			cpu_to_le32((info->wd_page_size ? AX_TXD_WD_PAGE : 0) |
 				    (adapter->dle_info.qta_mode ==
@@ -341,16 +369,20 @@ static u32 txdes_proc_mgnt_8852b(struct mac_ax_adapter *adapter,
 				     AX_TXD_STF_MODE : 0));
 	} else {
 		PLTFM_MSG_ERR("[ERR] unknown intf %d\n",
-			      adapter->hw_info->intf);
+			      adapter->env_info.intf);
 		return MACINTF;
 	}
+
+	ret = get_hdr_with_llc(adapter, info, &header_with_llc);
+	if (ret != MACSUCCESS)
+		return ret;
 
 	wdb->dword0 |=
 		cpu_to_le32(SET_WORD(info->hw_seq_mode,
 				     AX_TXD_EN_HWSEQ_MODE) |
 			    SET_WORD(info->hw_ssn_sel,
 				     AX_TXD_HW_SSN_SEL) |
-			    SET_WORD(info->hdr_len,
+			    SET_WORD(header_with_llc,
 				     AX_TXD_HDR_LLC_LEN) |
 			    (info->wdinfo_en ? AX_TXD_WDINFO_EN : 0));
 
@@ -440,14 +472,6 @@ static u32 txdes_proc_mgnt_8852b(struct mac_ax_adapter *adapter,
 
 	return MACSUCCESS;
 }
-
-static struct txd_proc_type txdes_proc_mac_8852b[] = {
-	{RTW_PHL_PKT_TYPE_H2C, txdes_proc_h2c_fwdl_8852b},
-	{RTW_PHL_PKT_TYPE_FWDL, txdes_proc_h2c_fwdl_8852b},
-	{RTW_PHL_PKT_TYPE_DATA, txdes_proc_data_8852b},
-	{RTW_PHL_PKT_TYPE_MGNT, txdes_proc_mgnt_8852b},
-	{RTW_PHL_PKT_TYPE_MAX, NULL},
-};
 
 u32 mac_build_txdesc_8852b(struct mac_ax_adapter *adapter,
 			   struct rtw_t_meta_data *info, u8 *buf, u32 len)
@@ -561,15 +585,6 @@ static u32 rxdes_parse_ppdu_8852b(struct mac_ax_adapter *adapter,
 
 	return MACSUCCESS;
 }
-
-static struct rxd_parse_type rxdes_parse_mac_8852b[] = {
-	{RXD_S_RPKT_TYPE_WIFI, rxdes_parse_wifi_8852b},
-	{RXD_S_RPKT_TYPE_C2H, rxdes_parse_c2h_8852b},
-	{RXD_S_RPKT_TYPE_PPDU, rxdes_parse_ppdu_8852b},
-	{RXD_S_RPKT_TYPE_CH_INFO, rxdes_parse_ch_info_8852b},
-	{RXD_S_RPKT_TYPE_DFS_RPT, rxdes_parse_dfs_8852b},
-	{RXD_RPKT_TYPE_INVALID, NULL},
-};
 
 u32 mac_parse_rxdesc_8852b(struct mac_ax_adapter *adapter,
 			   struct mac_ax_rxpkt_info *info, u8 *buf, u32 len)

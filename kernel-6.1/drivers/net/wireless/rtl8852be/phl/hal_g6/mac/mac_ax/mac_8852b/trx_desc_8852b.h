@@ -21,6 +21,33 @@
 #include "../role.h"
 #if MAC_AX_8852B_SUPPORT
 
+static u32 txdes_proc_h2c_fwdl_8852b(struct mac_ax_adapter *adapter,
+				     struct rtw_t_meta_data *info, u8 *buf, u32 len);
+
+static u32 txdes_proc_data_8852b(struct mac_ax_adapter *adapter,
+				 struct rtw_t_meta_data *info, u8 *buf, u32 len);
+
+static u32 txdes_proc_mgnt_8852b(struct mac_ax_adapter *adapter,
+				 struct rtw_t_meta_data *info, u8 *buf, u32 len);
+
+static u32 rxdes_parse_comm_8852b(struct mac_ax_adapter *adapter,
+				  struct mac_ax_rxpkt_info *info, u8 *buf);
+
+static u32 rxdes_parse_wifi_8852b(struct mac_ax_adapter *adapter,
+				  struct mac_ax_rxpkt_info *info, u8 *buf, u32 len);
+
+static u32 rxdes_parse_c2h_8852b(struct mac_ax_adapter *adapter,
+				 struct mac_ax_rxpkt_info *info, u8 *buf, u32 len);
+
+static u32 rxdes_parse_ch_info_8852b(struct mac_ax_adapter *adapter,
+				     struct mac_ax_rxpkt_info *info, u8 *buf, u32 len);
+
+static u32 rxdes_parse_dfs_8852b(struct mac_ax_adapter *adapter,
+				 struct mac_ax_rxpkt_info *info, u8 *buf, u32 len);
+
+static u32 rxdes_parse_ppdu_8852b(struct mac_ax_adapter *adapter,
+				  struct mac_ax_rxpkt_info *info, u8 *buf, u32 len);
+
 /**
  * @addtogroup Basic_TRX
  * @{

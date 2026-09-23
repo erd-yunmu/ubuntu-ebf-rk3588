@@ -18,7 +18,32 @@
 #define _MAC_AX_COEX_8852B_H_
 
 #include "../../mac_def.h"
+
 #if MAC_AX_8852B_SUPPORT
+/**
+ * @}
+ * @}
+ */
+
+/**
+ * @addtogroup Common
+ * @{
+ * @addtogroup LTE_COEX
+ * @{
+ */
+
+/**
+ * @brief mac_write_lte_8852a
+ *
+ * @param *adapter
+ * @param offset
+ * @param val
+ * @return Please Place Description here.
+ * @retval u32
+ */
+u32 mac_write_lte_8852b(struct mac_ax_adapter *adapter,
+			const u32 offset, u32 val);
+#if MAC_FEAT_COEX
 
 /**
  * @addtogroup Common
@@ -210,29 +235,6 @@ u32 mac_get_ctrl_path_8852b(struct mac_ax_adapter *adapter, u32 *wl);
  */
 
 /**
- * @brief mac_write_lte_8852a
- *
- * @param *adapter
- * @param offset
- * @param val
- * @return Please Place Description here.
- * @retval u32
- */
-u32 mac_write_lte_8852b(struct mac_ax_adapter *adapter,
-			const u32 offset, u32 val);
-/**
- * @}
- * @}
- */
-
-/**
- * @addtogroup Common
- * @{
- * @addtogroup LTE_COEX
- * @{
- */
-
-/**
  * @brief mac_read_lte_8852a
  *
  * @param *adapter
@@ -243,6 +245,7 @@ u32 mac_write_lte_8852b(struct mac_ax_adapter *adapter,
  */
 u32 mac_read_lte_8852b(struct mac_ax_adapter *adapter,
 		       const u32 offset, u32 *val);
+#else
 /**
  * @}
  * @}
@@ -263,10 +266,6 @@ u32 mac_read_lte_8852b(struct mac_ax_adapter *adapter,
  * @retval u32
  */
 u32 coex_mac_init_8852b(struct mac_ax_adapter *adapter);
-/**
- * @}
- * @}
- */
-
+#endif /* MAC_FEAT_COEX */
 #endif /* #if MAC_AX_8852B_SUPPORT */
 #endif

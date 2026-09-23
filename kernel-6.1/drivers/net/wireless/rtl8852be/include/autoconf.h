@@ -47,9 +47,10 @@
 #endif
 
 
-#define RTW_WKARD_PCI_DEVRM_DIS_INT
 
 #define RTW_WKARD_TX_DROP
+#define RTW_WKARD_TX_DROP_EN_HWCTS
+#define RTW_WKARD_TX_DROP_CHG_HWRTS
 
 /***** temporarily flag *******/
 /*
@@ -73,7 +74,7 @@
 #define CORE_RXBD_NUM 256
 #define CONFIG_RPQ_AGG_NUM 30
 #define CONFIG_TX_WD_NUM 512 /* if not defined, use phl default wd num: MAX_WD_PAGE_NUM (i.e. 256) */
-#define CORE_TX_AMSDU_AGG_NUM 3
+#define CORE_TX_AMSDU_AGG_NUM 4
 #define CONFIG_READ_TXBD_LVL 1
 
 #ifdef PLAT_MAX_PHL_TX_RING_ENTRY_NUM
@@ -154,11 +155,12 @@
 #ifdef CONFIG_FW_SPECIFY_FROM_CORE
 	#define MAC_FW_8852B_U2
 	#define MAC_FW_8852B_U3
-	/* #define MAC_FW_CATEGORY_NIC */       /* with pwr gating */
+	/* #define MAC_FW_CATEGORY_NIC */	/* with pwr gating */
 	#define MAC_FW_CATEGORY_NICCE		/* with clock gating */
 	/* #define MAC_FW_CATEGORY_NIC_PLE */
 	#ifdef CONFIG_WOWLAN
-	#define MAC_FW_CATEGORY_WOWLAN
+	/* #define MAC_FW_CATEGORY_WOWLAN */
+	#define MAC_FW_CATEGORY_WOWLANCE
 	#endif /* CONFIG_WOWLAN */
 #endif
 
@@ -215,6 +217,8 @@
 	#else
 	#define CONFIG_TX_AMSDU_SW_MODE	1
 	#endif
+
+	#define CONFIG_RTW_TX_AMSDU_CHK_LEN /* Improvement TCP RX performance */
 #endif
 
 /*
@@ -242,12 +246,13 @@
 #define BUF_DESC_ARCH		/* if defined, hardware follows Rx buffer descriptor architecture */
 
 #ifdef CONFIG_POWER_SAVE
-	/* #define CONFIG_RTW_IPS */
+	#define CONFIG_RTW_IPS
 	#define CONFIG_RTW_LPS
 	#ifdef CONFIG_RTW_IPS
 		#define CONFIG_FWIPS
 	#endif
 	#if defined(CONFIG_RTW_IPS) || defined(CONFIG_RTW_LPS)
+		#define CONFIG_RTW_WKARD_PS_DEFAULT_OFF
 		#define CONFIG_PS_FW_DBG
 	#endif
 	#ifdef CONFIG_WOWLAN
@@ -257,9 +262,6 @@
 		#endif /* CONFIG_RTW_IPS_WOW */
 		#define CONFIG_RTW_LPS_WOW
 	#endif /* CONFIG_WOWLAN */
-	#ifdef CONFIG_RTW_LPS
-	#define CONFIG_RTW_LPS_DEFAULT_OFF
-	#endif
 	/* #define CONFIG_HW_RADIO_ONOFF_DETECT */
 #endif /* CONFIG_POWER_SAVE */
 
@@ -268,6 +270,23 @@
 	/* #define CONFIG_ARP_KEEP_ALIVE */
 #endif /* CONFIG_WOWLAN */
 
+#ifdef CONFIG_APF
+#ifndef CONFIG_WOWLAN
+	#error "APF should enable WOWLAN"
+#endif
+#ifdef CONFIG_FW_SPECIFY_FROM_CORE
+	#undef MAC_FW_CATEGORY_NIC
+	#define MAC_FW_CATEGORY_NICCE
+	#undef MAC_FW_CATEGORY_WOWLAN
+	#define MAC_FW_CATEGORY_WOWLANCE
+#endif
+/* #ifdef CONFIG_APF_DBG
+	#undef CONFIG_RTW_DISABLE_PHL_LOG
+#endif */
+	#define CONFIG_APF_VERSION 6000
+	#define CONFIG_APF_RAM_SIZE 4000
+	#define CONFIG_APF_RAM_FRAG_SIZE 1024
+#endif /* CONFIG_APF */
 	/*#define CONFIG_ANTENNA_DIVERSITY*/
 
 #ifdef CONFIG_GPIO_WAKEUP
@@ -321,7 +340,9 @@
 	#define CONFIG_TDLS_CH_SW
 #endif
 
-#define CONFIG_SKB_COPY	/* for amsdu */
+#define CONFIG_SKB_COPY	/* for amsdu rx */
+#define RTW_SKB_CLONED_HANDLE
+/*#define RTW_SKB_LINEARIZE*/
 
 /*#define CONFIG_RTW_LED*/
 #ifdef CONFIG_RTW_LED
@@ -368,7 +389,6 @@
 
 #ifdef CONFIG_MP_INCLUDED
 	#define MP_DRIVER 1
-	#define RTW_MP_INIT_IN_MP_START
 #else
 	#define MP_DRIVER 0
 #endif
@@ -403,10 +423,6 @@
  */
 #define DBG	1
 
-
-/*#define DBG_CONFIG_ERROR_DETECT*/
-/* #define DBG_CONFIG_ERROR_DETECT_INT */
-/* #define DBG_CONFIG_ERROR_RESET */
 
 /* #define DBG_IO */
 /* #define DBG_DELAY_OS */
@@ -476,12 +492,18 @@
 #error "Wrong DMA mode"
 #endif
 
+#define CONFIG_DIS_DYN_RXBUF
+
 #if !defined(CONFIG_DIS_DYN_RXBUF) && !defined(CONFIG_RX_BUFF_NONCACHE_ADDR)
 #define CONFIG_DYNAMIC_RX_BUF
 #endif
 
+/* #define CONFIG_DIS_RXSKB_KMALOC */
+
 #if defined(CONFIG_DIS_DYN_RXBUF) && !defined(CONFIG_RX_BUFF_NONCACHE_ADDR)
+#ifndef CONFIG_DIS_RXSKB_KMALOC
 #define CONFIG_RTW_RXSKB_KMALOC
+#endif
 #endif
 
 #ifndef CONFIG_WD_PAGE_NONCACHE_ADDR
@@ -499,7 +521,7 @@
 	#ifndef CONFIG_RTW_WNM
 		#define CONFIG_RTW_WNM
 	#endif
-	#ifndef CONFIG_RTW_80211K
+	#ifndef CONFIG_RTW_FSM_RRM
 		#define CONFIG_RTW_80211K
 	#endif
 #endif /* CONFIG_RTW_MBO */
