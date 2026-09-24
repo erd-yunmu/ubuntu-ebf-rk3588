@@ -330,9 +330,9 @@ trap 'echo Error: in $0 on line $LINENO' ERR
 apt-get -y install ubuntu-desktop dbus-x11 xterm pulseaudio pavucontrol qtwayland5 guvcview \
 libcanberra-pulse mpv gnome-software language-pack-zh-han*
 
-# Install Mesa 26.2.2 and resolve its runtime dependencies from Jammy
-apt-get -y install /tmp/mesa-panfrost-panvk-26.2.2-ubuntu22.04-arm64.deb
-rm -f /tmp/mesa-panfrost-panvk-26.2.2-ubuntu22.04-arm64.deb
+# Install Mesa 26.2.3 and resolve its runtime dependencies from Jammy
+apt-get -y install /tmp/mesa-panfrost-panvk-26.2.3-ubuntu22.04-arm64.deb
+rm -f /tmp/mesa-panfrost-panvk-26.2.3-ubuntu22.04-arm64.deb
 getent group render > /dev/null || groupadd --system render
 usermod -aG render cat
 
@@ -404,10 +404,10 @@ rm -rf ${chroot_dir}/etc/systemd/system/systemd-networkd-wait-online.service.d/o
 # Enable wayland session
 cp ${overlay_dir}/etc/gdm3/custom.conf ${chroot_dir}/etc/gdm3/custom.conf
 
-# Use the isolated Mesa 26.2.2 build for desktop and GDM
-cat ${overlay_dir}/etc/mesa-26.2.2.environment >> ${chroot_dir}/etc/environment
+# Use the isolated Mesa 26.2.3 build for desktop and GDM
+cat ${overlay_dir}/etc/mesa-26.2.3.environment >> ${chroot_dir}/etc/environment
 mkdir -p ${chroot_dir}/etc/systemd/system/gdm3.service.d
-cp ${overlay_dir}/etc/systemd/system/gdm3.service.d/mesa-26.2.2.conf ${chroot_dir}/etc/systemd/system/gdm3.service.d/
+cp ${overlay_dir}/etc/systemd/system/gdm3.service.d/mesa-26.2.3.conf ${chroot_dir}/etc/systemd/system/gdm3.service.d/
 
 # default image background
 rm -rf ${chroot_dir}/usr/share/backgrounds/Jammy-Jellyfish_WP_4096x2304_Grey.png
