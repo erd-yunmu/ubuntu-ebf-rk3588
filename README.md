@@ -5,7 +5,7 @@
 - **系统**：Ubuntu 22.04（jammy）arm64，apt 在线更新内核 / 固件 / 引导
 - **内核**：Linux 6.1（Rockchip BSP）
 - **桌面**：GNOME + GDM3，默认启用 Wayland 会话，内置中文语言包
-- **图形**：Mesa 26.2.2（Panfrost / PanVK），OpenGL ES 与 Vulkan 硬件加速
+- **图形**：Mesa 26.2.3（Panfrost / PanVK），OpenGL ES 与 Vulkan 硬件加速
 - **视频**：Rockchip MPP 硬解；Chromium 流畅播放 4K YouTube，MPV / GStreamer 4K 播放
 
 # 获取与校验

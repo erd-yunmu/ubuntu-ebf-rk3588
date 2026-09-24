@@ -1,8 +1,0 @@
-MESA_ROOT="/opt/mesa-26.2.2"
-LD_LIBRARY_PATH="/opt/mesa-26.2.2/lib/aarch64-linux-gnu"
-LIBGL_DRIVERS_PATH="/opt/mesa-26.2.2/lib/aarch64-linux-gnu/dri"
-GBM_BACKENDS_PATH="/opt/mesa-26.2.2/lib/aarch64-linux-gnu/gbm"
-__EGL_VENDOR_LIBRARY_FILENAMES="/opt/mesa-26.2.2/share/glvnd/egl_vendor.d/50_mesa.json"
-VK_ICD_FILENAMES="/opt/mesa-26.2.2/share/vulkan/icd.d/panfrost_icd.aarch64.json"
-VK_DRIVER_FILES="/opt/mesa-26.2.2/share/vulkan/icd.d/panfrost_icd.aarch64.json"
-LIBGL_DRIRC_PATH="/opt/mesa-26.2.2/share/drirc.d"
