@@ -134,7 +134,7 @@ mount "${disk}${partition_char}2" ${mount_point}/writable
 tar -xpf "${rootfs}" -C ${mount_point}/writable
 
 # Set boot args for the splash screen
-[ -z "${img##*desktop*}" ] && bootargs="quiet splash plymouth.ignore-serial-consoles" || bootargs=""
+[ -z "${img##*desktop*}" ] && bootargs="splash plymouth.ignore-serial-consoles ignore_loglevel" || bootargs=""
 
 # Create fstab entries
 mkdir -p ${mount_point}/writable/boot/firmware
