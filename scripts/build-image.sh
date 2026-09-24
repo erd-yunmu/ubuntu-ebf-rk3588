@@ -134,7 +134,7 @@ mount "${disk}${partition_char}2" ${mount_point}/writable
 tar -xpf "${rootfs}" -C ${mount_point}/writable
 
 # Set boot args for the splash screen
-[ -z "${img##*desktop*}" ] && bootargs="quiet splash plymouth.ignore-serial-consoles" || bootargs=""
+[ -z "${img##*desktop*}" ] && bootargs="splash plymouth.ignore-serial-consoles ignore_loglevel" || bootargs=""
 
 # Create fstab entries
 mkdir -p ${mount_point}/writable/boot/firmware
@@ -187,9 +187,6 @@ mkimage -A arm64 -O linux -T script -C none -n "Boot Script" -d ${mount_point}/s
 cat > ${mount_point}/system-boot/ubuntuEnv.txt << EOF
 # bootargs: Kernel parameters for system boot configuration.
 bootargs=rootfstype=ext4 rootwait rw console=ttyS2,1500000 console=tty1 console=ttyFIQ0 cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1 systemd.unified_cgroup_hierarchy=0 ${bootargs}
-# quiet: Reduces boot log output for a quieter startup.
-# splash: Displays a graphical boot screen instead of text information.
-# plymouth.ignore-serial-consoles: Ignores Plymouth splash output on serial consoles.
 
 fdtfile=${DEVICE_TREE_FILE}
 overlay_prefix=${OVERLAY_PREFIX}
