@@ -34,6 +34,12 @@ if [ ! -e "$linux_headers_package" ]; then
     exit 1
 fi
 
+camera_package="$(basename "$(find ../packages/camera/ -type f -name "camera_engine_rkaiq_${OVERLAY_PREFIX}_*.deb" | sort | tail -n1)")"
+if [ -z "${camera_package}" ] || [ ! -e "../packages/camera/${camera_package}" ]; then
+    echo "Error: could not find the camera engine .deb file for ${OVERLAY_PREFIX}"
+    exit 1
+fi
+
 if [[ ${SERVER_ONLY} == "Y" ]]; then
     target="server"
 elif [[ ${DESKTOP_ONLY} == "Y" ]]; then
@@ -87,6 +93,10 @@ for type in $target; do
     chroot ${chroot_dir} /bin/bash -c "depmod -a $(echo "${linux_image_package}" | sed -rn 's/linux-image-(.*)_[[:digit:]].*/\1/p')"
     chroot ${chroot_dir} /bin/bash -c "apt-mark hold $(echo "${linux_image_package}" | sed -rn 's/(.*)_[[:digit:]].*/\1/p')"
     chroot ${chroot_dir} /bin/bash -c "apt-mark hold $(echo "${linux_headers_package}" | sed -rn 's/(.*)_[[:digit:]].*/\1/p')"
+
+    # Install the camera engine (rkaiq) matching the board SoC
+    cp "../packages/camera/${camera_package}" ${chroot_dir}/tmp/
+    chroot ${chroot_dir} /bin/bash -c "dpkg -i /tmp/${camera_package} && rm -rf /tmp/*"
 
     # Clean package cache
     chroot ${chroot_dir} /bin/bash -c "apt-get -y autoremove && apt-get -y clean"
