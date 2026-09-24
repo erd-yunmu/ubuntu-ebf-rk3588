@@ -5215,11 +5215,15 @@ static int panel_simple_dsi_of_get_desc_data(struct device *dev,
 	u32 val;
 	int err;
 
-	err = panel_simple_of_get_firmware_desc_data(dev, &desc->desc);
-	if (err == -EPROBE_DEFER)
-		return err;
-	if (err)
+	if (of_property_present(np, "nvmem")) {
+		err = panel_simple_of_get_firmware_desc_data(dev, &desc->desc);
+		if (err == -EPROBE_DEFER)
+			return err;
+		if (err)
+			err = panel_simple_of_get_desc_data(dev, &desc->desc);
+	} else {
 		err = panel_simple_of_get_desc_data(dev, &desc->desc);
+	}
 	if (err)
 		return err;
 
