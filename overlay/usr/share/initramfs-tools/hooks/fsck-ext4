@@ -17,5 +17,8 @@ esac
 
 . /usr/share/initramfs-tools/hook-functions
 
-copy_exec /usr/sbin/fsck.fat /usr/sbin/fsck.fat
-ln -sf fsck.fat "${DESTDIR}/usr/sbin/fsck.vfat"
+if prog="$(command -v fsck.ext4)"; then
+	copy_exec "${prog}"
+else
+	echo "W: fsck.ext4 doesn't exist, can't install to initramfs" >&2
+fi
