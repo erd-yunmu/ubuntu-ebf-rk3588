@@ -264,6 +264,10 @@ cp ${overlay_dir}/usr/lib/systemd/system/NetworkManager-wait-online.service ${ch
 mkdir -p ${chroot_dir}/lib/systemd/system/serial-getty@.service.d/
 cp ${overlay_dir}/usr/lib/systemd/system/serial-getty@.service.d/10-term.conf ${chroot_dir}/usr/lib/systemd/system/serial-getty@.service.d/10-term.conf
 
+# Forward the systemd journal to the serial console
+mkdir -p ${chroot_dir}/etc/systemd/journald.conf.d
+cp ${overlay_dir}/etc/systemd/journald.conf.d/console.conf ${chroot_dir}/etc/systemd/journald.conf.d/console.conf
+
 # Fix 120 second timeout bug
 mkdir -p ${chroot_dir}/etc/systemd/system/systemd-networkd-wait-online.service.d/
 cp ${overlay_dir}/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf ${chroot_dir}/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf
