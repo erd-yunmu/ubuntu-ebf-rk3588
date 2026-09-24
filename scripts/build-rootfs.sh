@@ -262,7 +262,7 @@ cp ${overlay_dir}/usr/lib/systemd/system/NetworkManager-wait-online.service ${ch
 
 # Set term for serial tty
 mkdir -p ${chroot_dir}/lib/systemd/system/serial-getty@.service.d/
-cp ${overlay_dir}/usr/lib/systemd/system/serial-getty@.service.d/10-term.conf ${chroot_dir}/usr/lib/systemd/system/serial-getty@.service.d/10-term.conf
+cp ${overlay_dir}/usr/lib/systemd/system/serial-getty@.service.d/10-term.conf ${chroot_dir}/lib/systemd/system/serial-getty@.service.d/10-term.conf
 
 # Forward the systemd journal to the serial console
 mkdir -p ${chroot_dir}/etc/systemd/journald.conf.d
