@@ -864,7 +864,7 @@ _checkfs_once()
 		NAME="root"
 	fi
 	FSCK_LOGFILE=/run/initramfs/fsck.log
-	FSCK_STAMPFILE=/run/initramfs/fsck-${NAME#/}
+	FSCK_STAMPFILE="/run/initramfs/fsck-$(printf '%s' "${NAME#/}" | tr '/' '-')"
 
 	if [ "${TYPE}" = "auto" ]; then
 		TYPE="$(get_fstype "${DEV}")"
