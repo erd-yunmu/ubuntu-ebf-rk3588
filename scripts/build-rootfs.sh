@@ -223,12 +223,12 @@ cp ${overlay_dir}/etc/adduser.conf ${chroot_dir}/etc/adduser.conf
 mkdir -p ${chroot_dir}/etc/initramfs/post-update.d/
 cp ${overlay_dir}/etc/initramfs/post-update.d/zz-update-firmware ${chroot_dir}/etc/initramfs/post-update.d/zz-update-firmware
 
-# Install filesystem checks for the root and FAT boot partitions
+# Install filesystem checks for the root and ext4 boot partitions
 cp ${overlay_dir}/usr/share/initramfs-tools/scripts/functions ${chroot_dir}/usr/share/initramfs-tools/scripts/functions
-cp ${overlay_dir}/usr/share/initramfs-tools/hooks/fsck-vfat ${chroot_dir}/usr/share/initramfs-tools/hooks/fsck-vfat
+cp ${overlay_dir}/usr/share/initramfs-tools/hooks/fsck-ext4 ${chroot_dir}/usr/share/initramfs-tools/hooks/fsck-ext4
 mkdir -p ${chroot_dir}/usr/share/initramfs-tools/scripts/local-bottom
 cp ${overlay_dir}/usr/share/initramfs-tools/scripts/local-bottom/fsck-boot-firmware ${chroot_dir}/usr/share/initramfs-tools/scripts/local-bottom/fsck-boot-firmware
-chmod 0755 ${chroot_dir}/usr/share/initramfs-tools/hooks/fsck-vfat \
+chmod 0755 ${chroot_dir}/usr/share/initramfs-tools/hooks/fsck-ext4 \
     ${chroot_dir}/usr/share/initramfs-tools/scripts/local-bottom/fsck-boot-firmware
 sed -i 's/^FSTYPE=auto/FSTYPE=ext4/' ${chroot_dir}/etc/initramfs-tools/initramfs.conf
 
