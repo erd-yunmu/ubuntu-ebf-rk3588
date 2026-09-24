@@ -79,14 +79,14 @@ mkdir -p ${mount_point}
 dd if=/dev/zero of="${disk}" count=4096 bs=512
 parted --script "${disk}" \
 mklabel gpt \
-mkpart primary fat32 16MiB 528MiB \
+mkpart primary ext4 16MiB 528MiB \
 mkpart primary ext4 528MiB 100%
 
 # Create partitions
 {
     echo "t"
     echo "1"
-    echo "BC13C2FF-59E6-4262-A352-B275FD6F7172"
+    echo "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
     echo "t"
     echo "2"
     echo "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
@@ -114,13 +114,14 @@ wait_loopdev "${disk}${partition_char}1" 60 || {
 sleep 1
 
 # Generate random uuid for bootfs
-boot_uuid=$(uuidgen | head -c8)
+boot_uuid=$(uuidgen)
 
 # Generate random uuid for rootfs
 root_uuid=$(uuidgen)
 
 # Create filesystems on partitions
-mkfs.vfat -i "${boot_uuid}" -F32 -n system-boot "${disk}${partition_char}1"
+dd if=/dev/zero of="${disk}${partition_char}1" bs=1KB count=10 > /dev/null
+mkfs.ext4 -U "${boot_uuid}" -L system-boot "${disk}${partition_char}1"
 dd if=/dev/zero of="${disk}${partition_char}2" bs=1KB count=10 > /dev/null
 mkfs.ext4 -U "${root_uuid}" -L writable "${disk}${partition_char}2"
 
@@ -139,7 +140,7 @@ tar -xpf "${rootfs}" -C ${mount_point}/writable
 mkdir -p ${mount_point}/writable/boot/firmware
 cat > ${mount_point}/writable/etc/fstab << 'EOF'
 # <file system>       <mount point>  <type>  <options>                    <dump>  <fsck>
-LABEL=system-boot     /boot/firmware vfat    defaults                     0       0
+LABEL=system-boot     /boot/firmware ext4    defaults                     0       0
 LABEL=writable        /              ext4    defaults,x-systemd.growfs    0       1
 /swapfile             none           swap    sw                           0       0
 EOF
