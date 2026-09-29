@@ -25,7 +25,7 @@
 ## NVMe 启动
 - 方案 A（先从 SD 引导到系统后写 NVMe）：
   ```bash
-  xz -dc ubuntu-22.04.4-desktop-arm64-lubancat-5.img.xz | sudo dd of=/dev/nvme0n1 bs=4k
+  xz -dc ubuntu-24.04-desktop-arm64-lubancat-5.img.xz | sudo dd of=/dev/nvme0n1 bs=4k
   sync
   ```
   断电拔卡后，按 MR 进入 maskrom，将 `rkspi_loader_lubancat_5.img` 刷入 eMMC 作为 NVMe 引导。
