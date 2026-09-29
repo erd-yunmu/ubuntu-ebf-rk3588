@@ -2,8 +2,8 @@
 面向 Rockchip RK3588 系列（LubanCat-4/5/5-V2/5IO）的 Ubuntu 体验，提供预制服务器版与桌面版镜像，开机即用。
 
 ## 主要特性
-- **系统**：Ubuntu 24.04（noble）arm64，apt 在线更新内核 / 固件 / 引导
-- **内核**：Linux 6.1.114（Rockchip BSP）
+- **系统**：Ubuntu 24.04（noble）
+- **内核**：Linux 6.1.172（Rockchip BSP）
 - **桌面**：GNOME + GDM3，默认启用 Wayland 会话，内置中文语言包
 - **图形**：Mesa 26.2.3（Panfrost / PanVK），OpenGL ES 与 Vulkan 硬件加速
 - **视频**：Rockchip MPP 硬解；Chromium 流畅播放 4K YouTube，MPV / GStreamer 4K 播放
@@ -25,7 +25,7 @@
 ## NVMe 启动
 - 方案 A（先从 SD 引导到系统后写 NVMe）：
   ```bash
-  xz -dc ubuntu-22.04.4-desktop-arm64-lubancat-5.img.xz | sudo dd of=/dev/nvme0n1 bs=4k
+  xz -dc ubuntu-24.04-desktop-arm64-lubancat-5.img.xz | sudo dd of=/dev/nvme0n1 bs=4k
   sync
   ```
   断电拔卡后，按 MR 进入 maskrom，将 `rkspi_loader_lubancat_5.img` 刷入 eMMC 作为 NVMe 引导。
