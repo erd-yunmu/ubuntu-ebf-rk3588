@@ -16,7 +16,8 @@ if [[ -z ${BOARD} ]]; then
     exit 1
 fi
 
-uboot_package="$(basename "$(find u-boot-"${BOARD}"_*.deb | sort | tail -n1)")"
+uboot_deb_name="${UBOOT_DEB_NAME:-u-boot-${BOARD}}"
+uboot_package="$(basename "$(find "${uboot_deb_name}"_*.deb | sort | tail -n1)")"
 if [ ! -e "$uboot_package" ]; then
     echo 'Error: could not find the u-boot .deb file'
     exit 1

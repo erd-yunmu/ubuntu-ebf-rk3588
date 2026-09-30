@@ -1,0 +1,14 @@
+[Unit]
+Description=Detect board model by ADC ID (learn mode)
+Documentation=file:///usr/lib/scripts/board-detect.sh
+After=local-fs.target
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/scripts/board-detect.sh
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

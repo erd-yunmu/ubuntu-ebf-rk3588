@@ -2,6 +2,15 @@
 # SPDX-License-Identifier:	GPL-2.0+
 #
 
+dtb-$(CONFIG_MULTI_DTB_FIT) += rk3588-lubancat-generic.dtb \
+	rk3588s-lubancat-4.dtb \
+	rk3588s-lubancat-4io.dtb \
+	rk3588-lubancat-5.dtb \
+	rk3588-lubancat-5io.dtb \
+	rk3576-lubancat-generic.dtb \
+	rk3576-lubancat-3.dtb \
+	rk3576-lubancat-3io.dtb
+
 dtb-$(CONFIG_AT91FAMILY) += at91sam9260-smartweb.dtb \
 	at91sam9g20-taurus.dtb \
 	at91sam9g45-corvus.dtb \
