@@ -192,16 +192,32 @@ fdtfile=${DEVICE_TREE_FILE}
 overlay_prefix=${OVERLAY_PREFIX}
 EOF
 
-cat ../config/uEnv/${BOARD}.uEnv >> ${mount_point}/system-boot/ubuntuEnv.txt
+case "${DEVICE_TREE_FILE}" in
+    rk-kernel.dtb | *generic*)
+        echo "Generic device tree: board uEnv will be applied on first boot"
+        ;;
+    *)
+        cat ../config/uEnv/${BOARD}.uEnv >> ${mount_point}/system-boot/ubuntuEnv.txt
+        ;;
+esac
 
-overlay_list="$(tr -d '\r' < ../config/uEnv/${BOARD}.uEnv \
-    | sed -e 's/#.*//' \
-    | sed -n -e 's|^[[:space:]]*dtoverlay=[[:space:]]*||p' \
-             -e 's|^[[:space:]]*\([A-Za-z0-9][A-Za-z0-9._-]*-ove[rt]*lay\)[[:space:]]*$|\1|p' \
-    | sed -e 's|[[:space:]]*$||' -e 's|.*/||' -e 's|\.dtbo$||' \
-    | grep -v '^$' \
-    | awk '!seen[$0]++' \
-    | tr '\n' ' ')"
+mkdir -p ${mount_point}/system-boot/uEnv
+for uenv in ../config/uEnv/*.uEnv; do
+    cp "${uenv}" "${mount_point}/system-boot/uEnv/uEnv-$(basename "${uenv}" .uEnv).txt"
+done
+
+uenv_file="../config/uEnv/${BOARD}.uEnv"
+overlay_list=""
+if [ -f "${uenv_file}" ]; then
+    overlay_list="$(tr -d '\r' < "${uenv_file}" \
+        | sed -e 's/#.*//' \
+        | sed -n -e 's|^[[:space:]]*dtoverlay=[[:space:]]*||p' \
+                 -e 's|^[[:space:]]*\([A-Za-z0-9][A-Za-z0-9._-]*-ove[rt]*lay\)[[:space:]]*$|\1|p' \
+        | sed -e 's|[[:space:]]*$||' -e 's|.*/||' -e 's|\.dtbo$||' \
+        | grep -v '^$' \
+        | awk '!seen[$0]++' \
+        | tr '\n' ' ')"
+fi
 
 # Copy the device trees, kernel, and initrd to the boot partition
 mv ${mount_point}/writable/boot/firmware/* ${mount_point}/system-boot/
@@ -210,6 +226,16 @@ if [ -d "${mount_point}/system-boot/dtbs/rockchip/overlay" ]; then
     rm -rf "${mount_point}/system-boot/dtb/overlay"
     mkdir -p "${mount_point}/system-boot/dtb"
     mv "${mount_point}/system-boot/dtbs/rockchip/overlay" "${mount_point}/system-boot/dtb/overlay"
+fi
+
+if [ "${DEVICE_TREE_FILE}" = "rk-kernel.dtb" ]; then
+    generic_dtb="${OVERLAY_PREFIX}-lubancat-generic.dtb"
+    if [ ! -f "${mount_point}/system-boot/dtbs/rockchip/${generic_dtb}" ]; then
+        echo "Error: ${generic_dtb} not found in dtbs/rockchip"
+        exit 1
+    fi
+    ln -sf "${generic_dtb}" "${mount_point}/system-boot/dtbs/rockchip/rk-kernel.dtb"
+    echo "Linked dtbs/rockchip/rk-kernel.dtb -> ${generic_dtb}"
 fi
 
 for overlay in ${overlay_list}; do

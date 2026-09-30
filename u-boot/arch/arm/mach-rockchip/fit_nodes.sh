@@ -91,6 +91,34 @@ function gen_fdt_node()
 
 	FDT_SIGN=", \"fdt\""
 	FDT="fdt = \"fdt\"${PROP_KERN_DTB};"
+
+	gen_lubancat_dtb_node
+};
+
+function gen_lubancat_dtb_node()
+{
+	if [ ! -f fit-dtb.blob ]; then
+		return
+	fi
+
+	LUBANCAT_DTB_LOAD_ADDR=0xc000000
+	if grep -q '^CONFIG_ROCKCHIP_RK3576=y' .config ; then
+		LUBANCAT_DTB_LOAD_ADDR=0x41800000
+	fi
+
+	echo "		lubancat-dtb {
+			description = \"LubanCat Multi-DTB FIT\";
+			data = /incbin/(\"./fit-dtb.blob\");
+			type = \"flat_dt\";
+			arch = \"${U_ARCH}\";
+			compression = \"none\";
+			load = <${LUBANCAT_DTB_LOAD_ADDR}>;
+			hash {
+				algo = \"sha256\";
+			};
+		};"
+
+	LOADABLE_LUBANCAT=", \"lubancat-dtb\""
 };
 
 function gen_kfdt_node()
@@ -396,7 +424,7 @@ echo "	};
 			description = \"${PLATFORM}\";
 			rollback-index = <0x0>;
 			firmware = \"atf-1\";
-			loadables = ${LOADABLE_UBOOT}${LOADABLE_ATF}${LOADABLE_OPTEE}${LOADABLE_OTHER};
+			loadables = ${LOADABLE_UBOOT}${LOADABLE_ATF}${LOADABLE_OPTEE}${LOADABLE_OTHER}${LOADABLE_LUBANCAT};
 			${STANDALONE_MCU}
 			${FDT}
 			signature {
