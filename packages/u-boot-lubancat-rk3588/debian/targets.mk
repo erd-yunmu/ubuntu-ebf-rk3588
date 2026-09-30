@@ -1,32 +1,8 @@
 # Target platforms supported by u-boot.
 # debian/rules includes this Makefile snippet.
 
-u-boot-rockchip_platforms += lubancat-4-rk3588s
-lubancat-4-rk3588s_ddr := rk3588_ddr_lp4_1848MHz_lp5_2400MHz_v1.18.bin
-lubancat-4-rk3588s_bl31 := rk3588_bl31_v1.53.elf
-lubancat-4-rk3588s_bl32 := rk3588_bl32_v1.20.bin
-lubancat-4-rk3588s_pkg := lubancat-4
-
-u-boot-rockchip_platforms += lubancat-4io-rk3588s
-lubancat-4io-rk3588s_ddr := rk3588_ddr_lp4_1848MHz_lp5_2400MHz_v1.18.bin
-lubancat-4io-rk3588s_bl31 := rk3588_bl31_v1.53.elf
-lubancat-4io-rk3588s_bl32 := rk3588_bl32_v1.20.bin
-lubancat-4io-rk3588s_pkg := lubancat-4io
-
-u-boot-rockchip_platforms += lubancat-5-rk3588
-lubancat-5-rk3588_ddr := rk3588_ddr_lp4_1848MHz_lp5_2400MHz_v1.18.bin
-lubancat-5-rk3588_bl31 := rk3588_bl31_v1.53.elf
-lubancat-5-rk3588_bl32 := rk3588_bl32_v1.20.bin
-lubancat-5-rk3588_pkg := lubancat-5
-
-u-boot-rockchip_platforms += lubancat-5-v2-rk3588
-lubancat-5-v2-rk3588_ddr := rk3588_ddr_lp4_1848MHz_lp5_2400MHz_v1.18.bin
-lubancat-5-v2-rk3588_bl31 := rk3588_bl31_v1.53.elf
-lubancat-5-v2-rk3588_bl32 := rk3588_bl32_v1.20.bin
-lubancat-5-v2-rk3588_pkg := lubancat-5-v2
-
-u-boot-rockchip_platforms += lubancat-5io-rk3588
-lubancat-5io-rk3588_ddr := rk3588_ddr_lp4_1848MHz_lp5_2400MHz_v1.18.bin
-lubancat-5io-rk3588_bl31 := rk3588_bl31_v1.53.elf
-lubancat-5io-rk3588_bl32 := rk3588_bl32_v1.20.bin
-lubancat-5io-rk3588_pkg := lubancat-5io
+u-boot-rockchip_platforms += lubancat-generic-rk3588
+lubancat-generic-rk3588_ddr := rk3588_ddr_lp4_1848MHz_lp5_2400MHz_v1.18.bin
+lubancat-generic-rk3588_bl31 := rk3588_bl31_v1.53.elf
+lubancat-generic-rk3588_bl32 := rk3588_bl32_v1.20.bin
+lubancat-generic-rk3588_pkg := lubancat-generic-rk3588

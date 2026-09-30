@@ -1021,9 +1021,12 @@ U_BOOT_ITS = $(subst ",,$(CONFIG_SPL_FIT_SOURCE))
 else
 ifneq ($(CONFIG_SPL_FIT_GENERATOR),"")
 U_BOOT_ITS := u-boot.its
-$(U_BOOT_ITS): u-boot FORCE
+ifneq ($(CONFIG_MULTI_DTB_FIT),)
+U_BOOT_ITS_DEP := fit-dtb.blob
+endif
+$(U_BOOT_ITS): u-boot $(U_BOOT_ITS_DEP) FORCE
 	$(srctree)/$(CONFIG_SPL_FIT_GENERATOR) \
-	$(patsubst %,arch/$(ARCH)/dts/%.dtb,$(subst ",,$(CONFIG_OF_LIST))) > $@
+	$(firstword $(patsubst %,arch/$(ARCH)/dts/%.dtb,$(subst ",,$(CONFIG_OF_LIST)))) > $@
 endif
 endif
 
