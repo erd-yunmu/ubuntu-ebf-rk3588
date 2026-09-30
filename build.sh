@@ -99,7 +99,8 @@ build_board() {
     fi
 
     # Build U-Boot if not found
-    if [[ ! -e "$(find build/u-boot-"${BOARD}"_*.deb | sort | tail -n1)" ]]; then
+    uboot_deb_name="${UBOOT_DEB_NAME:-u-boot-${BOARD}}"
+    if [[ ! -e "$(find build/"${uboot_deb_name}"_*.deb | sort | tail -n1)" ]]; then
         eval "${DOCKER}" ./scripts/build-u-boot.sh
     fi
 
