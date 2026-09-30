@@ -5,6 +5,7 @@
  */
 
 #include <common.h>
+#include <boot_fit.h>
 #include <dwc3-uboot.h>
 #include <usb.h>
 #include <linux/usb/phy-rockchip-usbdp.h>
@@ -170,6 +171,130 @@ int do_mac(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 {
 	printf("This device does not support user programmable EEPROM.\n");
 	return -1;
+}
+
+#endif
+
+#ifndef CONFIG_SPL_BUILD
+
+#define LUBANCAT_ADC_CH_HIGH	2
+#define LUBANCAT_ADC_CH_LOW	3
+#define LUBANCAT_DTB_FIT_ADDR	0x0c000000
+
+static const unsigned int lubancat_adc_threshold[] = {
+	916, 1376, 1840, 2380, 2928, 3432, 3900, 4096
+};
+
+struct lubancat_variant {
+	unsigned int id;
+	char *dtb;
+};
+
+static const struct lubancat_variant lubancat_variants[] = {
+	{ 101, "rk3588s-lubancat-4" },
+	{ 102, "rk3588s-lubancat-4" },
+	{ 201, "rk3588s-lubancat-4io" },
+	{ 301, "rk3588s-lubancat-4io" },
+	{ 401, "rk3588-lubancat-5" },
+	{ 402, "rk3588-lubancat-5" },
+	{ 501, "rk3588-lubancat-5io" },
+	{ 601, "rk3588-lubancat-5io" },
+	{ 701, "rk3588-lubancat-5io" },
+	{ 1, "rk3588-lubancat-5io" },
+};
+
+static const char *lubancat_dtb_name = "";
+
+static int lubancat_adc_read(unsigned int channel, unsigned int *value)
+{
+	int ret;
+
+	ret = adc_channel_single_shot(SARADC_ADDR, channel, value);
+	if (ret)
+		ret = adc_channel_single_shot("saradc", channel, value);
+
+	return ret;
+}
+
+static int lubancat_adc_index(unsigned int raw, unsigned int *index)
+{
+	unsigned int i;
+
+	for (i = 0; i < countof(lubancat_adc_threshold); i++) {
+		if (raw < lubancat_adc_threshold[i]) {
+			*index = i;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
+static const char *lubancat_dtb_for_adc(void)
+{
+	unsigned int raw_high, raw_low, high, low, id;
+	unsigned int i;
+
+	if (lubancat_adc_read(LUBANCAT_ADC_CH_HIGH, &raw_high) ||
+	    lubancat_adc_read(LUBANCAT_ADC_CH_LOW, &raw_low))
+		return NULL;
+
+	if (lubancat_adc_index(raw_high, &high) || lubancat_adc_index(raw_low, &low))
+		return NULL;
+
+	id = high * 100 + low;
+
+	for (i = 0; i < countof(lubancat_variants); i++) {
+		if (lubancat_variants[i].id == id) {
+			printf("lubancat: ch2=%u ch3=%u id=%03u -> dtb %s\n",
+			       raw_high, raw_low, id, lubancat_variants[i].dtb);
+			return lubancat_variants[i].dtb;
+		}
+	}
+
+	printf("lubancat: ch2=%u ch3=%u id=%03u not matched\n", raw_high, raw_low, id);
+
+	return NULL;
+}
+
+int board_fit_config_name_match(const char *name)
+{
+	const char *base;
+	size_t len;
+
+	if (!lubancat_dtb_name || !lubancat_dtb_name[0])
+		return -1;
+
+	base = strrchr(name, '/');
+	base = base ? base + 1 : name;
+	len = strlen(lubancat_dtb_name);
+
+	if (strncmp(base, lubancat_dtb_name, len))
+		return -1;
+
+	if (base[len] && base[len] != '.')
+		return -1;
+
+	return 0;
+}
+
+int embedded_dtb_select(void)
+{
+	void *blob;
+
+	lubancat_dtb_name = lubancat_dtb_for_adc();
+	if (!lubancat_dtb_name)
+		return 0;
+
+	blob = locate_dtb_in_fit((void *)LUBANCAT_DTB_FIT_ADDR);
+	if (!blob) {
+		printf("lubancat: no dtb in fit\n");
+		return 0;
+	}
+
+	gd->fdt_blob = blob;
+
+	return fdtdec_prepare_fdt();
 }
 
 #endif

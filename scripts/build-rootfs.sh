@@ -251,6 +251,12 @@ chroot ${chroot_dir} /bin/bash -c "systemctl enable cpu-governor-performance"
 cp ${overlay_dir}/usr/lib/systemd/system/gpu-governor-performance.service ${chroot_dir}/usr/lib/systemd/system/gpu-governor-performance.service
 chroot ${chroot_dir} /bin/bash -c "systemctl enable gpu-governor-performance"
 
+mkdir -p ${chroot_dir}/usr/lib/scripts
+cp ${overlay_dir}/usr/lib/scripts/board-detect.sh ${chroot_dir}/usr/lib/scripts/board-detect.sh
+chmod +x ${chroot_dir}/usr/lib/scripts/board-detect.sh
+cp ${overlay_dir}/usr/lib/systemd/system/board-detect.service ${chroot_dir}/usr/lib/systemd/system/board-detect.service
+chroot ${chroot_dir} /bin/bash -c "systemctl enable board-detect"
+
 # Add realtek bluetooth firmware to initrd 
 cp ${overlay_dir}/usr/share/initramfs-tools/hooks/rtl-bt ${chroot_dir}/usr/share/initramfs-tools/hooks/rtl-bt
 
