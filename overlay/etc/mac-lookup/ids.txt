@@ -1,0 +1,3 @@
+# one entry per board:  <cpuid>  <note>
+# read cpuid with:  tr -d "\0" < /proc/device-tree/serial-number
+# system-wide list, used when the per-user one is absent

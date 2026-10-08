@@ -259,6 +259,11 @@ chmod +x ${chroot_dir}/usr/lib/scripts/board-detect.sh
 cp ${overlay_dir}/usr/lib/systemd/system/board-detect.service ${chroot_dir}/usr/lib/systemd/system/board-detect.service
 chroot ${chroot_dir} /bin/bash -c "systemctl enable board-detect"
 
+mkdir -p ${chroot_dir}/usr/local/bin ${chroot_dir}/etc/mac-lookup
+cp ${overlay_dir}/usr/local/bin/mac-lookup ${chroot_dir}/usr/local/bin/mac-lookup
+chmod +x ${chroot_dir}/usr/local/bin/mac-lookup
+cp ${overlay_dir}/etc/mac-lookup/ids.txt ${chroot_dir}/etc/mac-lookup/ids.txt
+
 # Add realtek bluetooth firmware to initrd 
 cp ${overlay_dir}/usr/share/initramfs-tools/hooks/rtl-bt ${chroot_dir}/usr/share/initramfs-tools/hooks/rtl-bt
 
