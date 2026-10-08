@@ -1,0 +1,197 @@
+#!/bin/bash
+#
+# mac-lookup - work with the MAC addresses that LubanCat boards derive from
+#              their SoC unique ID (cpuid).
+#
+# Derivation:  MAC = "02:" + md5("<cpuid>:<iface>")[0:10]   (locally administered)
+#
+# md5 is one-way, so a MAC cannot be decoded back into a cpuid. This tool
+# forward-computes the table from a list of known cpuids and looks the MAC up
+# in it.
+#
+# Usage:
+#   mac-lookup                  show this machine's cpuid and per-interface MAC
+#   mac-lookup <MAC> [...]      reverse:  MAC -> cpuid:iface
+#   mac-lookup <CPUID> [...]    forward:  cpuid -> MACs
+#   mac-lookup table            print the whole table
+#
+# Options:
+#   --ids FILE    cpuid list, one "cpuid [note...]" per line
+#                 (lookup order: $MAC_LOOKUP_IDS, ~/.config/mac-lookup/ids.txt, /etc/mac-lookup/ids.txt)
+#   --ifaces STR  interfaces to consider (default: eth0 eth1 eth2 eth3)
+#   --self        also use this machine's cpuid
+#
+set -u
+
+DEFAULT_IDS="${MAC_LOOKUP_IDS:-${HOME}/.config/mac-lookup/ids.txt}"
+SYSTEM_IDS="/etc/mac-lookup/ids.txt"
+IFACES="eth0 eth1 eth2 eth3"
+IDS_FILE=""
+USE_SELF="N"
+
+resolve_ids() {
+    if [ -n "${MAC_LOOKUP_IDS:-}" ]; then
+        echo "${MAC_LOOKUP_IDS}"
+        return 0
+    fi
+    if [ -f "${DEFAULT_IDS}" ]; then
+        echo "${DEFAULT_IDS}"
+        return 0
+    fi
+    if [ -f "${SYSTEM_IDS}" ]; then
+        echo "${SYSTEM_IDS}"
+        return 0
+    fi
+    echo "${DEFAULT_IDS}"
+}
+
+usage() {
+    sed -n '3,21p' "$0" | sed -e 's/^# \?//' -e '/^[[:space:]]*$/d'
+}
+
+mac_of() {
+    printf '%s' "$1:$2" | md5sum | cut -c1-10 \
+        | sed 's/^\(..\)\(..\)\(..\)\(..\)\(..\)$/02:\1:\2:\3:\4:\5/'
+}
+
+local_cpuid() {
+    local id
+
+    if [ -r /proc/device-tree/serial-number ]; then
+        id="$(tr -d '\0' < /proc/device-tree/serial-number)"
+        if [ -n "${id}" ]; then
+            echo "${id}"
+            return 0
+        fi
+    fi
+    sed -n 's/^Serial[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo 2> /dev/null | head -n 1
+}
+
+list_ids() {
+    if [ -n "${IDS_FILE}" ]; then
+        sed -e 's/#.*//' -e 's/[[:space:]]*$//' "${IDS_FILE}" | grep -v '^[[:space:]]*$'
+        return 0
+    fi
+    if [ "${USE_SELF}" = "Y" ] || [ "${SELF_ONLY}" = "Y" ]; then
+        printf '%s (self)\n' "$(local_cpuid)"
+    fi
+}
+
+require_ids() {
+    if [ -f "${IDS_FILE}" ]; then
+        return 0
+    fi
+    printf 'error: no id list found. Put one at:\n  %s\n  %s  (system-wide, all users)\nor pass --ids FILE / set MAC_LOOKUP_IDS.\n' \
+        "${DEFAULT_IDS}" "${SYSTEM_IDS}" >&2
+    exit 1
+}
+
+do_lookup() {
+    local want hits=0 id note n
+
+    require_ids
+    for want in "$@"; do
+        want="$(printf '%s' "${want}" | tr 'A-F' 'a-f')"
+        hits=0
+        while read -r id note; do
+            [ -n "${id}" ] || continue
+            for n in ${IFACES}; do
+                if [ "$(mac_of "${id}" "${n}")" = "${want}" ]; then
+                    printf '%s  <=  %s:%s  %s\n' "${want}" "${id}" "${n}" "${note}"
+                    hits=$((hits + 1))
+                fi
+            done
+        done < <(list_ids)
+        if [ "${hits}" -eq 0 ]; then
+            printf '%s  <=  not found in the id list\n' "${want}"
+        fi
+    done
+}
+
+do_table() {
+    local id note n
+
+    require_ids
+    printf '%-17s  %-18s  %s\n' "MAC" "CPUID:IFACE" "NOTE"
+    while read -r id note; do
+        [ -n "${id}" ] || continue
+        for n in ${IFACES}; do
+            printf '%-17s  %-18s  %s\n' "$(mac_of "${id}" "${n}")" "${id}:${n}" "${note}"
+        done
+    done < <(list_ids)
+}
+
+do_forward() {
+    local id n
+
+    for id in "$@"; do
+        for n in ${IFACES}; do
+            printf '%-18s  %s\n' "${id}:${n}" "$(mac_of "${id}" "${n}")"
+        done
+    done
+}
+
+do_self() {
+    local id n found="N"
+
+    id="$(local_cpuid)"
+    if [ -n "${id}" ]; then
+        printf 'cpuid: %s\n\n' "${id}"
+        for n in $(ls /sys/class/net 2> /dev/null | grep -E '^eth[0-9]+$'); do
+            printf '%-7s %s\n' "${n}" "$(mac_of "${id}" "${n}")"
+            found="Y"
+        done
+        [ "${found}" = "Y" ] || printf '(no eth* interface found; candidate names: %s)\n' "${IFACES}"
+        return 0
+    fi
+
+    if [ -f "${IDS_FILE}" ]; then
+        SELF_ONLY="N" do_table
+        return 0
+    fi
+
+    printf 'no cpuid on this machine, and no id list at %s or %s\n\n' \
+        "${DEFAULT_IDS}" "${SYSTEM_IDS}"
+    usage
+}
+
+SELF_ONLY="N"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --ids)     IDS_FILE="${2:-}"; shift 2 ;;
+        --ifaces)  IFACES="${2:-}"; shift 2 ;;
+        --self)    USE_SELF="Y"; shift ;;
+        -h|--help) usage; exit 0 ;;
+        --)        shift; break ;;
+        -*)        echo "unknown option: $1" >&2; usage; exit 1 ;;
+        *)         break ;;
+    esac
+done
+
+if [ -z "${IDS_FILE}" ]; then
+    IDS_FILE="$(resolve_ids)"
+fi
+
+if [ $# -eq 0 ]; then
+    do_self
+    exit 0
+fi
+
+for arg in "$@"; do
+    case "${arg}" in
+        table)
+            do_table
+            ;;
+        lookup)
+            ;;
+        mac)
+            ;;
+        *:*:*:*:*:*)
+            do_lookup "${arg}"
+            ;;
+        *)
+            do_forward "${arg}"
+            ;;
+    esac
+done
