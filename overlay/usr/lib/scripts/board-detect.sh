@@ -20,6 +20,8 @@ DONE_FLAG="${BOOT_DIR}/board-detect.done"
 NET_DIR="/etc/systemd/network"
 NET_LINK_PREFIX="10-lubancat"
 
+MAC_IDS_FILE="/etc/mac-lookup/ids.txt"
+
 LOG_FILE=/var/log/board-detect.log
 
 log() {
@@ -244,6 +246,20 @@ setup_mac() {
     return 0
 }
 
+record_cpuid() {
+    local id note
+
+    id="$(soc_unique_id)"
+    [ -n "${id}" ] || return 0
+    if [ ! -f "${MAC_IDS_FILE}" ]; then
+        mkdir -p "$(dirname "${MAC_IDS_FILE}")" 2> /dev/null
+        printf '# one entry per board:  <cpuid>  <note>\n' > "${MAC_IDS_FILE}" 2> /dev/null
+    fi
+    grep -q "^${id}[[:space:]]" "${MAC_IDS_FILE}" 2> /dev/null && return 0
+    note="$(tr -d '\0' < /proc/device-tree/model 2> /dev/null)"
+    printf '%s %s (%s)\n' "${id}" "${note}" "$(hostname 2> /dev/null)" >> "${MAC_IDS_FILE}" 2> /dev/null
+}
+
 main() {
     { : >> "${LOG_FILE}"; } 2> /dev/null || LOG_FILE=/tmp/board-detect.log
 
@@ -252,6 +268,7 @@ main() {
 
     if [ "${MODE}" = "apply" ]; then
         setup_mac
+        record_cpuid
     fi
 
     if [ "${MODE}" = "apply" ] && [ -f "${DONE_FLAG}" ]; then
