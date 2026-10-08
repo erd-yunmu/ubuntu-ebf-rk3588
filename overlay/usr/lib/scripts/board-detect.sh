@@ -17,6 +17,9 @@ DTB_DIR="${BOOT_DIR}/dtbs/rockchip"
 LINK_FILE="${DTB_DIR}/rk-kernel.dtb"
 DONE_FLAG="${BOOT_DIR}/board-detect.done"
 
+NET_DIR="/etc/systemd/network"
+NET_LINK_PREFIX="10-lubancat"
+
 LOG_FILE=/var/log/board-detect.log
 
 log() {
@@ -200,11 +203,56 @@ apply_env() {
     return 0
 }
 
+soc_unique_id() {
+    local id
+
+    id="$(tr -d '\0' < /proc/device-tree/serial-number 2> /dev/null)"
+    [ -n "${id}" ] && echo "${id}" && return 0
+
+    id="$(sed -n 's/^Serial[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo 2> /dev/null | head -n 1)"
+    [ -n "${id}" ] && echo "${id}"
+}
+
+mac_for_iface() {
+    printf '%s:%s' "$1" "$2" | md5sum | cut -c1-10 \
+        | sed 's/^\(..\)\(..\)\(..\)\(..\)\(..\)$/02:\1:\2:\3:\4:\5/'
+}
+
+setup_mac() {
+    local id dev iface link mac
+
+    id="$(soc_unique_id)"
+    [ -n "${id}" ] || return 0
+
+    mkdir -p "${NET_DIR}" 2> /dev/null
+
+    for dev in /sys/class/net/eth*; do
+        [ -e "${dev}" ] || continue
+        iface="$(basename "${dev}")"
+        link="${NET_DIR}/${NET_LINK_PREFIX}-${iface}.link"
+        [ -f "${link}" ] && continue
+        mac="$(mac_for_iface "${id}" "${iface}")"
+        {
+            echo "[Match]"
+            echo "OriginalName=${iface}"
+            echo
+            echo "[Link]"
+            echo "MACAddress=${mac}"
+        } > "${link}"
+    done
+
+    return 0
+}
+
 main() {
     { : >> "${LOG_FILE}"; } 2> /dev/null || LOG_FILE=/tmp/board-detect.log
 
     local model soc board_compat dev scale scale_int ch raw
     local id_high id_low board_id guess
+
+    if [ "${MODE}" = "apply" ]; then
+        setup_mac
+    fi
 
     if [ "${MODE}" = "apply" ] && [ -f "${DONE_FLAG}" ]; then
         llog_prefixed "已完成初始化（$(cat "${DONE_FLAG}")），跳过"
