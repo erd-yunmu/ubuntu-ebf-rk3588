@@ -241,6 +241,11 @@ setup_mac() {
             echo "[Link]"
             echo "MACAddress=${mac}"
         } > "${link}"
+        cur="$(cat "${dev}/address" 2> /dev/null)"
+        if [ "${cur}" != "${mac}" ]; then
+            ip link set dev "${iface}" address "${mac}" 2> /dev/null \
+                && llog_prefixed "iface ${iface}: MAC set to ${mac} (link file created)"
+        fi
     done
 
     return 0
@@ -255,6 +260,16 @@ record_cpuid() {
         mkdir -p "$(dirname "${MAC_IDS_FILE}")" 2> /dev/null
         printf '# one entry per board:  <cpuid>  <note>\n' > "${MAC_IDS_FILE}" 2> /dev/null
     fi
+
+    if [ -n "${1:-}" ]; then
+        if grep -q "^${id}[[:space:]]" "${MAC_IDS_FILE}" 2> /dev/null; then
+            sed -i "s|^${id}[[:space:]].*|${id} $1 ($(hostname 2> /dev/null))|" "${MAC_IDS_FILE}" 2> /dev/null
+        else
+            printf '%s %s (%s)\n' "${id}" "$1" "$(hostname 2> /dev/null)" >> "${MAC_IDS_FILE}" 2> /dev/null
+        fi
+        return 0
+    fi
+
     grep -q "^${id}[[:space:]]" "${MAC_IDS_FILE}" 2> /dev/null && return 0
     note="$(tr -d '\0' < /proc/device-tree/model 2> /dev/null)"
     printf '%s %s (%s)\n' "${id}" "${note}" "$(hostname 2> /dev/null)" >> "${MAC_IDS_FILE}" 2> /dev/null
@@ -336,6 +351,10 @@ main() {
     local dtb="${rest%%|*}"
     local board_env="${rest##*|}"
     llog_prefixed "对应型号（LubanCat 官方映射）: ${board_name} / ${dtb}"
+
+    if [ "${MODE}" = "apply" ]; then
+        record_cpuid "${board_name}"
+    fi
 
     if [ "${MODE}" = "learn" ]; then
         llog_prefixed "学习模式：未做任何修改，结果见 ${LOG_FILE}"
