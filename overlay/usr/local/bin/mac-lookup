@@ -3,6 +3,8 @@
 # mac-lookup - work with the MAC addresses that LubanCat boards derive from
 #              their SoC unique ID (cpuid).
 #
+# Author:  erd-yunmu <cancet@embedfire.com>
+#
 # Derivation:  MAC = "02:" + md5("<cpuid>:<iface>")[0:10]   (locally administered)
 #
 # md5 is one-way, so a MAC cannot be decoded back into a cpuid. This tool
@@ -14,6 +16,8 @@
 #   mac-lookup <MAC> [...]      reverse:  MAC -> cpuid:iface
 #   mac-lookup <CPUID> [...]    forward:  cpuid -> MACs
 #   mac-lookup table            print the whole table
+#   mac-lookup <IFACE> <MAC>    set <IFACE>'s MAC now and keep it after reboot (needs root)
+#   mac-lookup reset [IFACE..]  restore the default (cpuid-derived) MAC (needs root)
 #
 # Options:
 #   --ids FILE    cpuid list, one "cpuid [note...]" per line
@@ -28,6 +32,9 @@ SYSTEM_IDS="/etc/mac-lookup/ids.txt"
 IFACES="eth0 eth1 eth2 eth3"
 IDS_FILE=""
 USE_SELF="N"
+
+NET_DIR="/etc/systemd/network"
+LINK_PREFIX="10-lubancat"
 
 resolve_ids() {
     if [ -n "${MAC_LOOKUP_IDS:-}" ]; then
@@ -46,7 +53,7 @@ resolve_ids() {
 }
 
 usage() {
-    sed -n '3,21p' "$0" | sed -e 's/^# \?//' -e '/^[[:space:]]*$/d'
+    sed -n '3,26p' "$0" | sed -e 's/^# \?//' -e '/^[[:space:]]*$/d'
 }
 
 mac_of() {
@@ -131,6 +138,117 @@ do_forward() {
     done
 }
 
+is_mac() {
+    printf '%s' "$1" | grep -qiE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'
+}
+
+apply_mac() {
+    local iface="$1" mac="$2"
+
+    ip link set dev "${iface}" address "${mac}" 2> /dev/null && return 0
+
+    ip link set dev "${iface}" down 2> /dev/null
+    if ip link set dev "${iface}" address "${mac}" 2> /dev/null; then
+        ip link set dev "${iface}" up 2> /dev/null
+        return 0
+    fi
+    ip link set dev "${iface}" up 2> /dev/null
+    return 1
+}
+
+do_set() {
+    local iface="$1" mac link
+
+    mac="$(printf '%s' "$2" | tr 'A-F' 'a-f')"
+
+    if ! is_mac "${mac}"; then
+        printf 'error: invalid MAC address: %s\n' "$2" >&2
+        exit 1
+    fi
+    if [ "$(id -u)" != "0" ]; then
+        printf 'error: need root to set a MAC (try: sudo mac-lookup %s %s)\n' "${iface}" "${mac}" >&2
+        exit 1
+    fi
+    if [ ! -d "/sys/class/net/${iface}" ]; then
+        printf 'error: interface not found: %s\n' "${iface}" >&2
+        exit 1
+    fi
+
+    link="${NET_DIR}/${LINK_PREFIX}-${iface}.link"
+    mkdir -p "${NET_DIR}"
+    if ! {
+        echo "[Match]"
+        echo "OriginalName=${iface}"
+        echo
+        echo "[Link]"
+        echo "MACAddress=${mac}"
+    } > "${link}"; then
+        printf 'error: cannot write %s\n' "${link}" >&2
+        exit 1
+    fi
+
+    if apply_mac "${iface}" "${mac}"; then
+        printf '%s: MAC set to %s\n' "${iface}" "${mac}"
+        printf 'persisted in %s (kept after reboot)\n' "${link}"
+    else
+        printf 'error: failed to apply MAC to %s (saved in %s, applies on next boot)\n' \
+            "${iface}" "${link}" >&2
+        exit 1
+    fi
+}
+
+do_reset() {
+    local id iface link mac dev found="N"
+    local -a targets
+
+    if [ "$(id -u)" != "0" ]; then
+        printf 'error: need root to reset MAC (try: sudo mac-lookup reset)\n' >&2
+        exit 1
+    fi
+    id="$(local_cpuid)"
+    if [ -z "${id}" ]; then
+        printf 'error: cannot read the SoC cpuid on this machine\n' >&2
+        exit 1
+    fi
+
+    if [ $# -gt 0 ]; then
+        targets=("$@")
+    else
+        targets=()
+        for dev in /sys/class/net/eth*; do
+            [ -e "${dev}" ] && targets+=("$(basename "${dev}")")
+        done
+    fi
+
+    if [ "${#targets[@]}" -eq 0 ]; then
+        printf 'no eth* interface found\n' >&2
+        return 0
+    fi
+
+    mkdir -p "${NET_DIR}"
+    for iface in "${targets[@]}"; do
+        if [ ! -d "/sys/class/net/${iface}" ]; then
+            printf 'warning: interface not found: %s\n' "${iface}" >&2
+            continue
+        fi
+        link="${NET_DIR}/${LINK_PREFIX}-${iface}.link"
+        mac="$(mac_of "${id}" "${iface}")"
+        {
+            echo "[Match]"
+            echo "OriginalName=${iface}"
+            echo
+            echo "[Link]"
+            echo "MACAddress=${mac}"
+        } > "${link}"
+        if apply_mac "${iface}" "${mac}"; then
+            printf '%s: MAC reset to default %s\n' "${iface}" "${mac}"
+            found="Y"
+        else
+            printf 'warning: failed to apply default MAC to %s (saved in %s)\n' "${iface}" "${link}" >&2
+        fi
+    done
+}
+
 do_self() {
     local id n found="N"
 
@@ -175,6 +293,17 @@ fi
 
 if [ $# -eq 0 ]; then
     do_self
+    exit 0
+fi
+
+if [ $# -eq 2 ] && is_mac "$2" && ! is_mac "$1"; then
+    do_set "$1" "$2"
+    exit 0
+fi
+
+if [ "${1:-}" = "reset" ]; then
+    shift
+    do_reset "$@"
     exit 0
 fi
 
