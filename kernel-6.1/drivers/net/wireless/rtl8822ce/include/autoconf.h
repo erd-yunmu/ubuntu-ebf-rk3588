@@ -318,7 +318,7 @@
 #define CONFIG_SINGLE_RECV_BUF
 #endif
 
-#define	DBG_TXBD_DESC_DUMP
+/* #define	DBG_TXBD_DESC_DUMP */
 
 
 /* #define CONFIG_NO_FW */
