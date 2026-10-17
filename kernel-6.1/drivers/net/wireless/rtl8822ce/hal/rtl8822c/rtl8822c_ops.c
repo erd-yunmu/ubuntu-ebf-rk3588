@@ -1038,7 +1038,9 @@ static void xmit_status_check(PADAPTER p)
 	if (txdma_status != 0x00) {
 		RTW_INFO("%s REG_TXDMA_STATUS:0x%08x\n", __FUNCTION__, txdma_status);
 
+#ifdef DBG_TXBD_DESC_DUMP
 		core_get_tx_ring_ext(p);
+#endif
 
 		psrtpriv->tx_dma_status_cnt++;
 		psrtpriv->self_dect_case = 4;
