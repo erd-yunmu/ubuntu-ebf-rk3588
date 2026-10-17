@@ -1,6 +1,8 @@
 # 设备树插件清单：去掉行首 '#' 即启用该插件，加上 '#' 即关闭
 # 修改后重启生效
 
+fdtfile=rk3576-lubancat-3.dtb
+
 #rgmii
 #dtoverlay=/dtb/overlay/rk3576-lubancat-rgmii-gmac1-overlay.dtbo
 #msata
