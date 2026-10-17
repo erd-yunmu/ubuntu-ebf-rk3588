@@ -198,6 +198,7 @@ kernel_build="$(date -d "${kb}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
 [ -z "${kernel_build}" ] && kernel_build="${kb}"
 gcc_ver="$(gcc --version 2>/dev/null | head -n1)"
 
+echo ""
 # board model / device tree / build info
 [ -n "${board_model}" ] && printf "%s\x1B[92m%s\x1B[0m\n" "板卡型号:     " "${board_model}"
 [ -n "${board_dtb}" ] && printf "%s\x1B[92m%s\x1B[0m\n" "设备树:       " "${board_dtb}"
