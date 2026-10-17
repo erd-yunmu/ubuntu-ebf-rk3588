@@ -206,14 +206,7 @@ EOF
 mkimage -A arm64 -O linux -T script -C none -n "Boot Script" -d ${mount_point}/system-boot/boot.cmd ${mount_point}/system-boot/boot.scr
 
 # dtb name used by the sanity check below.
-case "${DEVICE_TREE_FILE}" in
-    rk-kernel.dtb | *generic*)
-        FDTFILE_NAME="${OVERLAY_PREFIX}-lubancat-generic.dtb"
-        ;;
-    *)
-        FDTFILE_NAME="${DEVICE_TREE_FILE}"
-        ;;
-esac
+FDTFILE_NAME="${OVERLAY_PREFIX}-lubancat-generic.dtb"
 
 # uEnv = common bootargs + per-board dtb/overlay list.
 mkdir -p ${mount_point}/system-boot/uEnv
