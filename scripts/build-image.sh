@@ -157,10 +157,28 @@ setenv ubuntu_env_size 0
 
 echo "Boot script loaded from ${devtype} ${devnum}"
 
-if test -e ${devtype} ${devnum}:${distro_bootpart} /ubuntuEnv.txt; then
-	load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} /ubuntuEnv.txt
-	env import -t ${load_addr} ${filesize}
-	setenv ubuntu_env_size ${filesize}
+# Board uEnv first; ubuntuEnv.txt only as fallback.
+if test -n "${lubancat_uenv}"; then
+	if test -e ${devtype} ${devnum}:${distro_bootpart} /uEnv/uEnv-${lubancat_uenv}.txt; then
+		load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} /uEnv/uEnv-${lubancat_uenv}.txt
+		env import -t ${load_addr} ${filesize}
+		setenv ubuntu_env_size ${filesize}
+		echo "Config: /uEnv/uEnv-${lubancat_uenv}.txt"
+	fi
+fi
+
+if test "${ubuntu_env_size}" = "0"; then
+	if test -e ${devtype} ${devnum}:${distro_bootpart} /ubuntuEnv.txt; then
+		load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} /ubuntuEnv.txt
+		env import -t ${load_addr} ${filesize}
+		setenv ubuntu_env_size ${filesize}
+		echo "Config: /ubuntuEnv.txt (fallback)"
+	fi
+fi
+
+# U-Boot's dtb choice wins.
+if test -n "${lubancat_fdtfile}"; then
+	setenv fdtfile "${lubancat_fdtfile}"
 fi
 
 setenv bootargs "${bootargs} root=LABEL=writable"
@@ -176,6 +194,10 @@ else
     load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} /dtbs/rockchip/${fdtfile}
 fi
 
+# Pass what was used to the OS.
+fdt set /chosen lubancat,dtb "${fdtfile}"
+fdt set /chosen lubancat,uenv "${lubancat_uenv}"
+
 load ${devtype} ${devnum}:${distro_bootpart} ${kernel_addr_r} /vmlinuz
 load ${devtype} ${devnum}:${distro_bootpart} ${ramdisk_addr_r} /initrd.img
 
@@ -183,27 +205,25 @@ booti ${kernel_addr_r} ${ramdisk_addr_r}:${filesize} ${fdt_addr_r}
 EOF
 mkimage -A arm64 -O linux -T script -C none -n "Boot Script" -d ${mount_point}/system-boot/boot.cmd ${mount_point}/system-boot/boot.scr
 
-# Uboot env
-cat > ${mount_point}/system-boot/ubuntuEnv.txt << EOF
-# bootargs: Kernel parameters for system boot configuration.
-bootargs=rootfstype=ext4 rootwait rw console=ttyS2,1500000 console=tty1 console=ttyFIQ0 cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1 systemd.unified_cgroup_hierarchy=0 ${bootargs}
-
-fdtfile=${DEVICE_TREE_FILE}
-overlay_prefix=${OVERLAY_PREFIX}
-EOF
-
+# dtb name used by the sanity check below.
 case "${DEVICE_TREE_FILE}" in
     rk-kernel.dtb | *generic*)
-        echo "Generic device tree: board uEnv will be applied on first boot"
+        FDTFILE_NAME="${OVERLAY_PREFIX}-lubancat-generic.dtb"
         ;;
     *)
-        cat ../config/uEnv/${BOARD}.uEnv >> ${mount_point}/system-boot/ubuntuEnv.txt
+        FDTFILE_NAME="${DEVICE_TREE_FILE}"
         ;;
 esac
 
+# uEnv = common bootargs + per-board dtb/overlay list.
 mkdir -p ${mount_point}/system-boot/uEnv
 for uenv in ../config/uEnv/*.uEnv; do
-    cp "${uenv}" "${mount_point}/system-boot/uEnv/uEnv-$(basename "${uenv}" .uEnv).txt"
+    uenv_name="$(basename "${uenv}" .uEnv)"
+    {
+        printf '# Kernel parameters for system boot configuration.\n'
+        printf 'bootargs=rootfstype=ext4 rootwait rw console=ttyS2,1500000 console=tty1 console=ttyFIQ0 cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1 systemd.unified_cgroup_hierarchy=0 %s\n\n' "${bootargs}"
+        cat "${uenv}"
+    } > "${mount_point}/system-boot/uEnv/uEnv-${uenv_name}.txt"
 done
 
 uenv_file="../config/uEnv/${BOARD}.uEnv"
@@ -228,14 +248,9 @@ if [ -d "${mount_point}/system-boot/dtbs/rockchip/overlay" ]; then
     mv "${mount_point}/system-boot/dtbs/rockchip/overlay" "${mount_point}/system-boot/dtb/overlay"
 fi
 
-if [ "${DEVICE_TREE_FILE}" = "rk-kernel.dtb" ]; then
-    generic_dtb="${OVERLAY_PREFIX}-lubancat-generic.dtb"
-    if [ ! -f "${mount_point}/system-boot/dtbs/rockchip/${generic_dtb}" ]; then
-        echo "Error: ${generic_dtb} not found in dtbs/rockchip"
-        exit 1
-    fi
-    ln -sf "${generic_dtb}" "${mount_point}/system-boot/dtbs/rockchip/rk-kernel.dtb"
-    echo "Linked dtbs/rockchip/rk-kernel.dtb -> ${generic_dtb}"
+if [ ! -f "${mount_point}/system-boot/dtbs/rockchip/${FDTFILE_NAME}" ]; then
+    echo "Error: dtb ${FDTFILE_NAME} not found in dtbs/rockchip"
+    exit 1
 fi
 
 for overlay in ${overlay_list}; do
