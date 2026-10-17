@@ -187,20 +187,22 @@ static const unsigned int lubancat_adc_threshold[] = {
 
 struct lubancat_variant {
 	unsigned int id;
-	char *dtb;
+	char *dtb;		/* FIT config name, for U-Boot's own control dtb */
+	char *fdtfile;		/* Linux kernel dtb filename */
+	char *uenv;		/* board uEnv name: /uEnv/uEnv-<uenv>.txt */
 };
 
 static const struct lubancat_variant lubancat_variants[] = {
-	{ 101, "rk3588s-lubancat-4" },
-	{ 102, "rk3588s-lubancat-4" },
-	{ 201, "rk3588s-lubancat-4io" },
-	{ 301, "rk3588s-lubancat-4io" },
-	{ 401, "rk3588-lubancat-5" },
-	{ 402, "rk3588-lubancat-5" },
-	{ 501, "rk3588-lubancat-5io" },
-	{ 601, "rk3588-lubancat-5io" },
-	{ 701, "rk3588-lubancat-5io" },
-	{ 1, "rk3588-lubancat-5io" },
+	{ 101, "rk3588s-lubancat-4",   "rk3588s-lubancat-4-v1.dtb", "lubancat-4" },
+	{ 102, "rk3588s-lubancat-4",   "rk3588s-lubancat-4-v1.dtb", "lubancat-4" },
+	{ 201, "rk3588s-lubancat-4io", "rk3588s-lubancat-4io.dtb",  "lubancat-4io" },
+	{ 301, "rk3588s-lubancat-4io", "rk3588s-lubancat-4io.dtb",  "lubancat-4io" },
+	{ 401, "rk3588-lubancat-5",    "rk3588-lubancat-5.dtb",     "lubancat-5" },
+	{ 402, "rk3588-lubancat-5",    "rk3588-lubancat-5-v2.dtb",  "lubancat-5-v2" },
+	{ 501, "rk3588-lubancat-5io",  "rk3588-lubancat-5io.dtb",   "lubancat-5io" },
+	{ 601, "rk3588-lubancat-5io",  "rk3588-lubancat-5io.dtb",   "lubancat-5io" },
+	{ 701, "rk3588-lubancat-5io",  "rk3588-lubancat-5io.dtb",   "lubancat-5io" },
+	{ 1,   "rk3588-lubancat-5io",  "rk3588-lubancat-5io.dtb",   "lubancat-5io" },
 };
 
 static const char *lubancat_dtb_name = "";
@@ -230,7 +232,7 @@ static int lubancat_adc_index(unsigned int raw, unsigned int *index)
 	return -EINVAL;
 }
 
-static const char *lubancat_dtb_for_adc(void)
+static const struct lubancat_variant *lubancat_variant_get(void)
 {
 	unsigned int raw_high, raw_low, high, low, id;
 	unsigned int i;
@@ -246,15 +248,36 @@ static const char *lubancat_dtb_for_adc(void)
 
 	for (i = 0; i < countof(lubancat_variants); i++) {
 		if (lubancat_variants[i].id == id) {
-			printf("lubancat: ch2=%u ch3=%u id=%03u -> dtb %s\n",
-			       raw_high, raw_low, id, lubancat_variants[i].dtb);
-			return lubancat_variants[i].dtb;
+			printf("lubancat: ch2=%u ch3=%u id=%03u -> %s / %s\n",
+			       raw_high, raw_low, id,
+			       lubancat_variants[i].fdtfile, lubancat_variants[i].uenv);
+			return &lubancat_variants[i];
 		}
 	}
 
 	printf("lubancat: ch2=%u ch3=%u id=%03u not matched\n", raw_high, raw_low, id);
 
 	return NULL;
+}
+
+static const char *lubancat_dtb_for_adc(void)
+{
+	const struct lubancat_variant *v = lubancat_variant_get();
+
+	return v ? v->dtb : NULL;
+}
+
+/* Export the detected board to the environment. */
+int rk_board_late_init(void)
+{
+	const struct lubancat_variant *v = lubancat_variant_get();
+
+	if (v) {
+		env_set("lubancat_fdtfile", v->fdtfile);
+		env_set("lubancat_uenv", v->uenv);
+	}
+
+	return 0;
 }
 
 int board_fit_config_name_match(const char *name)
