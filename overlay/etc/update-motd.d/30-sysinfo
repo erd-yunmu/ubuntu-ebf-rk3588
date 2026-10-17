@@ -28,15 +28,41 @@ done
 
 # don't edit below here
 
+disp_width() {
+	local s="$1" b c
+	b=$(printf '%s' "$s" | wc -c)
+	c=$(printf '%s' "$s" | LC_ALL=C.UTF-8 wc -m)
+	printf '%d' $(( c + (b - c) / 2 ))
+}
+
+disp_pad() {
+	local w n
+	w=$(disp_width "$1")
+	printf '%s' "$1"
+	n=$(( $2 - w ))
+	[ "${n}" -gt 0 ] && printf '%*s' "${n}" ''
+}
+
+cell() {
+	disp_pad "$1" 14
+	printf "\x1B[92m %s\x1B[0m" "$2"
+	local n=$(( $3 - 14 - 1 - $(disp_width "$2") ))
+	[ "${n}" -gt 0 ] && printf '%*s' "${n}" ''
+}
+
 function display() {
-	# $1=name $2=value $3=red_limit $4=minimal_show_limit $5=unit $6=after $7=acs/desc{
+	# $1=name $2=value $3=red_limit $4=minimal_show_limit $5=unit $6=after $7=cell width
 	# battery red color is opposite, lower number
-	if [[ "$1" == "Battery" ]]; then local great="<"; else local great=">"; fi
+	if [[ "$1" == "电池" ]]; then local great="<"; else local great=">"; fi
 	if [[ -n "$2" && "$2" > "0" && (( "${2%.*}" -ge "$4" )) ]]; then
-	printf "%-14s%s" "$1:"
+	disp_pad "$1:" 14
 		if awk "BEGIN{exit ! ($2 $great $3)}"; then echo -ne "\e[0;91m $2"; else echo -ne "\e[0;92m $2"; fi
-		printf "%-1s%s\x1B[0m" "$5"
-		printf "%-11s%s\t" "$6"
+		printf "%-1s" "$5"
+		printf "%s\x1B[0m" "$6"
+		local uw n
+		uw=$(disp_width "$5"); [ "${uw}" -lt 1 ] && uw=1
+		n=$(( ${7:-0} - 14 - 1 - $(disp_width "$2") - uw - $(disp_width "$6") ))
+		[ "${n}" -gt 0 ] && printf '%*s' "${n}" ''
 		return 1
 	fi
 } # display
@@ -152,28 +178,56 @@ swap_info=$(LC_ALL=C free -m | grep "^Swap")
 swap_usage=$( (awk '/Swap/ { printf("%3.0f", $3/$2*100) }' <<<${swap_info} 2>/dev/null || echo 0) | tr -c -d '[:digit:]')
 swap_total=$(awk '{print $(2)}' <<<${swap_info})
 
+# board model and the device tree in use
+board_model="$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)"
+board_dtb=""
+if [ -r /proc/device-tree/chosen/lubancat,dtb ]; then
+	board_dtb="$(tr -d '\0' < /proc/device-tree/chosen/lubancat,dtb)"
+fi
+if [ -z "${board_dtb}" ]; then
+	board_dtb="$(tr '\0' '\n' < /proc/device-tree/compatible 2>/dev/null | head -n1 | sed 's/^[^,]*,//')"
+	[ -n "${board_dtb}" ] && board_dtb="${board_dtb}.dtb"
+fi
+
+# build information
+sys_build="$(stat -c '%w' / 2>/dev/null | cut -d. -f1)"
+case "${sys_build}" in -|"") sys_build="$(stat -c '%y' / 2>/dev/null | cut -d. -f1)";; esac
+kb="$(uname -v 2>/dev/null)"
+kb="$(printf '%s' "${kb}" | sed -E -e 's/#[0-9]+[[:space:]]*SMP[[:space:]]*//' -e 's/^[A-Za-z]+[[:space:]]+//' -e 's/[[:space:]][A-Z]{2,5}[[:space:]]/ /')"
+kernel_build="$(date -d "${kb}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
+[ -z "${kernel_build}" ] && kernel_build="${kb}"
+gcc_ver="$(gcc --version 2>/dev/null | head -n1)"
+
 echo
-echo -n "System information as of "
+echo -n "系统信息  更新于 "
 /bin/date
 echo
 
+# board model / device tree / build info
+[ -n "${board_model}" ] && printf "%s\x1B[92m%s\x1B[0m\n" "板卡型号:     " "${board_model}"
+[ -n "${board_dtb}" ] && printf "%s\x1B[92m%s\x1B[0m\n" "设备树:       " "${board_dtb}"
+[ -n "${sys_build}" ] && printf "%s\x1B[92m%s\x1B[0m\n" "系统构建日期: " "${sys_build}"
+[ -n "${kernel_build}" ] && printf "%s\x1B[92m%s\x1B[0m\n" "内核构建日期: " "${kernel_build}"
+[ -n "${gcc_ver}" ] && printf "%s\x1B[92m%s\x1B[0m\n" "GCC环境:      " "${gcc_ver}"
+echo ""
+
 # display info
-display "System load" "${load%% *}" "${critical_load}" "0" "" "${load#* }"
-printf "Up time:       \x1B[92m%s\x1B[0m\t\t" "$time"
-display "Local users" "${users##* }" "3" "2" ""
+display "系统负载" "${load%% *}" "${critical_load}" "0" "" "${load#* }" 32
+cell "运行时长:" "$time" 0
 echo "" # fixed newline
-display "Memory usage" "$memory_usage" "70" "0" " %" " of ${memory_total}MB"
-display "Zram usage" "$swap_usage" "75" "0" " %" " of $swap_total""Mb"
-printf "IP:            "
-printf "\x1B[92m%s\x1B[0m" "$ip_address"
+display "在线用户" "${users##* }" "3" "2" "" "" 32
+display "内存占用" "$memory_usage" "70" "0" " %" " 共 ${memory_total}MB" 0
+echo "" # fixed newline
+display "Zram占用" "$swap_usage" "75" "0" " %" " 共 $swap_total""Mb" 32
+cell "IP地址:" "$ip_address" 0
 echo "" # fixed newline
 a=0;b=0;c=0
-display "CPU temp" "$board_cpu_temp" $CPU_TEMP_LIMIT "0" "°C" "" ; a=$?
-display "GPU temp" "$board_gpu_temp" $GPU_TEMP_LIMIT "0" "°C" "" ; b=$?
+display "CPU温度" "$board_cpu_temp" $CPU_TEMP_LIMIT "0" "°C" "" 32 ; a=$?
+display "GPU温度" "$board_gpu_temp" $GPU_TEMP_LIMIT "0" "°C" "" 0 ; b=$?
 (( ($a+$b) >0 )) && echo "" # new line only if some value is displayed
-display "Usage of /" "$root_usage" "90" "1" "%" " of $root_total"
-display "storage/" "$storage_usage" "90" "1" "%" " of $storage_total"
-display "Battery" "$battery_percent" "20" "1" "%" "$status_battery_text"
+display "根分区" "$root_usage" "90" "1" "%" " 共 $root_total" 0
+display "存储" "$storage_usage" "90" "1" "%" " 共 $storage_total" 0
+display "电池" "$battery_percent" "20" "1" "%" "$status_battery_text" 0
 echo ""
 echo ""
 
