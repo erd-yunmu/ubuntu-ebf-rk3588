@@ -1,0 +1,45 @@
+#!/bin/sh
+set -e
+
+log() {
+    logger -t lubancat-mount-boot "$*"
+    echo "$*"
+}
+
+bootdev=""
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        lubancat.bootdev=*) bootdev="${arg#lubancat.bootdev=}" ;;
+    esac
+done
+
+if [ -z "$bootdev" ] || [ ! -b "$bootdev" ]; then
+    rootdev=$(findmnt -n -o SOURCE /)
+    pkname=$(lsblk -no PKNAME "$rootdev" | head -n1)
+    if [ -n "$pkname" ]; then
+        case "$pkname" in
+            *[0-9]) sep=p ;;
+            *) sep= ;;
+        esac
+        bootdev="/dev/${pkname}${sep}1"
+    fi
+fi
+
+if [ ! -b "$bootdev" ]; then
+    log "boot device not found; /boot/firmware is not mounted"
+    exit 1
+fi
+
+mkdir -p /boot/firmware
+
+current=$(findmnt -n -o SOURCE --target /boot/firmware 2>/dev/null || true)
+[ -n "$current" ] && [ "$(readlink -f "$current")" = "$(readlink -f "$bootdev")" ] && exit 0
+
+if mountpoint -q /boot/firmware; then
+    umount -lf /boot/firmware 2>/dev/null || log "failed to unmount /boot/firmware"
+fi
+
+if ! mount "$bootdev" /boot/firmware; then
+    log "failed to mount $bootdev on /boot/firmware"
+    exit 1
+fi

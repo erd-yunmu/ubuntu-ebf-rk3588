@@ -257,6 +257,12 @@ chmod +x ${chroot_dir}/usr/lib/scripts/board-detect.sh
 cp ${overlay_dir}/usr/lib/systemd/system/board-detect.service ${chroot_dir}/usr/lib/systemd/system/board-detect.service
 chroot ${chroot_dir} /bin/bash -c "systemctl enable board-detect"
 
+mkdir -p ${chroot_dir}/usr/local/sbin
+cp ${overlay_dir}/usr/local/sbin/lubancat-mount-boot ${chroot_dir}/usr/local/sbin/lubancat-mount-boot
+chmod 0755 ${chroot_dir}/usr/local/sbin/lubancat-mount-boot
+cp ${overlay_dir}/usr/lib/systemd/system/lubancat-mount-boot.service ${chroot_dir}/usr/lib/systemd/system/lubancat-mount-boot.service
+chroot ${chroot_dir} /bin/bash -c "systemctl enable lubancat-mount-boot"
+
 mkdir -p ${chroot_dir}/usr/local/bin ${chroot_dir}/etc/mac-lookup
 cp ${overlay_dir}/usr/local/bin/mac-lookup ${chroot_dir}/usr/local/bin/mac-lookup
 chmod +x ${chroot_dir}/usr/local/bin/mac-lookup
