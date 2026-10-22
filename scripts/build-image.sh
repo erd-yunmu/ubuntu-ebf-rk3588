@@ -93,6 +93,8 @@ mkpart primary ext4 528MiB 100%
     echo "w"
 } | fdisk "${disk}" &> /dev/null || true
 
+parted --script "${disk}" set 1 legacy_boot on
+
 partprobe "${disk}"
 
 partition_char="$(if [[ ${disk: -1} == [0-9] ]]; then echo p; fi)"
@@ -138,10 +140,9 @@ tar -xpf "${rootfs}" -C ${mount_point}/writable
 
 # Create fstab entries
 mkdir -p ${mount_point}/writable/boot/firmware
-cat > ${mount_point}/writable/etc/fstab << 'EOF'
+cat > ${mount_point}/writable/etc/fstab << EOF
 # <file system>       <mount point>  <type>  <options>                    <dump>  <fsck>
-LABEL=system-boot     /boot/firmware ext4    defaults                     0       0
-LABEL=writable        /              ext4    defaults,x-systemd.growfs    0       1
+UUID=${root_uuid}     /              ext4    defaults,x-systemd.growfs    0       1
 /swapfile             none           swap    sw                           0       0
 EOF
 
@@ -181,7 +182,21 @@ if test -n "${lubancat_fdtfile}"; then
 	setenv fdtfile "${lubancat_fdtfile}"
 fi
 
-setenv bootargs "${bootargs} root=LABEL=writable"
+if test "${devtype}" = "mmc"; then
+	setenv rootdev "/dev/mmcblk${devnum}p2"
+	setenv bootpart "/dev/mmcblk${devnum}p1"
+elif test "${devtype}" = "nvme"; then
+	setenv rootdev "/dev/nvme${devnum}n1p2"
+	setenv bootpart "/dev/nvme${devnum}n1p1"
+else
+	setenv rootdev "LABEL=writable"
+	setenv bootpart ""
+fi
+
+setenv bootargs "${bootargs} root=${rootdev}"
+if test -n "${bootpart}"; then
+	setenv bootargs "${bootargs} lubancat.bootdev=${bootpart}"
+fi
 printenv bootargs
 
 load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} /dtbs/rockchip/${fdtfile}
