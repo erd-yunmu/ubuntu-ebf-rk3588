@@ -16,15 +16,15 @@ esac
 
 . /scripts/functions
 
-if read_fstab_entry /boot/firmware ext4; then
-	BOOTDEV_RAW="$MNT_FSNAME"
-	BOOTDEV=$(resolve_device "$BOOTDEV_RAW") || BOOTDEV=""
+BOOTDEV=""
+for arg in $(cat /proc/cmdline); do
+	case "$arg" in
+	lubancat.bootdev=*) BOOTDEV="${arg#lubancat.bootdev=}" ;;
+	esac
+done
 
-	if [ -n "$BOOTDEV" ] && [ -b "$BOOTDEV" ]; then
-		checkfs "$BOOTDEV" /boot/firmware ext4
-	else
-		log_warning_msg "Unable to resolve boot filesystem device $BOOTDEV_RAW; skipping check."
-	fi
+if [ -n "$BOOTDEV" ] && [ -b "$BOOTDEV" ]; then
+	checkfs "$BOOTDEV" /boot/firmware ext4
 else
-	log_warning_msg "No ext4 /boot/firmware entry found in fstab; skipping boot filesystem check."
+	log_warning_msg "No boot device from kernel command line; skipping boot filesystem check."
 fi

@@ -1,0 +1,12 @@
+[Unit]
+Description=Mount boot firmware partition from the boot device
+After=local-fs.target
+Before=multi-user.target board-detect.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lubancat-mount-boot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
