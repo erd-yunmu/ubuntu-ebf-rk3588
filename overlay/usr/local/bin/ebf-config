@@ -1,0 +1,529 @@
+#!/bin/bash
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+read_dt() {
+	local value
+	IFS= read -r -d '' value < "$1" 2>/dev/null
+	printf '%s' "${value}"
+}
+
+freq_line() {
+	# $1=label $2=devfreq name match $3=temperature
+	local label="$1" match="$2" temp="$3" dev cur max
+	for dev in /sys/class/devfreq/*"${match}"*; do
+		[ -e "${dev}/cur_freq" ] || continue
+		cur=$(( $(<"${dev}/cur_freq") / 1000000 ))
+		max=$(( $(<"${dev}/max_freq") / 1000000 ))
+		if [ -n "${temp}" ]; then
+			printf '%s%s MHz（最大 %s MHz，%s°C）\n' "${label}" "${cur}" "${max}" "${temp}"
+		else
+			printf '%s%s MHz（最大 %s MHz）\n' "${label}" "${cur}" "${max}"
+		fi
+		return 0
+	done
+	return 1
+}
+
+disp_width() {
+	local s="$1" LC_ALL=C
+	local bytes=${#s}
+	local LC_ALL=C.UTF-8
+	local chars=${#s}
+	DISP_W=$(( chars + (bytes - chars) / 2 ))
+}
+
+pad_label() {
+	local n
+	printf '%s' "$1"
+	disp_width "$1"
+	n=$(( 14 - DISP_W ))
+	[ "${n}" -lt 1 ] && n=1
+	printf '%*s' "${n}" ''
+}
+
+value_line() {
+	# $1=label $2=value
+	pad_label "$1"
+	printf '%s\n' "$2"
+}
+
+os_ver=""
+os_codename=""
+if [ -r /etc/os-release ]; then
+	while IFS='=' read -r key value; do
+		value="${value%\"}"
+		value="${value#\"}"
+		case "${key}" in
+			VERSION_ID) os_ver="${value}" ;;
+			VERSION_CODENAME) os_codename="${value}" ;;
+		esac
+	done < /etc/os-release
+fi
+os_info="${os_ver}"
+[ -n "${os_codename}" ] && os_info="${os_info:+${os_info} }(${os_codename})"
+
+kernel=""
+[ -r /proc/sys/kernel/osrelease ] && kernel="$(< /proc/sys/kernel/osrelease)"
+kernel="${kernel%% *}"
+
+builder=""
+if [ -r /proc/version ]; then
+	read -r pv < /proc/version
+	pv_rest="${pv#*(}"
+	if [ "${pv_rest}" != "${pv}" ]; then
+		builder="${pv_rest%%)*}"
+	fi
+fi
+case "${builder}" in
+	dev|dev@*|*@dev|lubancat|lubancat@*|*@lubancat)
+		builder="erd-yunmu <cancet@embedfire.com>"
+		;;
+esac
+
+sys_build="$(stat -c '%w' / 2>/dev/null)"
+sys_build="${sys_build%%.*}"
+case "${sys_build}" in
+	-|"")
+		sys_build="$(stat -c '%y' / 2>/dev/null)"
+		sys_build="${sys_build%%.*}"
+		;;
+esac
+
+kb="$(uname -v 2>/dev/null)"
+kb="${kb#* }"
+kb="${kb#SMP }"
+kb="${kb#PREEMPT_RT }"
+kb="${kb#PREEMPT_DYNAMIC }"
+kb="${kb#PREEMPT }"
+if [[ "${kb}" =~ ^([A-Za-z]{3}[[:space:]]+[A-Za-z]{3}[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2})[[:space:]]+[A-Z]{2,5}[[:space:]]+([0-9]{4})$ ]]; then
+	kb="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+fi
+kernel_build="$(date -d "${kb}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
+[ -z "${kernel_build}" ] && kernel_build="${kb}"
+
+model="$(read_dt /proc/device-tree/model)"
+dtb="$(read_dt /proc/device-tree/chosen/lubancat,dtb)"
+if [ -z "${dtb}" ]; then
+	dtb="$(read_dt /proc/device-tree/compatible)"
+	dtb="${dtb#*,}"
+	[ -n "${dtb}" ] && dtb="${dtb}.dtb"
+fi
+
+soc=""
+soc_compat=""
+while IFS= read -r -d '' compat; do
+	soc_compat="${soc_compat} ${compat}"
+	case "${compat}" in
+		rockchip,rk3588*) soc="RK3588" ;;
+		rockchip,rk3576*) soc="RK3576" ;;
+	esac
+done < /proc/device-tree/compatible
+
+gpu_name=""
+case "${soc}" in
+	RK3588) gpu_name="Mali-G610 MC4" ;;
+	RK3576) gpu_name="Mali-G52 MC3" ;;
+esac
+gpu_drv=""
+for dev in /sys/bus/platform/devices/*gpu*; do
+	[ -e "${dev}/driver" ] || continue
+	gpu_drv="$(basename "$(readlink -f "${dev}/driver" 2>/dev/null)")"
+	break
+done
+[ -n "${gpu_drv}" ] && gpu_drv="${gpu_drv^}"
+gpu_info="${gpu_name}"
+[ -n "${gpu_drv}" ] && gpu_info="${gpu_info:+${gpu_info} }(${gpu_drv})"
+
+mesa=""
+mesa_root=""
+if [ -r /etc/environment ]; then
+	while IFS= read -r line; do
+		case "${line}" in
+			MESA_ROOT=*)
+				mesa_root="${line#MESA_ROOT=}"
+				mesa_root="${mesa_root%\"}"
+				mesa_root="${mesa_root#\"}"
+				;;
+		esac
+	done < /etc/environment
+fi
+if [ -n "${mesa_root}" ]; then
+	mesa="${mesa_root##*mesa-}"
+else
+	mesa="$(dpkg-query -W -f='${Version}' libgl1-mesa-dri 2>/dev/null)"
+	mesa="${mesa#*:}"
+	mesa="${mesa%%-*}"
+fi
+
+# thermal zones
+gpu_temp=""
+for zone in /sys/class/thermal/thermal_zone*; do
+	[ -e "${zone}/type" ] || continue
+	read -r ztype < "${zone}/type" 2>/dev/null || continue
+	[ "${ztype}" = "gpu-thermal" ] || continue
+	read -r ztemp < "${zone}/temp" 2>/dev/null && gpu_temp=$(( ztemp / 1000 ))
+	break
+done
+
+cluster_temps=()
+for want in littlecore-thermal bigcore0-thermal bigcore1-thermal bigcore-thermal; do
+	for zone in /sys/class/thermal/thermal_zone*; do
+		[ -e "${zone}/type" ] || continue
+		read -r ztype < "${zone}/type" 2>/dev/null || continue
+		[ "${ztype}" = "${want}" ] || continue
+		read -r ztemp < "${zone}/temp" 2>/dev/null && cluster_temps+=("$(( ztemp / 1000 ))")
+		break
+	done
+done
+
+# cpu clusters: identify core type by MIDR (CPU part) from /proc/cpuinfo
+declare -A cpu_part_map=()
+cur_cpu=""
+while IFS= read -r line; do
+	case "${line}" in
+		processor*) cur_cpu="${line#*:}"; cur_cpu="${cur_cpu// /}" ;;
+		"CPU part"*) part="${line#*:}"; cpu_part_map[${cur_cpu}]="${part// /}" ;;
+	esac
+done < /proc/cpuinfo
+
+cpu_lines=()
+for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+	[ -e "${policy}/scaling_cur_freq" ] || continue
+	cpus=""
+	[ -r "${policy}/related_cpus" ] && read -r cpus < "${policy}/related_cpus"
+	[ -n "${cpus}" ] || { [ -r "${policy}/affected_cpus" ] && read -r cpus < "${policy}/affected_cpus"; }
+	first="${cpus%% *}"
+	[ -n "${first}" ] || continue
+	core=""
+	case "${cpu_part_map[${first}]}" in
+		0xd03) core="A53" ;;
+		0xd05) core="A55" ;;
+		0xd07) core="A57" ;;
+		0xd08) core="A72" ;;
+		0xd0b) core="A76" ;;
+		0xd41) core="A78" ;;
+		0xd44) core="X1" ;;
+		0xd46) core="A510" ;;
+		0xd47) core="A710" ;;
+		0xd48) core="X2" ;;
+		0xd4d) core="A715" ;;
+		0xd4e) core="X3" ;;
+		0xd80) core="A520" ;;
+		0xd81) core="A720" ;;
+		0xd82) core="X4" ;;
+	esac
+	set -- ${cpus}
+	cur=$(( $(<"${policy}/scaling_cur_freq") / 1000 ))
+	max=$(( $(<"${policy}/cpuinfo_max_freq") / 1000 ))
+	temp=""
+	[ "${#cluster_temps[@]}" -gt "${#cpu_lines[@]}" ] && temp="${cluster_temps[${#cpu_lines[@]}]}"
+	if [ -n "${temp}" ]; then
+		cpu_lines+=("${core:-CPU}×$#  ${cur} MHz（最大 ${max} MHz，${temp}°C）")
+	else
+		cpu_lines+=("${core:-CPU}×$#  ${cur} MHz（最大 ${max} MHz）")
+	fi
+done
+
+# mpp and npu driver info
+dt_u32_be() {
+	# $1=file $2=index
+	local raw
+	raw="$(od -An -tu4 -j $(( $2 * 4 )) -N4 "$1" 2>/dev/null)"
+	raw="${raw// /}"
+	[ -n "${raw}" ] || return 1
+	DT_U32=$(( ((raw & 255) << 24) | (((raw >> 8) & 255) << 16) | (((raw >> 16) & 255) << 8) | ((raw >> 24) & 255) ))
+}
+
+mpp_venc=""
+mpp_vdec=""
+for node in /proc/device-tree/rkvenc-core@* /proc/device-tree/rkvdec-core@*; do
+	[ -e "${node}/rockchip,normal-rates" ] || continue
+	dt_u32_be "${node}/rockchip,normal-rates" 2 || continue
+	case "${node}" in
+		*rkvenc*) [ -z "${mpp_venc}" ] && mpp_venc=$(( DT_U32 / 1000000 )) ;;
+		*rkvdec*) [ -z "${mpp_vdec}" ] && mpp_vdec=$(( DT_U32 / 1000000 )) ;;
+	esac
+done
+mpp_freq=""
+[ -n "${mpp_venc}" ] && mpp_freq="VENC ${mpp_venc} MHz"
+[ -n "${mpp_vdec}" ] && mpp_freq="${mpp_freq:+${mpp_freq} / }VDEC ${mpp_vdec} MHz"
+
+mpp_ver=""
+mpp_pkg="$(dpkg-query -W -f='${Version}' librockchip-mpp1 2>/dev/null)"
+if [ -n "${mpp_pkg}" ]; then
+	mpp_ver="${mpp_pkg#*:}"
+	mpp_ver="${mpp_ver%%-*}"
+fi
+
+npu_ver=""
+[ -r /sys/module/rknpu/version ] && npu_ver="$(< /sys/module/rknpu/version)"
+npu_ver="${npu_ver// /}"
+
+ffmpeg_ver=""
+ffmpeg_rkmpp=""
+ff_dec=""
+ff_enc=""
+ff_flt=""
+if command -v ffmpeg >/dev/null 2>&1; then
+	ff_out="$(ffmpeg -hide_banner -version 2>/dev/null)"
+	ff_first="${ff_out%%$'\n'*}"
+	case "${ff_first}" in
+		"ffmpeg version "*)
+			ffmpeg_ver="${ff_first#ffmpeg version }"
+			ffmpeg_ver="${ffmpeg_ver%% *}"
+			;;
+	esac
+	case "${ff_out}" in
+		*enable-rkmpp*) ffmpeg_rkmpp="支持 rkmpp" ;;
+		*) ffmpeg_rkmpp="不支持 rkmpp" ;;
+	esac
+	if [ -r /usr/share/doc/ffmpeg/RELEASE ]; then
+		read -r ffmpeg_rel < /usr/share/doc/ffmpeg/RELEASE
+		[ -n "${ffmpeg_rel}" ] && ffmpeg_ver="${ffmpeg_rel} ${ffmpeg_ver}"
+	fi
+	if [ "${ffmpeg_rkmpp}" = "支持 rkmpp" ]; then
+		while read -r _ name _; do
+			case "${name}" in
+				*_rkmpp) ff_dec="${ff_dec:+${ff_dec} }${name%_rkmpp}" ;;
+			esac
+		done < <(ffmpeg -hide_banner -decoders 2>/dev/null)
+		while read -r _ name _; do
+			case "${name}" in
+				*_rkmpp) ff_enc="${ff_enc:+${ff_enc} }${name%_rkmpp}" ;;
+			esac
+		done < <(ffmpeg -hide_banner -encoders 2>/dev/null)
+		while read -r _ name _; do
+			case "${name}" in
+				*_rkrga) ff_flt="${ff_flt:+${ff_flt} }${name%_rkrga}" ;;
+			esac
+		done < <(ffmpeg -hide_banner -filters 2>/dev/null)
+	fi
+fi
+
+browser_name=""
+browser_label=""
+browser_ver=""
+browser_rkmpp=""
+for b in google-chrome-stable google-chrome chromium chromium-browser; do
+	if command -v "${b}" >/dev/null 2>&1; then
+		browser_name="${b}"
+		break
+	fi
+done
+if [ -n "${browser_name}" ]; then
+	case "${browser_name}" in
+		google-chrome*) browser_label="Chrome" ;;
+		*) browser_label="Chromium" ;;
+	esac
+	browser_ver="$(dpkg-query -W -f='${Version}' "${browser_name}" 2>/dev/null)"
+	browser_ver="${browser_ver#*:}"
+	browser_ver="${browser_ver%%-*}"
+	browser_rkmpp="不支持 rkmpp"
+	for plug in /usr/lib/*/libv4l/plugins/libv4l-rkmpp.so; do
+		[ -e "${plug}" ] && { browser_rkmpp="支持 rkmpp"; break; }
+	done
+fi
+
+vpu_devs=""
+declare -A vpu_seen=()
+if [ -r /proc/mpp_service/supports-device ]; then
+	while IFS= read -r line; do
+		case "${line}" in
+			DEVICE*)
+				name="${line#*:}"
+				name="${name%% *}"
+				[ -n "${name}" ] || continue
+				[ -n "${vpu_seen[${name}]}" ] && continue
+				vpu_seen[${name}]=1
+				vpu_devs="${vpu_devs:+${vpu_devs} / }${name}"
+				;;
+		esac
+	done < /proc/mpp_service/supports-device
+fi
+
+vpu_load=""
+if [ -r /proc/mpp_service/load ]; then
+	while IFS= read -r line; do
+		case "${line}" in
+			*"please set load_interval"*) break ;;
+			*rkvenc-core*|*rkvdec-core*)
+				dev="${line%% *}"
+				pct="${line#*load:}"
+				pct="${pct%%%*}"
+				pct="${pct// /}"
+				case "${dev}" in
+					fdbd0000*) name="VENC0" ;;
+					fdbe0000*) name="VENC1" ;;
+					fdc38100*) name="VDEC0" ;;
+					fdc48100*) name="VDEC1" ;;
+					*) continue ;;
+				esac
+				vpu_load="${vpu_load:+${vpu_load} / }${name} ${pct}%"
+				;;
+		esac
+	done < /proc/mpp_service/load
+	[ -n "${vpu_load}" ] || vpu_load="未启用"
+fi
+
+# storage
+root_src=""
+while read -r dev mnt _; do
+	[ "${mnt}" = "/" ] && { root_src="${dev}"; break; }
+done < /proc/self/mounts
+
+storage_label=""
+storage_cap=""
+if [ -n "${root_src}" ]; then
+	pk="${root_src#/dev/}"
+	case "${pk}" in
+		*p[0-9]*) pk="${pk%p[0-9]*}" ;;
+		*[0-9]) pk="${pk%%[0-9]*}" ;;
+	esac
+	case "${pk}" in
+		mmcblk*)
+			read -r mmc_type < "/sys/block/${pk}/device/type" 2>/dev/null
+			case "${mmc_type}" in
+				SD) storage_label="SD 卡" ;;
+				MMC) storage_label="eMMC" ;;
+				*) storage_label="mmc" ;;
+			esac
+			;;
+		nvme*) storage_label="NVMe" ;;
+		sd*|vd*)
+			link="$(readlink -f "/sys/block/${pk}" 2>/dev/null)"
+			case "${link}" in
+				*usb*) storage_label="USB" ;;
+				*) storage_label="SATA" ;;
+			esac
+			;;
+		*) storage_label="${pk}" ;;
+	esac
+	if [ -e "/sys/block/${pk}/size" ]; then
+		cap10=$(( $(<"/sys/block/${pk}/size") * 10 / 2097152 ))
+		storage_cap="$(( cap10 / 10 )).$(( cap10 % 10 ))G"
+	fi
+fi
+
+# eMMC capacity, shown even when the system boots from another device
+emmc_cap=""
+for blk in /sys/block/mmcblk*; do
+	[ -d "${blk}" ] || continue
+	name="${blk##*/}"
+	[ "${name}" = "${pk:-}" ] && continue
+	read -r mmc_type < "${blk}/device/type" 2>/dev/null
+	[ "${mmc_type}" = "MMC" ] || continue
+	[ -e "${blk}/size" ] || continue
+	cap10=$(( $(<"${blk}/size") * 10 / 2097152 ))
+	emmc_cap="$(( cap10 / 10 )).$(( cap10 % 10 ))G"
+	break
+done
+
+root_used=""
+root_total=""
+root_pct=""
+while read -r _ size used _ pct mnt; do
+	[ "${mnt}" = "/" ] || continue
+	root_total="${size}"
+	root_used="${used}"
+	root_pct="${pct%\%}"
+	break
+done < <(df -h / 2>/dev/null)
+
+# network ports
+nic_names=()
+nic_states=()
+nic_speeds=()
+nic_macs=()
+for path in /sys/class/net/*; do
+	[ -d "${path}" ] || continue
+	iface="${path##*/}"
+	[ "${iface}" = "lo" ] && continue
+	[ -e "${path}/device" ] || continue
+	[ -e "${path}/phy80211" ] && continue
+	case "$(readlink -f "${path}/device" 2>/dev/null)" in
+		*gadget*|*udc*) continue ;;
+	esac
+	read -r if_type < "${path}/type" 2>/dev/null
+	[ "${if_type}" = "1" ] || continue
+	read -r mac < "${path}/address" 2>/dev/null
+	read -r state < "${path}/operstate" 2>/dev/null
+	speed=""
+	[ -r "${path}/speed" ] && read -r speed < "${path}/speed" 2>/dev/null
+	case "${speed}" in
+		''|-1|*[!0-9]*) speed="--" ;;
+		*) speed="${speed} Mb/s" ;;
+	esac
+	nic_names+=("${iface}")
+	nic_states+=("${state:-unknown}")
+	nic_speeds+=("${speed}")
+	nic_macs+=("${mac:-N/A}")
+done
+nic_count=${#nic_names[@]}
+
+[ -n "${model}" ] && value_line "板卡型号:" "${model}"
+[ -n "${soc}" ] && value_line "SoC:" "${soc}"
+[ -n "${os_info}" ] && value_line "Ubuntu 版本:" "${os_info}"
+[ -n "${kernel}" ] && value_line "内核版本:" "${kernel}"
+[ -n "${sys_build}" ] && value_line "系统构建日期:" "${sys_build}"
+[ -n "${builder}" ] && value_line "镜像制作者:" "${builder}"
+[ -n "${kernel_build}" ] && value_line "内核构建日期:" "${kernel_build}"
+[ -n "${dtb}" ] && value_line "设备树:" "${dtb}"
+[ -n "${gpu_info}" ] && value_line "GPU:" "${gpu_info}"
+[ -n "${mesa}" ] && value_line "Mesa 版本:" "${mesa}"
+if [ "${#cpu_lines[@]}" -gt 0 ]; then
+	value_line "CPU 频率:" "${cpu_lines[0]}"
+	for line in "${cpu_lines[@]:1}"; do
+		printf '              %s\n' "${line}"
+	done
+fi
+freq_line "GPU 频率:     " gpu "${gpu_temp}"
+freq_line "NPU 频率:     " npu
+[ -n "${mpp_freq}" ] && value_line "MPP 频率:" "${mpp_freq}"
+freq_line "DDR 频率:     " dmc
+[ -n "${mpp_ver}" ] && value_line "MPP 版本:" "${mpp_ver}"
+[ -n "${vpu_devs}" ] && value_line "VPU 硬件:" "${vpu_devs}"
+[ -n "${vpu_load}" ] && value_line "VPU 负载:" "${vpu_load}"
+[ -n "${npu_ver}" ] && value_line "NPU 驱动:" "${npu_ver}"
+if [ -n "${ffmpeg_ver}" ]; then
+	value_line "FFmpeg 版本:" "${ffmpeg_ver}（${ffmpeg_rkmpp}）"
+	[ -n "${ff_dec}" ] && value_line "RKMPP 解码:" "${ff_dec}"
+	[ -n "${ff_enc}" ] && value_line "RKMPP 编码:" "${ff_enc}"
+	[ -n "${ff_flt}" ] && value_line "RKRGA 滤镜:" "${ff_flt}"
+else
+	value_line "FFmpeg 版本:" "未安装"
+fi
+if [ -n "${browser_name}" ]; then
+	value_line "浏览器版本:" "${browser_label} ${browser_ver}（${browser_rkmpp}）"
+else
+	value_line "浏览器版本:" "未安装"
+fi
+if [ -n "${storage_label}" ]; then
+	storage_text="${storage_cap}"
+	[ -n "${root_pct}" ] && storage_text="${storage_text}，根分区已用 ${root_pct}%（${root_used} / ${root_total}）"
+	value_line "${storage_label}:" "${storage_text}"
+fi
+[ -n "${emmc_cap}" ] && value_line "eMMC:" "${emmc_cap}"
+if [ "${nic_count}" -gt 0 ]; then
+	pad_label "网口:"
+	printf '%d 个\n' "${nic_count}"
+	for i in "${!nic_names[@]}"; do
+		pad_label "  ${nic_names[$i]}:"
+		printf '%-8s %-11s %s\n' "${nic_states[$i]}" "${nic_speeds[$i]}" "${nic_macs[$i]}"
+	done
+fi
+
+has_devfreq() {
+	local dev
+	for dev in /sys/class/devfreq/*"$1"*; do
+		[ -e "${dev}/cur_freq" ] && return 0
+	done
+	return 1
+}
+
+[ -n "${soc}" ] || value_line "SoC:" "未检测到，怀疑硬件故障"
+[ "${#cpu_lines[@]}" -gt 0 ] || value_line "CPU 频率:" "未检测到，怀疑硬件故障"
+has_devfreq gpu || value_line "GPU 频率:" "未检测到，怀疑硬件故障"
+has_devfreq npu || value_line "NPU 频率:" "未检测到，怀疑硬件故障"
+[ -e /proc/mpp_service ] || value_line "VPU:" "未检测到，怀疑硬件故障"
+has_devfreq dmc || value_line "DDR 频率:" "未检测到，怀疑硬件故障"
