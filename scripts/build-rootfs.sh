@@ -268,6 +268,8 @@ chroot ${chroot_dir} /bin/bash -c "systemctl enable lubancat-mount-boot"
 mkdir -p ${chroot_dir}/usr/local/bin ${chroot_dir}/etc/mac-lookup
 cp ${overlay_dir}/usr/local/bin/mac-lookup ${chroot_dir}/usr/local/bin/mac-lookup
 chmod +x ${chroot_dir}/usr/local/bin/mac-lookup
+cp ${overlay_dir}/usr/local/bin/ebf-config ${chroot_dir}/usr/local/bin/ebf-config
+chmod +x ${chroot_dir}/usr/local/bin/ebf-config
 cp ${overlay_dir}/etc/mac-lookup/ids.txt ${chroot_dir}/etc/mac-lookup/ids.txt
 
 # Add realtek bluetooth firmware to initrd 
