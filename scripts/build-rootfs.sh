@@ -250,10 +250,12 @@ cp ${overlay_dir}/usr/lib/systemd/system/cpu-governor-performance.service ${chro
 chroot ${chroot_dir} /bin/bash -c "systemctl enable cpu-governor-performance"
 
 # Set gpu governor to performance
+mkdir -p ${chroot_dir}/usr/lib/scripts
+cp ${overlay_dir}/usr/lib/scripts/gpu-governor.sh ${chroot_dir}/usr/lib/scripts/gpu-governor.sh
+chmod +x ${chroot_dir}/usr/lib/scripts/gpu-governor.sh
 cp ${overlay_dir}/usr/lib/systemd/system/gpu-governor-performance.service ${chroot_dir}/usr/lib/systemd/system/gpu-governor-performance.service
 chroot ${chroot_dir} /bin/bash -c "systemctl enable gpu-governor-performance"
 
-mkdir -p ${chroot_dir}/usr/lib/scripts
 cp ${overlay_dir}/usr/lib/scripts/board-detect.sh ${chroot_dir}/usr/lib/scripts/board-detect.sh
 chmod +x ${chroot_dir}/usr/lib/scripts/board-detect.sh
 cp ${overlay_dir}/usr/lib/systemd/system/board-detect.service ${chroot_dir}/usr/lib/systemd/system/board-detect.service
