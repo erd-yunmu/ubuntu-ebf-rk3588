@@ -1276,7 +1276,7 @@ static int rk3588_combphy_cfg(struct rockchip_combphy_priv *priv)
 		/* Select TX margin/de-emphasis/swing from GRF override */
 		regmap_write(priv->phy_grf, 0x0c, GENMASK(18, 16) | 0x0007);
 		/* Full Txswing, Txmargin 1200mV and -3.5dB De-emphasis */
-		regmap_write(priv->phy_grf, 0x04, GENMASK(26, 21) | 0x0140);
+		regmap_write(priv->phy_grf, 0x04, GENMASK(26, 21) | 0x0180);
 
 		rockchip_combphy_param_write(priv->phy_grf, &cfg->pipe_txcomp_sel, false);
 		rockchip_combphy_param_write(priv->phy_grf, &cfg->pipe_txelec_sel, false);
